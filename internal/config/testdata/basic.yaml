@@ -1,0 +1,35 @@
+# Shy Garlic — konfiguracja domowa
+# Ten komentarz musi przetrwać zapis z UI.
+
+title: Homelab Demo      # komentarz na końcu linii
+
+defaults: &defaults
+  check:
+    interval: 30s
+    timeout: 5s
+    expect: [200, 301, 302, 401, 403]   # 401/403 = żyje, tylko wymaga auth
+
+groups:
+  # Grupa mediów — najczęściej używana, ma być pierwsza
+  - name: Media
+    services:
+      - name: Jellyfin
+        url: http://10.0.0.5:8096
+        icon: jellyfin
+        <<: *defaults
+
+      - name: "Sonarr"          # cudzysłowy celowo, nie zdejmuj
+        url: http://10.0.0.5:8989
+        icon: sonarr
+        <<: *defaults
+
+  - name: Sieć
+    services:
+      - name: Pi-hole
+        url: http://10.0.0.2/admin
+        icon: pi-hole
+        check:
+          interval: 10s   # ten pinguje częściej
+          expect: [200]
+
+# Stopka: nic tu nie ma, ale komentarz ma zostać.

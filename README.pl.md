@@ -1,0 +1,531 @@
+<p align="center">
+  <img src="docs/img/banner.png" alt="Shy Garlic" width="100%">
+</p>
+
+<p align="center">
+  <b>Panel do homelabu, w którym plik konfiguracyjny i interfejs to jedno.</b><br>
+  Klikasz w UI — zmienia się YAML. Edytujesz YAML — zmienia się UI.<br>
+  I nikt po drodze nie kasuje Twoich komentarzy.
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.pl.md">Polski</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zatto-dev/shy-garlic/actions/workflows/ci.yml"><img src="https://github.com/zatto-dev/shy-garlic/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/zatto-dev/shy-garlic/releases/latest"><img src="https://img.shields.io/github/v/release/zatto-dev/shy-garlic" alt="Najnowsze wydanie"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licencja-AGPL--3.0--or--later-blue" alt="Licencja: AGPL-3.0-or-later"></a>
+</p>
+
+<p align="center">
+  <img src="docs/img/panel-dark.png" alt="Panel Shy Garlic — motyw ciemny" width="100%">
+</p>
+
+---
+
+Shy Garlic to strona startowa homelabu: Twoje usługi w grupach, każda z
+heartbeatem, który mówi, czy naprawdę działa. Cała instancja to jeden plik YAML,
+który możesz trzymać w gicie — a panel jest pełnoprawnym edytorem tego samego
+pliku.
+
+- **Jedna statyczna binarka Go**, 14 MB, bez cgo. SQLite przez
+  `modernc.org/sqlite`. Obraz kontenera ma około 16 MB.
+- **Zero node w produkcie.** `html/template`, waniliowy JavaScript i SSE — żadnego
+  kroku budowania frontendu i ani jednego zapytania z przeglądarki do CDN-a.
+- **Zapis z UI jest round-trip-safe.** Komentarze, kotwice, wyrównanie i puste
+  linie wychodzą z zapisu dokładnie takie, jakie do niego weszły.
+
+## Dlaczego jeszcze jeden panel
+
+Rynek podzielił się wzdłuż jednej osi i nikt nie przeszedł na drugą stronę:
+
+|             | Config w pliku (git, diff) | Edycja w UI (klik, telefon)     |
+| ----------- | -------------------------- | ------------------------------- |
+| **Lekki**   | Homepage, Glance, Homer    | **← tu jesteśmy**               |
+| **Ciężki**  | Dashy                      | Homarr, Heimdall, Flame, Fenrus |
+
+Albo masz plik, który wersjonujesz w gicie, ale każda zmiana to wejście przez
+SSH. Albo masz wygodne UI, ale konfiguracja siedzi w bazie, której nie
+zdiffujesz, nie przejrzysz i nie skopiujesz na drugą maszynę.
+
+**Shy Garlic robi jedno i drugie nad tym samym plikiem.** Zmiana zrobiona klikiem
+zapisuje się jako splice po offsetach bajtowych w oryginalnym tekście — nie jako
+ponowna serializacja sparsowanego dokumentu. I na tym polega cała różnica:
+komentarze, puste linie, kotwice (`&defaults`), merge-keye (`<<: *defaults`),
+styl cytowania i wyrównanie komentarzy końca linii zostają dokładnie tam, gdzie
+były.
+
+Dostatecznie często uchodzi to za niewykonalne, żeby powiedzieć to wprost. Home
+Assistant zamknął zgłoszenie o zachowywanie komentarzy przy zapisie
+(`frontend#6486`) słowami *„parsers are not comment aware, this has been brought
+up many times, but not fixable"*. Da się to naprawić. Ten projekt jest dowodem.
+
+Poniżej diff z prawdziwego pliku po dodaniu usługi klikiem w UI:
+
+```diff
+       - name: "Sonarr"          # cudzysłowy celowo, nie zdejmuj
+-        url: http://sonarr.home.arpa:8989
++        url: http://sonarr.home.arpa:8990
+         icon: sonarr
+         <<: *defaults
+@@
+           expect: [200]
++      - name: AdGuard
++        url: http://adguard.home.arpa:3000
++        icon: adguard-home
+ 
+ # Stopka: nic tu nie ma, ale komentarz ma zostać.
+```
+
+Jedna linia zmieniona, trzy dodane, zero szkód ubocznych.
+
+## Widzisz zmianę, zanim się wydarzy
+
+Edytor cudzego pliku działa tylko wtedy, gdy ktoś mu ufa. Dlatego panel nigdy nie
+zapisuje niczego, czego wcześniej nie zobaczysz: każda akcja — dodanie usługi,
+zmiana nazwy grupy, edycja surowego YAML-a, zmiana wyglądu instancji — pokazuje
+dokładny diff i czeka na potwierdzenie.
+
+Pod spodem są jeszcze dwa zabezpieczenia:
+
+- **Historia wersji.** Każdy zapis jest zachowany razem z diffem, autorem i
+  czasem. Powrót do stanu sprzed godziny to jedno kliknięcie, a samo przywrócenie
+  też trafia do historii, więc można cofnąć cofnięcie.
+- **Commity w gicie.** Jeśli config leży w repozytorium, każdy zapis z UI staje
+  się commitem: `shyg: dodano usługę "Radarr" do grupy "Infrastructure"`. Klikasz
+  w przeglądarce, a historia jest w `git log`. Nie ma gita albo repo — nic się
+  nie dzieje i nie ma błędu. Domyślny obraz jest distroless, więc nie ma w nim
+  `gita`; kto chce commitów w kontenerze, buduje `--target git` (wariant na
+  Alpine) albo uruchamia binarkę wprost na hoście z gitem.
+
+## Edytor, który nie potrzebuje node
+
+<p align="center">
+  <img src="docs/img/edytor-pliku.png" alt="Edytor configu z kolorowaniem składni YAML" width="100%">
+</p>
+
+Zakładka z plikiem w ustawieniach to prawdziwy edytor: kolorowanie składni YAML —
+komentarze, klucze, liczby, słowa kluczowe i kotwice, każde w swoim kolorze, w
+obu motywach — oraz tryb pełnoekranowy na dłuższe pliki. Kolorowanie jest
+napisane od zera, bo alternatywą był krok budowania albo CDN, a tego projekt nie
+ma ani jednego, ani drugiego. Pole zostaje zwykłym `<textarea>`, więc cofanie,
+wklejanie i zaznaczanie działają tak, jak chce przeglądarka.
+
+Zapis stąd przechodzi przez ten sam podgląd diffa, tę samą historię wersji i ten
+sam commit w gicie, co zmiana zrobiona klikiem.
+
+## Heartbeat, który nie kłamie
+
+Sprawdzanie idzie **po stronie serwera**, po HTTP albo TCP, i leci nawet wtedy,
+gdy nikt nie ma otwartej karty w przeglądarce.
+
+- **Lista akceptowanych kodów jest jawna** i domyślnie zawiera
+  `200, 301, 302, 401, 403` — bo `401` i `403` znaczą „usługa żyje i chce, żebyś
+  się zalogował", a nie „usługa padła".
+- **„Nie da się połączyć" to inny stan niż „serwer odpowiedział czymś dziwnym".**
+  Pierwsze jest czerwone, drugie pomarańczowe.
+- **Stany są rozróżnialne kształtem, nie tylko kolorem** — koło, romb, kwadrat.
+  Dla daltonistów sam kolor to za mało.
+- `insecure: true` dla samopodpisanych certyfikatów, bo w homelabie stoją
+  wszędzie, a Proxmox nie jest martwy tylko dlatego, że nikt nie kupił mu certu.
+
+## Każda usługa ma swoją historię
+
+<p align="center">
+  <img src="docs/img/detale.png" alt="Szczegóły usługi z dostępnością i czasami odpowiedzi" width="100%">
+</p>
+
+Kliknięcie w wykres na karcie otwiera szczegóły: dostępność z 24 godzin i 7 dni,
+mediana i p95 czasu odpowiedzi, najwolniejsze sprawdzenie, wykres opóźnień oraz
+dziennik momentów, w których usługa naprawdę zmieniła stan, razem z powodem.
+
+## Ikony bez donoszenia na Ciebie
+
+Typowe podejście wstawia w HTML `<img src="https://cdn.jsdelivr.net/...">`. To
+znaczy, że **przeglądarka użytkownika odpytuje obcy CDN o nazwy usług, które ktoś
+ma w domu** — z Twojego IP wychodzi żądanie o `vaultwarden.svg` i `proxmox.svg`.
+Panel bez internetu traci przy okazji wszystkie ikony.
+
+Tutaj przeglądarka pyta wyłącznie Twój panel, o `/icon/<nazwa>`, i o nic więcej.
+Ikonę dociąga **serwer**, raz, i cache'uje ją na dysku.
+
+Żeby było dokładnie, bo twierdzenia o prywatności zasługują na precyzję: CDN
+nigdy nie widzi Twojej przeglądarki, nie dowiaduje się, ile osób korzysta z
+panelu, i po pierwszym pobraniu nie dostaje już nic. Widzi natomiast, raz,
+serwer proszący o plik. Jeśli i to jest za dużo — `--icons icons.zip` wozi
+komplet w jednym pliku i sprowadza liczbę zapytań na zewnątrz do zera.
+
+Katalog ma około 4200 pozycji, wyszukiwanych po nazwie i po aliasie.
+
+## Umie zajrzeć do Twoich kontenerów
+
+Panel potrafi zaproponować gotowe wpisy na podstawie kontenerów działających na
+hoście — ze zgadniętą nazwą, zgadniętą ikoną i adresem zbudowanym z wystawionego
+portu. Zaznaczasz, co ma trafić na panel, a cała paczka przechodzi przez ten sam
+podgląd diffa, co każda inna zmiana.
+
+Wskaż go na socket-proxy z wyłączonym `POST`, a nie na gołe gniazdo Dockera.
+Zamontowanie samego gniazda — nawet tylko do odczytu — oddaje w praktyce władzę
+nad Dockerem hosta każdemu, kto przejmie panel.
+
+Kontener może też opisać się sam, co bije każde zgadywanie panelu. Etykiety
+czytane są z prefiksem `shyg.`:
+
+```yaml
+labels:
+  shyg.name: Jellyfin
+  shyg.url: https://media.home.arpa
+  shyg.icon: jellyfin
+  shyg.group: Media
+  shyg.enable: "false"   # ten ma nie trafiać do podpowiedzi
+```
+
+## Kiedy coś padnie
+
+Ustaw webhooka Discorda (albo cokolwiek innego, co przyjmuje JSON) i dostajesz
+jedno zdanie, gdy usługa padnie, i jedno, gdy wróci. Nic poza tym.
+
+To świadomie **nie jest** alerting: bez eskalacji, harmonogramów, reguł i okien
+ciszy. Kto chce prawdziwego alertingu, niech postawi Uptime Kumę — nie zamierzamy
+jej zastępować.
+
+Dwa szczegóły, które mają znaczenie w praktyce:
+
+- **Awaria musi się potwierdzić.** Domyślnie trzeba dwóch nieudanych sprawdzeń z
+  rzędu, żeby cokolwiek wyszło — jedno mrugnięcie sieci nie obudzi nikogo w nocy.
+  Powrót zgłaszany jest od razu. Liczbę zmienia `notify.threshold`.
+- **Adres webhooka mieszka w bazie, nie w pliku konfiguracyjnym.** Plik jest
+  pokazywany w panelu i commitowany do gita, a URL webhooka jest poświadczeniem.
+  Ustawisz go w Ustawienia → Powiadomienia albo zmienną `SHYG_WEBHOOK`, jeśli
+  deploy zarządza swoimi sekretami sam — wartość ze środowiska wygrywa, żeby
+  restart kontenera nie cofał po cichu zmiany zrobionej w panelu.
+
+## Instalacja
+
+### Docker Compose
+
+```yaml
+services:
+  shyg:
+    image: ghcr.io/zatto-dev/shy-garlic:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
+      SHYG_DATA: /data/shygarlic.db
+      SHYG_DOCKER: http://docker-proxy:2375   # usuń tę linię, jeśli nie chcesz podpowiedzi z kontenerów
+      TZ: Europe/Warsaw
+    volumes:
+      - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml   # Twój config, zapisywalny
+      - shyg-data:/data                                  # konta, historia, cache ikon, tapety
+    healthcheck:
+      test: ["CMD", "/shyg", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - docker-proxy
+
+  # Widok na gniazdo Dockera tylko do odczytu: kontenery można wylistować,
+  # niczego nie da się uruchomić, zatrzymać ani utworzyć.
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  shyg-data:
+```
+
+Wejdź na `http://localhost:8080`.
+
+Obraz działa jako uid **65532**. Nazwany wolumen dziedziczy właściciela z obrazu,
+ale bind-mount już nie — nadaj go plikowi konfiguracyjnemu sam, LICZBĄ, bo host
+nie zna nazwy `nonroot`:
+
+```bash
+chown 65532:65532 ./shygarlic.yaml
+```
+
+### Skrypt instalacyjny
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zatto-dev/shy-garlic/main/install.sh | sh
+```
+
+Pobiera binarkę wydania dla Twojej platformy i weryfikuje jej sumę SHA-256 wobec
+pliku sum opublikowanego w tym samym wydaniu; przy niezgodności przerywa
+instalację. `SHYG_VERSION` przypina wersję, `SHYG_BIN_DIR` wybiera katalog
+docelowy.
+
+```bash
+shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
+```
+
+### Ze źródeł
+
+```bash
+go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.25
+```
+
+### Pierwsze uruchomienie
+
+Pierwsze wejście prowadzi na `/setup`, gdzie zakładasz konto administratora.
+Dopóki baza jest pusta, panel nie wpuszcza nikogo dalej; gdy konto już istnieje,
+`/setup` jest zamknięty.
+
+Za reverse proxy (Traefik, Caddy, Pangolin) ustaw `--trusted-proxy` /
+`SHYG_TRUSTED_PROXY` na jego sieć, np. `10.0.0.0/8`. Bez tego `X-Forwarded-For` i
+`X-Forwarded-Proto` są ignorowane — inaczej jeden nagłówek na żądanie
+wystarczyłby, żeby obejść limiter prób logowania. Proxy musi też przekazywać
+oryginalny nagłówek `Host`: żądania zapisujące są odrzucane, gdy `Origin` z
+przeglądarki się z nim nie zgadza.
+
+## Panel
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/panel-light.png" alt="Motyw jasny"></td>
+    <td width="50%"><img src="docs/img/tryb-edycji.png" alt="Tryb edycji"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Motyw jasny i ciemny</sub></td>
+    <td align="center"><sub>Tryb edycji — dodawanie, edycja i usuwanie z UI</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/img/panel-list-dark.png" alt="Widok listy"></td>
+    <td width="50%"><img src="docs/img/panel-bento-dark.png" alt="Widok bento"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Widok listy — na maszynę z sześćdziesięcioma usługami</sub></td>
+    <td align="center"><sub>Widok bento — kafle w trzech rozmiarach</sub></td>
+  </tr>
+</table>
+
+Tło to albo preset (aurora, nebula, graphite, dawn, fog), albo Twoja własna
+tapeta, z rozmyciem i przyciemnieniem, które ustawiasz sam — przyciemnieniem, bo
+na zdjęciu o dużym kontraście wewnętrznym żaden wybór koloru tekstu nie ratuje
+czytelności.
+
+<p align="center">
+  <img src="docs/img/background-picker-dark.png" alt="Wybór tła" width="100%">
+</p>
+
+Przełącznik w górnym pasku zmienia wygląd **tylko w Twojej** przeglądarce.
+Ustawienia → Wygląd zmieniają domyślny wygląd instancji, w pliku, przez zwykły
+diff. Interfejs mówi po angielsku i po polsku, przełączasz w nagłówku.
+
+### Skróty klawiszowe
+
+| Klawisz     | Działanie                       |
+| ----------- | ------------------------------- |
+| `/`         | wejdź w wyszukiwarkę            |
+| `E`         | włącz i wyłącz tryb edycji      |
+| `N`         | nowa usługa                     |
+| `B`         | wybór tła                       |
+| `1` `2` `3` | widok grid, bento, lista        |
+| `Esc`       | zamknij, potem wyczyść filtr    |
+
+## Konfiguracja
+
+```yaml
+# Ten komentarz przeżyje każdą edycję z UI.
+title: Homelab
+
+# Wspólne ustawienia — zmieniasz raz, działa wszędzie.
+defaults: &defaults
+  check:
+    interval: 30s
+    timeout: 6s
+    expect: [200, 301, 302, 401, 403]
+
+# Domyślny wygląd instancji. Każda przeglądarka może go u siebie nadpisać;
+# ten blok to jest to, co widzi, zanim cokolwiek sama wybierze.
+appearance:
+  background:
+    preset: aurora    # aurora | nebula | graphite | dawn | fog | photo
+    blur: 10          # 0..30 px, dotyczy własnej tapety
+    tone: dark        # dark | light — jasność tekstu
+  view: grid          # grid | bento | list
+
+groups:
+  - name: Media
+    services:
+      - name: Jellyfin
+        url: http://jellyfin.home.arpa:8096
+        icon: jellyfin
+        size: lg      # sm | md | lg — rozmiar kafla w widoku bento
+        <<: *defaults
+
+  - name: Zarządzanie
+    services:
+      - name: Proxmox
+        url: https://proxmox.home.arpa:8006
+        icon: proxmox
+        check:
+          interval: 30s
+          expect: [200, 401]
+          insecure: true    # samopodpisany certyfikat, tak ma być
+```
+
+| Pole                           | Znaczenie                                              | Domyślnie                    |
+| ------------------------------ | ------------------------------------------------------ | ---------------------------- |
+| `title`                        | nagłówek panelu                                         | `Shy Garlic`                 |
+| `groups[].name`                | nazwa sekcji                                            | —                            |
+| `services[].name`              | nazwa usługi                                            | wymagane                     |
+| `services[].url`               | adres; `http://`, `https://` albo `tcp://host:port`     | wymagane                     |
+| `services[].icon`              | nazwa z katalogu ikon albo pełny adres URL              | litera z nazwy               |
+| `services[].size`              | rozmiar kafla w widoku bento: `sm`, `md`, `lg`          | `md`                         |
+| `appearance.background.preset` | `aurora`, `nebula`, `graphite`, `dawn`, `fog`, `photo`  | `aurora`                     |
+| `appearance.background.image`  | nazwa pliku z `/bg/`, tylko przy `preset: photo`        | —                            |
+| `appearance.background.blur`   | rozmycie tapety w px, `0`–`30`                          | `10`                         |
+| `appearance.background.dim`    | przyciemnienie pod treścią w %, `0`–`80`                | `50`                         |
+| `appearance.background.tone`   | jasność tekstu: `dark` albo `light`                     | `dark`                       |
+| `appearance.view`              | `grid`, `bento` albo `list`                             | `grid`                       |
+| `check.interval`               | co ile sprawdzać                                        | `30s`                        |
+| `check.timeout`                | ile czekać na odpowiedź                                 | `5s`                         |
+| `check.expect`                 | kody uznawane za „żyje"                                 | `[200, 301, 302, 401, 403]`  |
+| `check.insecure`               | ignoruj błędy certyfikatu                               | `false`                      |
+| `notify.threshold`             | ile nieudanych sprawdzeń z rzędu, zanim powiadomimy     | `2`                          |
+| `discovery.docker`             | podpowiadaj usługi z kontenerów                         | włączone, jeśli jest gniazdo |
+
+### Gdzie co mieszka
+
+Konfiguracja stoi w czterech warstwach. Granica nie przebiega po ważności, tylko
+po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
+
+| Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
+| Baza SQLite                  | adres webhooka, konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
+| Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
+
+Każda flaga ma odpowiednik w zmiennej środowiskowej z przedrostkiem `SHYG_`
+(`SHYG_ADDR`, `SHYG_CONFIG`, …). Ustawienia → Instancja pokazują je wszystkie
+razem ze źródłem każdej wartości: flaga, zmienna czy wartość domyślna.
+
+! **Adresu webhooka nie ma w pliku i nie będzie.** Panel ten plik pokazuje i
+commituje, a URL jest poświadczeniem.
+
+## Logowanie
+
+<p align="center">
+  <img src="docs/img/login.png" alt="Ekran logowania" width="70%">
+</p>
+
+Konta mieszkają w SQLite, hasła haszowane bcryptem. Sesja to ciasteczko
+`HttpOnly`, `SameSite=Strict` ważne 30 dni, trasy zapisujące niosą token CSRF, a
+pięć nieudanych prób z jednego adresu blokuje logowanie na pięć minut. API bez
+sesji odpowiada `401`.
+
+Nie ma uprawnień per użytkownik: każde konto może wszystko. Przed czym panel się
+broni, a przed czym nie, i jak zakłada, że go wdrożysz, spisane jest w
+[SECURITY.md](SECURITY.md) — przeczytaj, zanim wystawisz to szerzej niż na LAN.
+
+## API
+
+Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
+
+| Metoda   | Ścieżka                          | Co robi                                                |
+| -------- | -------------------------------- | ------------------------------------------------------ |
+| `GET`    | `/api/status`                    | aktualny stan wszystkich usług                          |
+| `GET`    | `/events`                        | strumień SSE ze zmianami stanu                          |
+| `GET`    | `/api/history?key=Grupa/Usługa`  | historia sprawdzeń i dostępność 24 h                    |
+| `GET`    | `/api/service?key=Grupa/Usługa`  | wszystko o jednej usłudze: staty, wykres, zmiany stanu  |
+| `POST`   | `/api/check?key=Grupa/Usługa`    | sprawdź tę usługę natychmiast                           |
+| `GET`    | `/api/info`                      | co ta instancja ma włączone                             |
+| `GET`    | `/api/instance`                  | opcje startowe i źródło każdej wartości                 |
+| `GET`    | `/api/discover`                  | usługi zaproponowane z działających kontenerów          |
+| `GET`    | `/api/icons?q=jelly`             | wyszukiwarka ikon                                       |
+| `GET`    | `/api/config`                    | surowy YAML                                             |
+| `PUT`    | `/api/config`                    | zapis surowego YAML-a (najpierw walidacja)              |
+| `POST`   | `/api/services`                  | dodaj usługę                                            |
+| `PATCH`  | `/api/services`                  | zmień usługę                                            |
+| `DELETE` | `/api/services?group=…&name=…`   | usuń usługę                                             |
+| `POST`   | `/api/services/bulk`             | dodaj wiele usług jako jedną zmianę                     |
+| `POST`   | `/api/groups`                    | dodaj grupę                                             |
+| `PATCH`  | `/api/groups`                    | zmień nazwę grupy                                       |
+| `DELETE` | `/api/groups?name=…`             | usuń grupę                                              |
+| `GET`    | `/api/versions`                  | historia zmian                                          |
+| `POST`   | `/api/versions/{id}/restore`     | przywróć plik do tej wersji                             |
+| `GET`    | `/api/appearance`                | domyślny wygląd instancji                               |
+| `PUT`    | `/api/appearance`                | zmiana wyglądu (przez diff, jak każda edycja)           |
+| `GET`    | `/api/notify`                    | ustawienia powiadomień, bez adresu                      |
+| `PUT`    | `/api/notify`                    | ustaw adres webhooka                                    |
+| `POST`   | `/api/notify/test`               | wyślij wiadomość testową                                |
+| `POST`   | `/api/background`                | wgraj tapetę (multipart `file`)                         |
+| `GET`    | `/api/background`                | lista wgranych tapet                                    |
+| `DELETE` | `/api/background/{nazwa}`        | usuń tapetę (`409`, gdy jest w użyciu)                  |
+| `GET`    | `/bg/{nazwa}`                    | serwowanie tapety — tylko dla zalogowanych              |
+| `GET`    | `/healthz`                       | liveness, jedyna trasa bez sesji                        |
+
+Zarządzanie kontami (`/api/users`, `/api/password`) działa na tych samych
+zasadach.
+
+Dopisz `?dry=1` do dowolnego wywołania zapisującego, a nic się nie zapisze —
+dostaniesz diff tego, co by się zmieniło. Dokładnie tego używa panel do podglądu.
+
+Jeśli ktoś zmienił plik na dysku między odczytem a zapisem, dostajesz `409`
+zamiast cichego nadpisania cudzej pracy.
+
+## Jak to jest zbudowane
+
+```
+cmd/shyg            wejście CLI: serve, check, version
+internal/config     silnik konfiguracji — parsowanie i round-trip-safe zapis
+internal/health     sprawdzanie usług: scheduler, semantyka kodów, stany
+internal/i18n       teksty interfejsu, angielski i polski
+internal/server     HTTP, SSE, szablony, ikony, API edytora, logowanie
+internal/store      SQLite: konta, sesje, historia sprawdzeń
+```
+
+Kluczowa decyzja jest w `internal/config`: **AST służy wyłącznie do nawigacji**, a
+zapis podmienia zakres bajtów w oryginalnym tekście. Wynika to z pomiaru, nie z
+gustu — `gopkg.in/yaml.v3` przy zapisie kasuje puste linie i przepisuje
+`<<: *defaults` na `!!merge <<: *defaults`, a nawet `goccy/go-yaml`, który radzi
+sobie z tym najlepiej, zbija wyrównanie komentarzy końca linii. Skoro sam
+odczyt-i-zapis rusza linie, których użytkownik nie tknął, to nie jest round-trip.
+Stąd splice po offsetach.
+
+Frontend to `html/template` plus waniliowy JavaScript: żadnego builda, żadnych
+`node_modules`, ani jednego pakietu z npm w produkcie.
+
+## Stan projektu
+
+Wersje zostają w `0.x`, dopóki projekt nie przejdzie audytu bezpieczeństwa. Do
+tego czasu API HTTP i format pliku konfiguracyjnego mogą się jeszcze zmienić;
+każda zmiana, która psuje coś, na czym polegałeś, jest zapisana w
+[CHANGELOG.md](CHANGELOG.md).
+
+Rzeczy, których nie ma świadomie, a nie przez zapomnienie:
+
+- **Nie ma alertingu.** Jedna wiadomość, gdy padnie, jedna, gdy wróci. Uptime
+  Kuma istnieje.
+- **Nie ma uprawnień per użytkownik.** Każde konto może wszystko.
+- **Nie ma sprawdzania aktualizacji.** Panel nie dzwoni do domu, nawet po to, by
+  zapytać, czy jest nowsza wersja — cichy ruch na zewnątrz podważałby jedyną
+  rzecz, którą ten projekt obiecuje.
+
+## Wkład
+
+Zgłoszenia błędów, patche i tłumaczenia są mile widziane. Nie ma CLA; podpisuj
+commity przez [DCO](CONTRIBUTING.md) (`git commit -s`, dodaje linię
+`Signed-off-by`). Jak budować i testować, opisuje
+[CONTRIBUTING.md](CONTRIBUTING.md); podatności zgłasza się drogą z
+[SECURITY.md](SECURITY.md), a nie w publicznym issue.
+
+## Licencja
+
+**GNU Affero General Public License v3.0 lub nowsza** — patrz [LICENSE](LICENSE).
+
+Wybrana świadomie: jeśli ktoś uruchomi zmienionego Shy Garlica jako usługę, jego
+użytkownicy dostają źródła. Nie zamyka żadnego kanału dystrybucji, na którym nam
+zależy — nixpkgs, aplikacje TrueNAS, Unraid Community Applications i sklep
+Umbrela rozprowadzają dziś oprogramowanie na AGPL.

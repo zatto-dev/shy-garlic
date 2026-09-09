@@ -1,0 +1,120 @@
+# Shy Garlic — example homelab configuration
+#
+# Everything below is made up: RFC 8375 reserved domain (home.arpa) and the
+# most common home network prefix. Replace it with your own.
+#
+# This file is the source of truth. The panel reads it, and the editor in the
+# UI writes to it so that this comment and every one below stays where it is.
+
+title: Homelab
+
+# Shared check settings. Change them once, they apply everywhere.
+defaults: &defaults
+  check:
+    interval: 30s
+    timeout: 6s
+    # ! 401 and 403 mean "the service is alive, it just wants a login" — not
+    #   an outage. 302 is a reverse proxy redirecting to SSO, also not an outage.
+    expect: [200, 301, 302, 401, 403]
+
+# The default look of this instance. A browser may override it locally — this
+# block is what anyone sees before making a choice of their own.
+appearance:
+  background:
+    preset: aurora    # aurora | nebula | graphite | dawn | fog | photo
+    blur: 10          # 0..30 px, applies to your own wallpaper (preset: photo)
+    dim: 50           # 0..80 % — dimming under the content. On a photo with
+                      # strong internal contrast the text colour alone cannot
+                      # save legibility: some cards sit on light, some on dark.
+    # tone: dark      # dark | light — text brightness. Works ONLY with
+                      # `preset: photo`; every other preset carries its own
+                      # brightness and dictates the tone itself.
+  view: grid          # grid | bento | list
+
+# Notifications. ! The webhook address is NOT here and never will be — this
+# file is shown in the panel and committed to git, and a webhook URL is a
+# credential. Set it in the panel (Settings → Notifications) or through
+# SHYG_WEBHOOK; the environment variable wins.
+notify:
+  threshold: 2        # failed checks in a row before we send a message
+
+# What the panel suggests when you add a service.
+# discovery:
+#   docker: false     # turns off suggesting services from containers. Leaving
+#                     # this key out means "suggest, if a socket is there".
+
+groups:
+  - name: Infrastructure
+    services:
+      - name: Proxmox
+        url: https://192.168.1.10:8006
+        icon: proxmox
+        check:
+          interval: 30s
+          timeout: 6s
+          expect: [200, 301, 302, 401, 403]
+          insecure: true   # self-signed certificate, on purpose
+
+      - name: OPNsense
+        url: https://192.168.1.1
+        icon: opnsense
+        check:
+          <<: *defaults
+          insecure: true
+
+      - name: TrueNAS
+        url: https://nas.home.arpa
+        icon: truenas
+        <<: *defaults
+
+      - name: Home Assistant
+        url: http://192.168.1.20:8123
+        icon: home-assistant
+        <<: *defaults
+
+  - name: Media
+    services:
+      - name: Jellyfin
+        url: http://192.168.1.30:8096
+        icon: jellyfin
+        size: lg          # sm | md | lg — rozmiar kafla w widoku bento
+        <<: *defaults
+
+      - name: Immich
+        url: https://photos.home.arpa
+        icon: immich
+        <<: *defaults
+
+  - name: Tools
+    services:
+      - name: Vaultwarden
+        url: https://vault.home.arpa
+        icon: vaultwarden
+        <<: *defaults
+
+      - name: Gitea
+        url: https://git.home.arpa
+        icon: gitea
+        <<: *defaults
+
+      - name: Paperless-ngx
+        url: https://paperless.home.arpa
+        icon: paperless-ngx
+        <<: *defaults
+
+  - name: Monitoring
+    services:
+      - name: Uptime Kuma
+        url: http://192.168.1.40:3001
+        icon: uptime-kuma
+        check:
+          interval: 15s   # this one watches the rest, so we ask more often
+          timeout: 5s
+          expect: [200, 302]
+
+      - name: Grafana
+        url: http://192.168.1.40:3000
+        icon: grafana
+        <<: *defaults
+
+# Adding a service? Copy a block above and change three fields.
