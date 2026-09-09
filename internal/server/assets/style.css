@@ -1,0 +1,1934 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Shy Garlic Glass — tokeny. Wklej na sam początek style.css, ZAMIAST
+   obecnych linii 1-58 (:root + dwa bloki [data-theme]).
+   Akcent jest STAŁY (#A4CF36 = dawny --kielek), więc wszystkie color-mix()
+   z projektu są tu prewyliczone jako rgba() — jedyny wyjątek to --acc-ink
+   w tonie jasnym (mieszanie w oklab), podany dwiema deklaracjami: fallback
+   + color-mix, żeby stara przeglądarka dostała sensowny kolor.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── paleta maskotki: zostaje, bo to decyzja brandowa (logo, litera) ── */
+  --krem:   #FBF2E2;
+  --lisc:   #6B9924;
+  --kielek: #A4CF36;
+
+  /* ── akcent + prewyliczone miksy ── */
+  --acc:      #A4CF36;
+  --acc-fg:   #1A2005;               /* lum(#A4CF36)=0.6929 > 0.55 */
+  --acc-ink:  #A4CF36;               /* w tonie ciemnym = acc */
+  --acc-12:   rgba(164,207,54,.12);  /* tło linii "+" w diffie */
+  --acc-22:   rgba(164,207,54,.22);  /* tło włączonego toggle, halo up */
+  --acc-32:   rgba(164,207,54,.32);  /* ring focusu */
+  --acc-55:   rgba(164,207,54,.55);  /* obwódka włączonego toggle */
+  --acc-80:   rgba(164,207,54,.80);  /* cień przycisku akcentowego */
+  --acc-bar:  rgba(164,207,54,.85);  /* wypełnienie słupków "up" */
+
+  /* ── VARS.dark (projekt, dosłownie) ── */
+  --ink:    #F3F0E8;
+  --ink2:   rgba(243,240,232,.68);
+  --ink3:   rgba(243,240,232,.62);
+  --edge:   rgba(255,255,255,.12);
+  --edge2:  rgba(255,255,255,.24);
+  --shine:  rgba(255,255,255,.16);
+  --chip:   rgba(255,255,255,.08);
+  --field:  rgba(0,0,0,.2);
+  --shadow: 0 24px 60px -28px rgba(0,0,0,.6);
+  --scrim:  rgba(5,7,10,.55);
+  --panel:  rgba(18,22,28,.8);
+  --bar:    rgba(12,15,20,.55);
+
+  /* wariant awaryjny bez backdrop-filter — patrz @supports niżej */
+  --panel-krycie: rgba(20,24,30,.97);
+  --bar-krycie:   rgba(14,17,22,.97);
+
+  /* glassOpacity g = 0.35: dark → 0.03+0.12g / 0.08+0.12g */
+  --glass:  rgba(255,255,255,.072);
+  --glass2: rgba(255,255,255,.122);
+
+  /* ── geometria i ruch ── */
+  --blur: 20px;                          /* backdrop-filter paneli */
+  --r:    24px;                          /* promień bazowy kart */
+  --r-mala: 8px;
+  --r-duza: 14px;
+  --dur:  .7s;                           /* wejście kart (sg-in) */
+  --lift: -3px;                          /* podniesienie karty na hover */
+  --przejscie: 140ms cubic-bezier(.2,.7,.3,1);
+  --ease: cubic-bezier(.2,.7,.2,1);
+
+  /* ── statusy ── */
+  --up:            var(--acc);
+  --degraded:      #E8A33D;
+  --down:          #E5484D;
+  --down-ink:      #FF7B7F;              /* tekst/hover na czerwonym */
+  --down-obwodka:  rgba(229,72,77,.35);  /* krawędź akcji niszczącej */
+  --unknown:       #8A8578;
+  --halo-up:       rgba(164,207,54,.22);
+  --halo-degraded: rgba(232,163,61,.22);
+  --halo-down:     rgba(229,72,77,.22);
+  --puls-down-a:   rgba(229,72,77,.28);
+  --puls-down-b:   rgba(229,72,77,.05);
+  --spark-degraded:#E8A33D;
+  --spark-down:    rgba(229,72,77,.7);
+
+  /* ── warstwa tła (JS nadpisuje --tlo-obraz i --tlo-rozmycie przez CSSOM) ── */
+  --tlo-baza:      #0A0F14;
+  --tlo-obraz:     none;                 /* url("/bg/<nazwa>") albo none */
+  --tlo-rozmycie:  10px;                 /* 0..30px */
+  --tlo-inset:     -24px;                /* = -(2*rozmycie + 4) */
+  --ziarno-krycie: .07;
+
+  /* ── typografia ── */
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system,
+               "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ── baza .btn (Faza 2 / Task 7) — aliasy na tokeny wyżej, żeby nie mnożyć
+     równoległych źródeł prawdy. Wyprowadzone z Shy-Garlic-Glass.dc.html,
+     patrz komentarz przy bloku .btn niżej. ── */
+  --btn-bg:       var(--chip);
+  --btn-bg-hover: var(--glass2);
+  --btn-edge:     var(--edge);
+  --btn-ink:      var(--ink2);
+  --btn-radius:   999px;
+  --btn-ease:     .2s ease;
+}
+
+/* ── ton jasny. Sterowany WYŁĄCZNIE atrybutem data-ton na <html>.
+      Nie ma tu @media (prefers-color-scheme) — o tonie decyduje wybrane tło,
+      a pierwszy wybór presetu robi serwer/JS na podstawie preferencji systemu. ── */
+:root[data-ton="light"] {
+  color-scheme: light;
+
+  --ink:    #1B1813;
+  --ink2:   rgba(27,24,19,.68);
+  --ink3:   rgba(27,24,19,.66);
+  --edge:   rgba(255,255,255,.85);
+  --edge2:  rgba(27,24,19,.16);
+  --shine:  rgba(255,255,255,.95);
+  --chip:   rgba(27,24,19,.06);
+  --field:  rgba(255,255,255,.55);
+  --shadow: 0 24px 60px -30px rgba(27,24,19,.28);
+  --scrim:  rgba(235,232,228,.5);
+  --panel:  rgba(255,255,255,.84);
+  --bar:    rgba(255,255,255,.6);
+
+  --panel-krycie: rgba(252,251,249,.98);
+  --bar-krycie:   rgba(250,249,246,.98);
+
+  --glass:  rgba(255,255,255,.525);       /* light: 0.35 + 0.5g */
+  --glass2: rgba(255,255,255,.675);       /* light: min(.96, 0.5 + 0.5g) */
+
+  --acc-ink: #6E8C22;                                        /* fallback */
+  --acc-ink: color-mix(in oklab, #A4CF36 62%, #1B1813);      /* wg projektu */
+
+  --ziarno-krycie: .045;
+}
+
+/* ── kolor bazowy warstwy tła per preset (PRESETS.base z projektu) ──
+      Musi stać PO bloku tonu, bo preset jest bardziej szczegółowy niż ton. ── */
+:root[data-preset="aurora"]   { --tlo-baza: #0A0F14; }
+:root[data-preset="nebula"]   { --tlo-baza: #0C0A18; }
+:root[data-preset="graphite"] { --tlo-baza: #121316; }
+:root[data-preset="dawn"]     { --tlo-baza: #F4EEE8; }
+:root[data-preset="fog"]      { --tlo-baza: #EDF1F4; }
+:root[data-preset="photo"]    { --tlo-baza: #0B0D10; }
+:root[data-preset="photo"][data-ton="light"] { --tlo-baza: #E9E6E1; }
+
+/* ── wariant awaryjny: brak backdrop-filter = panele nieprzezroczyste.
+      Bez tego dialog nad zdjęciem jest nieczytelny. ── */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  :root {
+    --panel: var(--panel-krycie);
+    --bar:   var(--bar-krycie);
+    --glass:  rgba(28,32,38,.94);
+    --glass2: rgba(34,39,46,.97);
+    --scrim:  rgba(5,7,10,.86);
+  }
+  :root[data-ton="light"] {
+    --panel: var(--panel-krycie);
+    --bar:   var(--bar-krycie);
+    --glass:  rgba(255,255,255,.94);
+    --glass2: rgba(255,255,255,.98);
+    --scrim:  rgba(235,232,228,.86);
+  }
+}
+
+/* ── @font-face: pliki lokalne, zero sieci w runtime ── */
+@font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:400;
+  font-display:swap; src:url("/assets/fonts/hanken-grotesk-400.woff2") format("woff2"); }
+@font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:500;
+  font-display:swap; src:url("/assets/fonts/hanken-grotesk-500.woff2") format("woff2"); }
+@font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:600;
+  font-display:swap; src:url("/assets/fonts/hanken-grotesk-600.woff2") format("woff2"); }
+@font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:700;
+  font-display:swap; src:url("/assets/fonts/hanken-grotesk-700.woff2") format("woff2"); }
+@font-face { font-family:"DM Mono"; font-style:normal; font-weight:400;
+  font-display:swap; src:url("/assets/fonts/dm-mono-400.woff2") format("woff2"); }
+@font-face { font-family:"DM Mono"; font-style:normal; font-weight:500;
+  font-display:swap; src:url("/assets/fonts/dm-mono-500.woff2") format("woff2"); }
+
+/* ── keyframes z projektu (dosłownie) ── */
+@keyframes sg-dryf1 { from{transform:translate(0,0) scale(1)}    to{transform:translate(9vw,7vh) scale(1.18)} }
+@keyframes sg-dryf2 { from{transform:translate(0,0) scale(1.1)}  to{transform:translate(-8vw,9vh) scale(.94)} }
+@keyframes sg-dryf3 { from{transform:translate(0,0) scale(1)}    to{transform:translate(6vw,-8vh) scale(1.22)} }
+@keyframes sg-wejscie { from{opacity:0;transform:translateY(12px) scale(.985)} to{opacity:1;transform:none} }
+@keyframes sg-pop     { from{opacity:0;transform:translateY(8px) scale(.97)}   to{opacity:1;transform:none} }
+@keyframes sg-fade    { from{opacity:0} to{opacity:1} }
+@keyframes sg-puls    { 0%,100%{box-shadow:0 0 0 3px var(--puls-down-a)} 50%{box-shadow:0 0 0 8px var(--puls-down-b)} }
+@keyframes sg-obrot   { to{transform:rotate(360deg)} }
+
+/* ── ruch wyłączony: nasza twardsza wersja zostaje (nie .01ms z projektu) ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ── reset i dokument ─────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+/* Wiele komponentów (menu, picker, toast) ma display:flex i chowa się
+   atrybutem [hidden] — bez tego atrybut przegrywa z regułą klasy. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--tlo-baza);
+  color: var(--ink);
+  font: 15px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  padding: 16px clamp(14px, 3vw, 40px) 64px;
+  overflow-x: hidden;
+}
+
+/* Kontener treści. ! BEZ z-index — w projekcie wrapper miał z-index:1
+   i tworzył własny kontekst układania, przez co pasek (30) lądował pod
+   łapaczem kliknięć (25) i kliknięcie w preset trafiało w próżnię. */
+.top, #podsumowanie, main, .stopka { max-width: 1440px; margin-inline: auto; }
+
+main { display: flex; flex-direction: column; gap: 28px; }
+
+h1, h2, h3, h4 { letter-spacing: -.015em; }
+
+/* Treść tylko dla czytników ekranu — #podsumowanie zostaje w DOM jako
+   role="status", ale liczby pokazują chipy w pasku. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ── warstwa tła ──────────────────────────────────────────────────────── */
+
+/* ! z-index: -1, NIE 0. Warstwa tła jest position:fixed, więc przy z-index:0
+   malowałaby się w warstwie „pozycjonowane potomki", czyli NAD zwykłą treścią
+   w przepływie — nagłówki grup, stopka i #dodaj-grupe znikały pod tłem
+   (karty przeżywały tylko dlatego, że mają position:relative).
+   Lekarstwem NIE jest z-index:1 na wrapperze treści — to był właśnie bug
+   projektu, przez który pasek (30) lądował pod zasłoną (25). Tło schodzi
+   poniżej zera i reszta skali (25/30/40/60/70/80) zostaje nietknięta. */
+#tlo {
+  position: fixed; inset: 0; z-index: -1;
+  overflow: hidden; pointer-events: none;
+  background: var(--tlo-baza);
+}
+
+.tlo-warstwa {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  background: var(--tlo-baza);
+}
+.tlo-warstwa.wchodzi { animation: sg-fade .8s ease both; }
+
+.tlo-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  will-change: transform;
+}
+
+/* Pozycje, rozmiary, kolory i czasy dryfu — PRESETS z projektu, 1:1.
+   Szablon renderuje zawsze cztery bloby; presety z mniejszą liczbą kul
+   chowają nadmiarowe. Numer animacji = i%3+1, jak w projekcie. */
+
+:root[data-preset="aurora"] .tlo-blob:nth-child(1) {
+  left: -10%; top: -20%; width: 55vw; height: 55vw;
+  background: radial-gradient(closest-side, rgba(164,207,54,.55), transparent);
+  animation: sg-dryf1 26s ease-in-out infinite alternate;
+}
+:root[data-preset="aurora"] .tlo-blob:nth-child(2) {
+  left: 55%; top: -10%; width: 50vw; height: 50vw;
+  background: radial-gradient(closest-side, rgba(45,212,191,.42), transparent);
+  animation: sg-dryf2 32s ease-in-out infinite alternate;
+}
+:root[data-preset="aurora"] .tlo-blob:nth-child(3) {
+  left: 20%; top: 45%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(20,110,90,.55), transparent);
+  animation: sg-dryf3 38s ease-in-out infinite alternate;
+}
+:root[data-preset="aurora"] .tlo-blob:nth-child(4) {
+  left: 65%; top: 55%; width: 45vw; height: 45vw;
+  background: radial-gradient(closest-side, rgba(120,90,220,.22), transparent);
+  animation: sg-dryf1 30s ease-in-out infinite alternate;
+}
+
+:root[data-preset="nebula"] .tlo-blob:nth-child(1) {
+  left: -15%; top: -10%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(139,92,246,.45), transparent);
+  animation: sg-dryf1 34s ease-in-out infinite alternate;
+}
+:root[data-preset="nebula"] .tlo-blob:nth-child(2) {
+  left: 50%; top: -20%; width: 55vw; height: 55vw;
+  background: radial-gradient(closest-side, rgba(236,72,153,.28), transparent);
+  animation: sg-dryf2 40s ease-in-out infinite alternate;
+}
+:root[data-preset="nebula"] .tlo-blob:nth-child(3) {
+  left: 30%; top: 50%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(59,130,246,.35), transparent);
+  animation: sg-dryf3 30s ease-in-out infinite alternate;
+}
+:root[data-preset="nebula"] .tlo-blob:nth-child(4) { display: none; }
+
+/* graphite i fog są statyczne z definicji — zero animacji, zero kosztu GPU */
+:root[data-preset="graphite"] .tlo-blob:nth-child(1) {
+  left: -10%; top: -30%; width: 70vw; height: 70vw;
+  background: radial-gradient(closest-side, rgba(255,255,255,.07), transparent);
+}
+:root[data-preset="graphite"] .tlo-blob:nth-child(2) {
+  left: 60%; top: 60%; width: 50vw; height: 50vw;
+  background: radial-gradient(closest-side, rgba(164,207,54,.07), transparent);
+}
+:root[data-preset="graphite"] .tlo-blob:nth-child(3),
+:root[data-preset="graphite"] .tlo-blob:nth-child(4) { display: none; }
+
+:root[data-preset="dawn"] .tlo-blob:nth-child(1) {
+  left: -10%; top: -20%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(255,170,130,.6), transparent);
+  animation: sg-dryf1 30s ease-in-out infinite alternate;
+}
+:root[data-preset="dawn"] .tlo-blob:nth-child(2) {
+  left: 50%; top: -15%; width: 55vw; height: 55vw;
+  background: radial-gradient(closest-side, rgba(180,160,255,.5), transparent);
+  animation: sg-dryf2 36s ease-in-out infinite alternate;
+}
+:root[data-preset="dawn"] .tlo-blob:nth-child(3) {
+  left: 25%; top: 50%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(200,232,120,.5), transparent);
+  animation: sg-dryf3 32s ease-in-out infinite alternate;
+}
+:root[data-preset="dawn"] .tlo-blob:nth-child(4) { display: none; }
+
+:root[data-preset="fog"] .tlo-blob:nth-child(1) {
+  left: -20%; top: -20%; width: 70vw; height: 70vw;
+  background: radial-gradient(closest-side, rgba(150,195,235,.5), transparent);
+}
+:root[data-preset="fog"] .tlo-blob:nth-child(2) {
+  left: 50%; top: 40%; width: 60vw; height: 60vw;
+  background: radial-gradient(closest-side, rgba(165,225,205,.45), transparent);
+}
+:root[data-preset="fog"] .tlo-blob:nth-child(3),
+:root[data-preset="fog"] .tlo-blob:nth-child(4) { display: none; }
+
+/* w trybie zdjęcia blobów nie ma w ogóle — tapeta niesie całe tło */
+:root[data-preset="photo"] .tlo-blob { display: none; }
+
+/* Tapeta i przyciemnienie żyją tylko w trybie photo. Inset jest ujemny,
+   żeby rozmycie nie odsłoniło jasnej krawędzi przy brzegu ekranu. */
+.tlo-obraz, .tlo-przycmienie { display: none; }
+:root[data-preset="photo"] .tlo-obraz {
+  display: block;
+  position: absolute; inset: var(--tlo-inset);
+  background-image: var(--tlo-obraz);
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--tlo-rozmycie));
+  transform: translateZ(0);
+}
+/* Krycie steruje --dim (ułamek z appearance.background.dim). Górny koniec to
+   zawsze dim × .56 — proporcja z pierwotnych .28/.5, żeby przyciemnienie dalej
+   narastało ku dołowi, gdzie stoją kafle.
+   ! Sam kolor tekstu czytelności nie ratuje: na zdjęciu o dużym kontraście
+   część kafli leży na jasnym, a część na ciemnym. */
+:root[data-preset="photo"] .tlo-przycmienie {
+  display: block;
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg,
+    rgba(0,0,0,calc(var(--dim, .5) * .56)),
+    rgba(0,0,0,var(--dim, .5)));
+}
+:root[data-preset="photo"][data-ton="light"] .tlo-przycmienie {
+  background: linear-gradient(180deg,
+    rgba(255,255,255,calc(var(--dim, .5) * .6)),
+    rgba(255,255,255,var(--dim, .5)));
+}
+
+/* Ziarno rozbija banding gradientów. SVG inline w data: — zero sieci. */
+.tlo-ziarno {
+  position: absolute; inset: 0;
+  opacity: var(--ziarno-krycie);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 160px 160px;
+}
+
+/* ── skip link ────────────────────────────────────────────────────────── */
+
+.skip {
+  position: absolute; left: -9999px; top: 0;
+  z-index: 80;
+  padding: 10px 14px;
+  border: 1px solid var(--edge2); border-radius: var(--r-duza);
+  background: var(--panel); color: var(--ink);
+  text-decoration: none;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.skip:focus { left: 16px; top: 16px; }
+
+/* ── pasek górny ──────────────────────────────────────────────────────── */
+
+.top {
+  position: sticky; top: 12px; z-index: 30;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px 10px 16px;
+  margin-bottom: 28px;
+  border: 1px solid var(--edge); border-radius: 26px;
+  background: var(--bar);
+  backdrop-filter: blur(var(--blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--shine), var(--shadow);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; margin-right: auto; }
+.brand img { display: block; }
+.brand h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+
+.tools { display: flex; align-items: center; gap: 8px; flex: none; }
+
+.search {
+  display: flex; align-items: center; gap: 10px;
+  flex: 1 1 240px; max-width: 440px; min-width: 200px;
+  height: 40px; padding: 0 10px 0 14px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--field);
+  transition: box-shadow .2s;
+  cursor: text;
+}
+.search:focus-within { box-shadow: 0 0 0 3px var(--acc-32); }
+.search svg { flex: none; width: 16px; height: 16px; color: var(--ink3); }
+.search input {
+  flex: 1; min-width: 0; height: 100%; padding: 0;
+  border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 14px;
+}
+.search input:focus { outline: none; }
+.search input::placeholder { color: var(--ink3); }
+.search kbd {
+  flex: none;
+  font: 500 11px/1 var(--font-mono); color: var(--ink3);
+  border: 1px solid var(--edge); border-radius: 6px;
+  padding: 4px 6px; pointer-events: none;
+}
+.search input:not(:placeholder-shown) + kbd { opacity: 0; }
+
+/* Przełączniki w pasku świecą akcentem, gdy są włączone. */
+.btn--icon[aria-pressed="true"] {
+  background: var(--acc-22); color: var(--acc-ink); border-color: var(--acc-55);
+}
+
+/* Przełącznik języka ZOSTAJE linkiem — działa bez JS i przez proxy. */
+a.btn--icon.jezyk {
+  font: 600 11.5px/1 var(--font-mono);
+  letter-spacing: .04em; text-decoration: none;
+}
+
+/* Łapacz kliknięć popoverów. Niżej niż pasek (30), wyżej niż treść. */
+.zaslona { position: fixed; inset: 0; z-index: 25; }
+
+/* ── chipy licznikowe ─────────────────────────────────────────────────── */
+
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid transparent; border-radius: 999px;
+  background: var(--chip);
+  font: 500 12px/1 var(--font-mono); color: var(--ink2);
+  white-space: nowrap;
+}
+.kropka-chip {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-22);
+}
+
+.chip-problemy {
+  border-color: var(--edge);
+  color: var(--down-tekst);
+  cursor: pointer;
+  transition: background .2s, border-color .2s;
+}
+.chip-problemy .kropka-chip {
+  border-radius: 2px;
+  background: var(--down);
+  box-shadow: 0 0 0 3px var(--halo-down);
+}
+.chip-problemy:hover { background: rgba(229,72,77,.12); }
+.chip-problemy.wlaczony {
+  background: rgba(229,72,77,.16);
+  border-color: rgba(229,72,77,.55);
+}
+
+/* ── przełącznik widoku ───────────────────────────────────────────────── */
+
+.przelacznik-widoku {
+  display: flex; gap: 2px; flex: none;
+  padding: 3px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--field);
+}
+ /* Segmentowany przełącznik: obwódkę i tło niesie pigułka, nie dzieci —
+   dlatego jedyne miejsce, gdzie kontener nadpisuje bazę .btn. */
+.przelacznik-widoku .btn {
+  width: 34px; height: 32px;
+  border: 0; background: transparent; color: var(--ink3);
+}
+.przelacznik-widoku .btn:hover { background: transparent; color: var(--ink); }
+.przelacznik-widoku .btn[aria-selected="true"] {
+  background: var(--glass2); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--edge2), 0 2px 6px -2px rgba(0,0,0,.3);
+}
+
+/* ── menu usługi ──────────────────────────────────────────────────────── */
+
+/* Wygląd niesie .btn--primary; tu zostaje tylko to, czym ten przycisk różni
+   się od innych primary — wysokość paska i większy napis. */
+.menu-uslugi { height: 40px; padding: 0 12px; font-size: 14px; flex: none; }
+.menu-uslugi svg { width: 16px; height: 16px; }
+
+/* Popover kotwiczy się do .top (sticky = kontekst układania), nie do
+   przycisku — dzięki temu nie potrzebuje własnego wrappera w szablonie. */
+/* ! Tło KRYJĄCE, nie półprzezroczyste. Popover jest dzieckiem .top, a .top
+   ma backdrop-filter — element z backdrop-filter tworzy „backdrop root",
+   więc własny backdrop-filter potomka NIE widzi już strony pod paskiem i
+   nic nie rozmywa. Przy półprzezroczystym tle treść kart przebijała przez
+   napisy menu. Stąd --panel-krycie, ten sam token co w wariancie
+   awaryjnym @supports. Deklaracja backdrop-filter zostaje: nie szkodzi,
+   a zadziała, gdyby popover kiedyś wyszedł poza pasek. */
+.menu-panel {
+  position: absolute; top: calc(100% + 10px); right: 12px;
+  z-index: 40; width: 230px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--edge2); border-radius: 18px;
+  background: var(--panel-krycie);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--shine), var(--shadow);
+  animation: sg-pop .22s var(--ease) both;
+}
+
+/* Docker niedostępny NIE znika — blednie, żeby było widać, że istnieje. */
+.btn--menu[aria-disabled="true"] { opacity: .45; cursor: default; }
+.btn--menu[aria-disabled="true"]:hover { background: none; }
+
+.menu-skrot {
+  font: 500 11px/1 var(--font-mono); color: var(--ink3);
+  border: 1px solid var(--edge); border-radius: 5px;
+  padding: 3px 5px;
+}
+.menu-badge { font-size: 11px; color: var(--ink3); }
+
+/* ── picker tła ───────────────────────────────────────────────────────── */
+
+.picker-tla {
+  position: absolute; top: calc(100% + 10px); right: 12px;
+  z-index: 40; width: min(420px, calc(100vw - 48px));
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--edge2); border-radius: 24px;
+  /* kryjące z tego samego powodu co .menu-panel — patrz komentarz wyżej */
+  background: var(--panel-krycie);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--shine), var(--shadow);
+  animation: sg-pop .25s var(--ease) both;
+}
+
+.picker-naglowek {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.picker-naglowek > :first-child { font-weight: 600; font-size: 14px; }
+.picker-naglowek > :last-child  { font-size: 12px; color: var(--ink3); }
+
+.picker-siatka { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+
+/* Kafle niosą już bazę .btn — zostaje wyłącznie ich układ: podpis i opis
+   w jednym wierszu pod miniaturą. */
+.kafel-presetu, .kafel-tapety {
+  display: grid; grid-template-columns: 1fr auto; gap: 6px;
+  padding: 0; border: 0; background: none;
+}
+.kafel-presetu:hover, .kafel-tapety:hover { background: none; }
+.miniatura {
+  grid-column: 1 / -1;
+  display: grid; place-items: center;
+  width: 100%; aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--edge);
+  transition: box-shadow .2s;
+}
+.kafel-presetu[aria-pressed="true"] .miniatura,
+.kafel-tapety[aria-pressed="true"] .miniatura {
+  box-shadow: 0 0 0 2px var(--acc), 0 0 0 1px var(--edge);
+}
+.kafel-podpis { font-size: 12px; color: var(--ink2); padding-left: 2px; }
+.kafel-sub { font-size: 12px; color: var(--ink3); padding-right: 2px; text-align: right; }
+
+/* Miniatury presetów — PRESETS.thumb z projektu, 1:1. */
+.kafel-presetu[data-preset="aurora"] .miniatura {
+  background:
+    radial-gradient(70% 90% at 15% 20%, rgba(164,207,54,.85), transparent 70%),
+    radial-gradient(60% 80% at 85% 30%, rgba(45,212,191,.7), transparent 70%),
+    radial-gradient(80% 70% at 50% 100%, rgba(20,110,90,.8), transparent 70%),
+    #0A0F14;
+}
+.kafel-presetu[data-preset="nebula"] .miniatura {
+  background:
+    radial-gradient(70% 90% at 15% 20%, rgba(139,92,246,.8), transparent 70%),
+    radial-gradient(60% 80% at 85% 20%, rgba(236,72,153,.55), transparent 70%),
+    radial-gradient(80% 70% at 55% 100%, rgba(59,130,246,.7), transparent 70%),
+    #0C0A18;
+}
+.kafel-presetu[data-preset="graphite"] .miniatura {
+  background:
+    radial-gradient(90% 90% at 20% 0%, rgba(255,255,255,.14), transparent 70%),
+    #121316;
+}
+.kafel-presetu[data-preset="dawn"] .miniatura {
+  background:
+    radial-gradient(70% 90% at 15% 20%, rgba(255,170,130,.9), transparent 70%),
+    radial-gradient(60% 80% at 85% 20%, rgba(180,160,255,.8), transparent 70%),
+    radial-gradient(80% 70% at 55% 100%, rgba(200,232,120,.8), transparent 70%),
+    #F4EEE8;
+}
+.kafel-presetu[data-preset="fog"] .miniatura {
+  background:
+    radial-gradient(90% 90% at 10% 10%, rgba(150,195,235,.8), transparent 70%),
+    radial-gradient(80% 80% at 90% 100%, rgba(165,225,205,.8), transparent 70%),
+    #EDF1F4;
+}
+
+/* Miniaturę tapety podstawia JS przez CSSOM (setProperty), nigdy szablon.
+   Domyślne none = kafel wygląda jak pusty slot na zrzut. */
+.kafel-tapety .miniatura {
+  background-color: var(--chip);
+  background-image: var(--tlo-miniatura, none);
+  background-size: cover;
+  background-position: center;
+  color: var(--ink3);
+}
+.kafel-tapety.pusty .miniatura { border: 1px dashed var(--edge2); }
+.kafel-tapety .miniatura svg { width: 18px; height: 18px; }
+
+/* Sekcja tapety ma sens tylko wtedy, gdy tapeta jest tłem. */
+.picker-tapeta {
+  display: flex; flex-direction: column; gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--edge);
+}
+:root:not([data-preset="photo"]) .picker-tapeta { display: none; }
+
+.picker-suwak {
+  display: grid; grid-template-columns: 56px 1fr 44px;
+  align-items: center; gap: 10px;
+  font-size: 12px; color: var(--ink2);
+}
+.picker-suwak input[type="range"] { width: 100%; margin: 0; accent-color: var(--acc); }
+#wartosc-rozmycia { font: 500 12px/1 var(--font-mono); text-align: right; }
+
+/* Ton tekstu jest dostępny dla WSZYSTKICH presetów, nie tylko dla zdjęcia —
+   projekt dawał go tylko w trybie photo, u nas to stała kontrola. */
+.picker-ton {
+  display: flex; gap: 2px; width: max-content;
+  padding: 3px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--field);
+}
+.picker-ton button {
+  padding: 6px 12px;
+  border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink3);
+  font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.picker-ton button:hover { color: var(--ink); }
+.picker-ton button[aria-pressed="true"] {
+  background: var(--glass2); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--edge2);
+}
+
+.tlo-lista {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px;
+  max-height: 150px; overflow-y: auto;
+}
+.tlo-pozycja {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge); border-radius: 10px;
+  background: var(--chip);
+  font: 400 12px/1.3 var(--font-mono); color: var(--ink2);
+}
+.tlo-pozycja > :first-child {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tlo-pozycja.uzywana { border-color: var(--acc-55); color: var(--ink); }
+.picker-tip { margin: 0; font-size: 12px; color: var(--ink3); }
+
+/* ── grupy ────────────────────────────────────────────────────────────── */
+
+.grupa { display: flex; flex-direction: column; gap: 14px; }
+
+.grupa h2 {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0; padding: 0 6px;
+  font-size: 12px; font-weight: 600;
+}
+.nazwa-grupy {
+  flex: 0 0 auto;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink2);
+}
+.grupa h2::after {
+  content: ""; order: 9; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--edge2), transparent);
+}
+
+/* Akcje nagłówka grupy pokazują się dopiero w trybie edycji. Sterowane po
+   kontenerze, bo własna klasa na przycisku byłaby kolejnym idiomem. */
+.grupa h2 .btn { display: none; width: 24px; height: 24px; background: none; }
+body.edycja .grupa h2 .btn { display: inline-flex; }
+
+/* ── siatka i karty ───────────────────────────────────────────────────── */
+
+.siatka {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* Karta ma PŁASKI DOM — .glowna, .szczegoly, .karta-meta i oba zestawy akcji
+   są rodzeństwem, bo kontrakt nie przewiduje wrappera wiersza. Układ robi
+   więc grid: wiersz 1 = nazwa + stan, wiersz 2 = meta + akcje. */
+.karta {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--edge); border-radius: calc(var(--r) - 2px);
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--shine), var(--shadow);
+  transition: transform .25s var(--ease), background .25s, border-color .25s;
+  animation: sg-wejscie var(--dur) var(--ease) both;
+}
+.karta:hover {
+  transform: translateY(var(--lift));
+  background: var(--glass2);
+  border-color: var(--edge2);
+}
+.karta:focus-within {
+  border-color: var(--acc);
+  box-shadow: inset 0 1px 0 var(--shine), 0 0 0 3px var(--acc-32);
+}
+
+/* Kaskada wejścia — w projekcie liczona w JS jako inline delay, u nas
+   czysto w CSS, bo styli inline nie wolno (CSP style-src 'self'). */
+.siatka > :nth-child(1)  { animation-delay: 0ms; }
+.siatka > :nth-child(2)  { animation-delay: 35ms; }
+.siatka > :nth-child(3)  { animation-delay: 70ms; }
+.siatka > :nth-child(4)  { animation-delay: 105ms; }
+.siatka > :nth-child(5)  { animation-delay: 140ms; }
+.siatka > :nth-child(6)  { animation-delay: 175ms; }
+.siatka > :nth-child(7)  { animation-delay: 210ms; }
+.siatka > :nth-child(8)  { animation-delay: 245ms; }
+.siatka > :nth-child(9)  { animation-delay: 280ms; }
+.siatka > :nth-child(10) { animation-delay: 315ms; }
+.siatka > :nth-child(11) { animation-delay: 350ms; }
+.siatka > :nth-child(n+12) { animation-delay: 385ms; }
+
+.glowna {
+  grid-column: 1; grid-row: 1;
+  display: flex; align-items: center; gap: 12px;
+  min-width: 0;
+  text-decoration: none; color: inherit;
+}
+/* Ring siedzi na samym linku, nie na .nazwa — .nazwa ma overflow:hidden
+   i przycięłaby obwódkę przy dłuższej nazwie usługi. */
+.glowna:focus-visible {
+  outline: none;
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px var(--acc-32);
+}
+
+.ikona {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; flex: none;
+  border-radius: 12px;
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--edge);
+  overflow: hidden;
+}
+.ikona img { width: 24px; height: 24px; object-fit: contain; display: block; }
+.litera { font-weight: 600; font-size: 15px; color: var(--acc-ink); }
+
+/* ── warianty ikon na ciemny/jasny tusz ──────────────────────────────────
+   Część ikon (Dashboard Icons) ma osobną grafikę na ciemny i na jasny motyw
+   panelu — ciemny tusz ginie na ciemnym tle i odwrotnie. Oba obrazy leżą w
+   DOM-ie naraz (patrz app.js renderujIkone / index.html), tu tylko czysty
+   CSS decyduje, który się pokaże — zero JS-a i zero drugiego requestu przy
+   przełączeniu motywu. display:contents na opakowaniu, żeby <img> w środku
+   dalej liczył się jak bezpośrednie dziecko .ikona / .ikona-podglad /
+   .kafel-ikony dla reguł rozmiaru zdefiniowanych przy tamtych klasach. */
+.ikona-motyw--ciemny { display: contents; }
+.ikona-motyw--jasny { display: none; }
+:root[data-ton="light"] .ikona-motyw--ciemny { display: none; }
+:root[data-ton="light"] .ikona-motyw--jasny { display: contents; }
+
+.opis { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nazwa {
+  font-weight: 600; font-size: 15px; letter-spacing: -.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.host {
+  font: 400 12px/1.2 var(--font-mono); color: var(--ink3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Dolny pasek karty: uptime · ago. Trzyma wysokość, żeby akcje na hover
+   nie przesuwały treści. */
+.karta-meta {
+  grid-column: 1; grid-row: 2;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 26px; min-width: 0;
+  font: 400 12px/1.2 var(--font-mono); color: var(--ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.karta-meta > :first-child { color: var(--ink2); }
+
+.karta-akcje {
+  grid-column: 2; grid-row: 2; justify-self: end;
+  display: flex; gap: 6px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s;
+}
+.karta:hover .karta-akcje,
+.karta:focus-within .karta-akcje { opacity: 1; pointer-events: auto; }
+.karta-akcje svg { width: 14px; height: 14px; }
+
+.szczegoly {
+  grid-column: 2; grid-row: 1;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; margin: -6px -8px -6px 0;
+  border: 0; border-radius: 12px;
+  background: none; color: inherit; font: inherit;
+  cursor: pointer;
+  transition: background .2s;
+}
+.szczegoly:hover { background: var(--chip); }
+
+/* Kafel „Dodaj do <grupa>" — tylko w trybie edycji. */
+.kafel-dodaj {
+  display: none;
+  align-items: center; justify-content: center; gap: 8px;
+  min-height: 104px;
+  border: 1px dashed var(--edge2); border-radius: calc(var(--r) - 2px);
+  background: transparent; color: var(--ink3);
+  font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.kafel-dodaj:hover { background: var(--chip); color: var(--ink); }
+/* Wygląd kafla niesie <li>; przycisk w środku ma tylko wypełnić go klikalnie,
+   w wyśrodkowanym wierszu — kolumna z .btn--tile rozbijała ikonę i podpis. */
+.kafel-dodaj .btn {
+  width: 100%; height: 100%;
+  flex-direction: row; align-items: center; justify-content: center;
+  padding: 0; border: 0; background: none; color: inherit;
+}
+.kafel-dodaj .btn:hover { background: none; color: inherit; }
+.kafel-dodaj svg { width: 16px; height: 16px; }
+
+.pusto {
+  margin: 0; padding: 64px 0;
+  text-align: center; font-size: 15px; color: var(--ink3);
+  animation: sg-fade .3s both;
+}
+
+/* ── widok bento ──────────────────────────────────────────────────────── */
+
+/* Rozmiary działają WYŁĄCZNIE w bento — w siatce wszystkie karty są równe,
+   bo to jest cała różnica między tymi dwoma widokami. */
+body[data-widok="bento"] .siatka {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-auto-rows: 52px;
+  grid-auto-flow: dense;
+}
+body[data-widok="bento"] .karta { grid-column: span 2; grid-row: span 2; }
+body[data-widok="bento"] .kafel-dodaj { grid-column: span 2; grid-row: span 2; }
+
+/* Mały kafel to jeden wiersz: ikona, nazwa, stan. Host, meta i wykres
+   nie mieszczą się w 52 px, więc znikają — nie ściskamy ich do nieczytelności. */
+body[data-widok="bento"] .karta[data-rozmiar="sm"] {
+  grid-row: span 1;
+  gap: 10px;
+  padding: 0 14px 0 10px;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--shine);
+}
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .ikona {
+  width: 32px; height: 32px; border-radius: 10px;
+}
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .ikona img { width: 20px; height: 20px; }
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .nazwa { font-size: 14px; }
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .host,
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .karta-meta,
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .karta-akcje,
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .wykres { display: none; }
+/* Akcje edycji muszą zostać dostępne — mały kafel dostaje trzecią kolumnę,
+   żeby nie nachodziły na stan (grid nakłada elementy z tej samej komórki). */
+body.edycja[data-widok="bento"] .karta[data-rozmiar="sm"] {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+body.edycja[data-widok="bento"] .karta[data-rozmiar="sm"] .edycja-akcje {
+  grid-column: 3; grid-row: 1;
+}
+
+body[data-widok="bento"] .karta[data-rozmiar="lg"] {
+  grid-column: span 4; grid-row: span 4;
+  gap: 14px; padding: 18px 20px 16px;
+}
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .ikona {
+  width: 46px; height: 46px; border-radius: 14px;
+}
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .ikona img { width: 28px; height: 28px; }
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .nazwa {
+  font-size: 17px; letter-spacing: -.015em;
+}
+/* Duży kafel rozkłada się na trzy wiersze: nagłówek, pełnowymiarowy
+   wykres, meta — dlatego wykres dostaje całą szerokość karty. */
+body[data-widok="bento"] .karta[data-rozmiar="lg"] {
+  grid-template-rows: auto 1fr auto;
+  align-items: start;
+}
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .glowna { align-self: center; }
+/* align-self: stretch jest tu konieczne — karta ma align-items:start, więc
+   bez tego .szczegoly skurczyłoby się do wysokości tekstu i absolutny
+   wykres nie miałby czego wypełnić. */
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .szczegoly {
+  grid-column: 1 / -1; grid-row: 2;
+  position: relative; align-self: stretch; align-items: center;
+  margin: 0; min-height: 56px;
+}
+/* ! Wykres WYPADA Z PRZEPŁYWU. SVG ma viewBox 80×18, więc dopóki jest
+   zwykłym pudełkiem, przeglądarka liczy jego wysokość z proporcji (przy
+   740 px szerokości to 166 px) i rozpycha kartę o stałej wysokości —
+   raz wypychając akcje poza kartę, raz nachodząc na wiersz meta.
+   Absolutny inset:0 przykleja go dokładnie do swojego wiersza siatki. */
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .wykres {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; min-height: 0;
+}
+/* Stan zostaje w przepływie, więc maluje się nad wykresem, przy prawej —
+   dostaje pigułkę, żeby dało się go odczytać na tle słupków. */
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .stan {
+  position: relative; margin-left: auto; align-self: center;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--chip);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .karta-meta,
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .karta-akcje,
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .edycja-akcje { grid-row: 3; }
+
+/* ── widok listy ──────────────────────────────────────────────────────── */
+
+/* Ten sam DOM, inna skóra: karty stają się wierszami wspólnej tabeli.
+   Zero re-renderu i zero dublowania modelu — SSR zostaje nietknięty. */
+body[data-widok="list"] .siatka {
+  display: block;
+  border: 1px solid var(--edge); border-radius: calc(var(--r) - 2px);
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--shine), var(--shadow);
+  overflow: hidden;
+}
+body[data-widok="list"] .karta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center; gap: 14px;
+  min-height: 56px; padding: 10px 18px;
+  border: 0; border-top: 1px solid var(--edge); border-radius: 0;
+  background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: none; animation: none;
+}
+body[data-widok="list"] .karta:first-child { border-top-color: transparent; }
+body[data-widok="list"] .karta:hover { transform: none; background: var(--glass2); }
+body[data-widok="list"] .karta:focus-within {
+  box-shadow: inset 0 0 0 2px var(--acc-32); border-color: var(--edge);
+}
+/* Wiersz listy jest jednowierszowy — wszystkie dzieci wracają do rzędu 1. */
+body[data-widok="list"] .glowna,
+body[data-widok="list"] .karta-meta,
+body[data-widok="list"] .szczegoly,
+body[data-widok="list"] .karta-akcje,
+body[data-widok="list"] .edycja-akcje { grid-row: 1; }
+body[data-widok="list"] .glowna { grid-column: 1; }
+body[data-widok="list"] .karta-meta { grid-column: 2; justify-content: flex-end; min-height: 0; }
+body[data-widok="list"] .szczegoly { grid-column: 3; justify-content: flex-end; }
+body[data-widok="list"] .karta-akcje,
+body[data-widok="list"] .edycja-akcje { grid-column: 4; }
+body[data-widok="list"] .ikona { width: 34px; height: 34px; border-radius: 10px; }
+body[data-widok="list"] .ikona img { width: 20px; height: 20px; }
+body[data-widok="list"] .nazwa { font-size: 14px; }
+body[data-widok="list"] .kafel-dodaj { display: none !important; }
+
+/* ── stan usługi ──────────────────────────────────────────────────────── */
+
+/* Kolory TEKSTU statusu są oddzielne od kolorów grafiki. Kropki, słupki
+   wykresu i obwódki zostają przy czystych --degraded/--down (to grafika,
+   próg 3:1), ale etykieta jest tekstem: w tonie jasnym #E8A33D daje 1,9:1,
+   a #FF7B7F 2,1:1 — oba zaprojektowane pod ciemne tło. */
+:root {
+  --degraded-ink: var(--degraded);
+  --down-tekst:   var(--down-ink);
+}
+:root[data-ton="light"] {
+  --degraded-ink: #8A5A00;
+  --down-tekst:   #B3161C;
+  --down-obwodka: rgba(179,22,28,.38);
+}
+
+.stan {
+  display: flex; align-items: center; gap: 7px; flex: none;
+  font: 500 12px/1 var(--font-mono); color: var(--ink2);
+}
+.stan .etykieta { min-width: 42px; text-align: right; }
+
+/* Kształt niesie znaczenie razem z kolorem — dla daltonistów sam kolor to
+   za mało. up = koło, degraded = romb, down = kwadrat, unknown = pierścień. */
+.kropka {
+  width: 9px; height: 9px; flex: none;
+  border-radius: 50%;
+  background: var(--unknown);
+  box-shadow: 0 0 0 3px transparent;
+  transition: background var(--przejscie), box-shadow var(--przejscie);
+}
+[data-stan="up"] .kropka {
+  background: var(--up);
+  box-shadow: 0 0 0 3px var(--halo-up);
+}
+[data-stan="degraded"] .kropka {
+  background: var(--degraded); border-radius: 2px; transform: rotate(45deg);
+  box-shadow: 0 0 0 3px var(--halo-degraded);
+}
+[data-stan="down"] .kropka {
+  background: var(--down); border-radius: 2px;
+  box-shadow: 0 0 0 3px var(--halo-down);
+  animation: sg-puls 2.4s ease-in-out infinite;
+}
+[data-stan="unknown"] .kropka {
+  background: transparent; border: 1.5px solid var(--unknown); box-shadow: none;
+}
+[data-stan="down"] .etykieta { color: var(--down-tekst); }
+[data-stan="degraded"] .etykieta { color: var(--degraded-ink); }
+
+/* ── wykresy ──────────────────────────────────────────────────────────── */
+
+/* Trzy ścieżki, jedna na stan, w kolejności up / degraded / down — tak je
+   wypełnia szablon i tak rysuje je JS. Kolor bierze CSS, nie atrybut. */
+.wykres { width: 60px; height: 18px; flex: none; display: block; }
+.wykres path:nth-child(1), .wykres-duzy path:nth-child(1) { fill: var(--acc-bar); }
+.wykres path:nth-child(2), .wykres-duzy path:nth-child(2) { fill: var(--spark-degraded); }
+.wykres path:nth-child(3), .wykres-duzy path:nth-child(3) { fill: var(--spark-down); }
+
+.wykres-duzy {
+  width: 100%; height: 96px; display: block;
+  padding: 12px;
+  border: 1px solid var(--edge); border-radius: 16px;
+  background: var(--chip);
+}
+
+/* Przezroczysta nakładka niosąca <title> per próbka — jedyne miejsce,
+   gdzie użytkownik widzi powód bez otwierania szczegółów. */
+.detale-slupek { fill: transparent; }
+.detale-slupek:hover { fill: var(--shine); }
+
+#dodaj-grupe { align-self: flex-start; font-weight: 500; }
+
+/* Obwódka klawiaturowa — NIGDY outline:none bez zamiennika. Kontrolki
+   dostają ring na :focus-visible, pola tekstowe na zwykłym :focus. */
+.przycisk:focus-visible,
+.ikonka:focus-visible,
+.menu-uslugi:focus-visible,
+.menu-pozycja:focus-visible,
+/* Fokus niesie baza .btn. Zostają komponenty, które bazą nie są. */
+.szczegoly:focus-visible,
+.chip-problemy:focus-visible,
+.skip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--acc-32);
+  border-radius: 999px;
+}
+.szczegoly:focus-visible { border-radius: 12px; }
+/* Promień pierścienia musi iść za kształtem wariantu, inaczej wokół kafla
+   rysuje się pigułka. */
+.btn--tile:focus-visible { border-radius: 14px; }
+.btn--menu:focus-visible { border-radius: 12px; }
+
+/* ── tryb edycji ──────────────────────────────────────────────────────── */
+
+.edycja-akcje {
+  grid-column: 2; grid-row: 2; justify-self: end;
+  display: none; gap: 6px;
+}
+body.edycja .edycja-akcje { display: flex; }
+body.edycja .kafel-dodaj { display: flex; animation: sg-fade .2s both; }
+/* W trybie edycji rządzą akcje edycji — hover-owe chowamy, żeby się nie biły. */
+body.edycja .karta-akcje { display: none; }
+
+.edycja-akcje svg, .karta-akcje svg { width: 14px; height: 14px; }
+
+/* ── okna dialogowe ───────────────────────────────────────────────────── */
+
+dialog {
+  width: min(560px, 94vw);
+  max-height: calc(100dvh - 40px);
+  /* Bez tego okno ustawień (konta + hasło + powiadomienia + historia +
+     surowy YAML) urywa się na dole — natywny <dialog> sam nie przewija. */
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--edge2); border-radius: 28px;
+  background: var(--panel); color: var(--ink);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--shine), 0 40px 100px -30px rgba(0,0,0,.7);
+}
+dialog[open] { animation: sg-pop .3s var(--ease) both; }
+dialog::backdrop {
+  background: var(--scrim);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+dialog form, dialog .tresc-okna { padding: 24px; display: grid; gap: 16px; }
+dialog h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+dialog h4 {
+  margin: 0 0 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink2);
+}
+dialog section { border-top: 1px solid var(--edge); padding-top: 16px; }
+dialog menu {
+  display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+  margin: 4px 0 0; padding: 0;
+}
+
+/* Okno ustawień ma pięć sekcji i pole z całym YAML-em — „Zamknij" lądowało
+   kilka ekranów niżej, w oderwaniu od reszty. Przyklejamy stopkę do dołu;
+   krycie musi być pełne, bo pod spodem przewija się tekst. */
+#okno-ustawien menu {
+  position: sticky; bottom: 0; z-index: 1;
+  margin: 8px -24px -24px; padding: 14px 24px;
+  background: var(--panel-krycie);
+  border-top: 1px solid var(--edge);
+}
+/* zapas, żeby ostatni wiersz sekcji nie kończył się tuż pod przyklejoną stopką */
+#okno-ustawien section:last-of-type { padding-bottom: 6px; }
+
+dialog label { display: grid; gap: 5px; font-size: 13px; }
+dialog label > span { color: var(--ink2); }
+dialog label.checkbox { grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
+
+dialog input[type="text"], dialog input:not([type]), dialog input[type="url"],
+dialog input[type="search"], dialog input[type="password"],
+dialog input[type="number"],
+dialog select, dialog textarea {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--field); color: var(--ink);
+  font: inherit; font-size: 14px;
+}
+dialog textarea {
+  font: 12.5px/1.55 var(--font-mono);
+  resize: vertical; min-height: 180px;
+}
+dialog input:focus, dialog select:focus, dialog textarea:focus {
+  outline: none;
+  border-color: var(--acc-55);
+  box-shadow: 0 0 0 3px var(--acc-32);
+}
+/* ! Rozwijana lista <select> to widget rysowany przez system, nie przez nas.
+   Na Linuksie Chrome bierze do niej motyw GTK i ignoruje color-scheme strony —
+   w ciemnym oknie wyskakiwał jasny popup. Jedyne, co przeglądarki tu
+   respektują, to jawne tło i kolor na <option>. */
+select option {
+  background: var(--panel-krycie);
+  color: var(--ink);
+}
+select option:checked { background: var(--chip); }
+
+dialog input[type="range"] { accent-color: var(--acc); }
+dialog input[type="checkbox"] { accent-color: var(--acc); }
+
+.dwie-kolumny { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.zaawansowane summary {
+  cursor: pointer; color: var(--ink2); font-size: 13px; padding: 4px 0;
+}
+.zaawansowane summary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
+.zaawansowane[open] { display: grid; gap: 10px; }
+
+.blad-okna {
+  margin: 0; padding: 10px 12px;
+  border: 1px solid rgba(229,72,77,.35); border-radius: var(--r-duza);
+  background: rgba(229,72,77,.14); color: var(--down-tekst);
+  font-size: 13px;
+}
+/* Sukces ma własny wariant — dotąd nadużywana była .blad-okna. */
+.ok-okna {
+  margin: 0; padding: 10px 12px;
+  border: 1px solid var(--acc-55); border-radius: var(--r-duza);
+  background: var(--acc-12); color: var(--acc-ink);
+  font-size: 13px;
+}
+.drobne { margin: 0; font-size: 12.5px; color: var(--ink3); }
+
+/* Segment rozmiaru kafla w edytorze usługi. */
+.pole-rozmiaru {
+  display: flex; gap: 2px; width: max-content;
+  padding: 3px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--field);
+}
+.pole-rozmiaru button {
+  padding: 6px 14px;
+  border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink3);
+  font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.pole-rozmiaru button:hover { color: var(--ink); }
+.pole-rozmiaru button[aria-pressed="true"] {
+  background: var(--glass2); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--edge2);
+}
+.pole-rozmiaru button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
+
+/* ── wybierak ikon ────────────────────────────────────────────────────── */
+
+.pole-ikony {
+  display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center;
+}
+.etykieta-pola { grid-column: 1 / -1; font-size: 13px; color: var(--ink2); }
+.ikona-podglad {
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  border: 1px solid var(--edge); border-radius: 12px;
+  background: var(--chip);
+}
+.ikona-podglad img { width: 28px; height: 28px; object-fit: contain; }
+
+.siatka-ikon {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 6px; max-height: 190px; overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--field);
+}
+.kafel-ikony {
+  display: grid; place-items: center;
+  aspect-ratio: 1; padding: 6px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: transparent; cursor: pointer;
+  transition: background .2s, border-color .2s;
+}
+.kafel-ikony:hover { background: var(--chip); }
+.kafel-ikony[aria-pressed="true"] { border-color: var(--acc); background: var(--acc-12); }
+.kafel-ikony img { width: 24px; height: 24px; object-fit: contain; }
+
+/* ── konta ────────────────────────────────────────────────────────────── */
+
+.lista-kont { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.lista-kont li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--chip);
+  font-size: 13.5px;
+}
+.lista-kont button {
+  padding: 0; border: 0; background: none;
+  color: var(--ink3); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+/* ! po samym `button.grozna` nie wystarczy — `.lista-kont button` ma tę samą
+   wagę i stoi niżej w pliku, więc kasowanie konta wyglądało na neutralne */
+.lista-kont button.grozna { color: var(--down-tekst); }
+.lista-kont button:hover { color: var(--down-tekst); }
+.lista-kont button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
+
+.wiersz-formy { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.wiersz-formy input { flex: 1; min-width: 120px; }
+
+/* ── wygląd i mini-dialogi ────────────────────────────────────────────── */
+
+/* Zastępują prompt() i confirm() — natywne okna przeglądarki nie dają się
+   ostylować, a w szkle wyglądały jak wyrwa. */
+#okno-nazwy, #okno-potwierdzenia { width: min(380px, 94vw); }
+#pole-nazwy { width: 100%; }
+#blad-nazwy {
+  margin: 0; font-size: 12.5px; color: var(--down-tekst);
+}
+#tekst-potwierdzenia { margin: 0; font-size: 14px; color: var(--ink2); }
+#potwierdz-tak {
+  background: var(--down); color: #FFFFFF;
+  border-color: transparent; box-shadow: none;
+}
+#potwierdz-tak:hover { filter: brightness(1.08); }
+
+/* ── podgląd zmiany ───────────────────────────────────────────────────── */
+
+#okno-diff { width: min(760px, 94vw); }
+
+/* Kolory tekstu diffa są ODDZIELNE od kolorów statusu. --down-ink (#FF7B7F)
+   jest zaprojektowany na ciemne tło i na jasnej pigułce diffa daje 2,0:1,
+   a --acc-ink 3,8:1 — obie poniżej progu. Diff to miejsce, w którym
+   użytkownik zatwierdza zmianę pliku, więc musi być czytelny w obu tonach. */
+.diff, .licznik-diff {
+  --diff-plus:  var(--acc-ink);
+  --diff-minus: var(--down-ink);
+}
+:root[data-ton="light"] .diff,
+:root[data-ton="light"] .licznik-diff {
+  --diff-plus:  #46610F;
+  --diff-minus: #A5141A;
+}
+
+.licznik-diff { margin: 0; font: 12px/1 var(--font-mono); color: var(--ink2); }
+.licznik-diff b.plus { color: var(--diff-plus); }
+.licznik-diff b.minus { color: var(--diff-minus); }
+
+.diff {
+  margin: 0; padding: 12px 14px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--field);
+  font: 12.5px/1.6 var(--font-mono);
+  white-space: pre; overflow: auto; max-height: 46vh;
+}
+.diff .plus  { display: block; color: var(--diff-plus); background: var(--acc-12); }
+.diff .minus { display: block; color: var(--diff-minus); background: rgba(229,72,77,.12); }
+/* bez opacity — .75 na --ink3 schodziło do 3,0:1 */
+.diff .hunk  { display: block; margin-top: 6px; color: var(--ink2); }
+.diff .ctx   { display: block; }
+
+/* ── historia zmian ───────────────────────────────────────────────────── */
+
+.lista-wersji {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px; max-height: 220px; overflow-y: auto;
+}
+.lista-wersji li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--chip);
+  font-size: 13px;
+}
+.lista-wersji .kiedy {
+  flex: 0 0 auto; font: 11px/1 var(--font-mono); color: var(--ink3);
+}
+.lista-wersji .co {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lista-wersji .zmiany {
+  flex: 0 0 auto; font: 11px/1 var(--font-mono); color: var(--ink3);
+}
+.lista-wersji button {
+  padding: 0; border: 0; background: none;
+  color: var(--ink3); font: inherit; font-size: 12px; cursor: pointer;
+}
+.lista-wersji button:hover { color: var(--ink); }
+.lista-wersji button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
+#git-info { color: var(--acc-ink); }
+
+/* ── okno szczegółów ──────────────────────────────────────────────────── */
+
+#okno-detali { width: min(780px, 94vw); }
+
+.detale-naglowek { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.detale-naglowek .ikona { width: 48px; height: 48px; border-radius: 14px; }
+.detale-naglowek .ikona img { width: 28px; height: 28px; }
+.detale-naglowek > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.detale-naglowek h3 { margin: 0; font-size: 20px; line-height: 1.2; }
+.detale-naglowek .stan {
+  margin-left: auto;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--edge); border-radius: 999px;
+  background: var(--chip);
+}
+.detale-url {
+  font: 400 12.5px/1.3 var(--font-mono); color: var(--ink3);
+  text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detale-url:hover { color: var(--acc-ink); }
+
+.staty { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
+.staty .kafel {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--edge); border-radius: 16px;
+  background: var(--chip);
+}
+.staty .kafel .etykieta-staty {
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink3); white-space: nowrap;
+}
+.staty .kafel b {
+  font: 500 20px/1.1 var(--font-mono); letter-spacing: -.02em; color: var(--ink);
+}
+.staty .kafel .jednostka { font-size: 12px; color: var(--ink3); font-weight: 400; }
+
+.lista-zmian {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px; max-height: 170px; overflow-y: auto;
+}
+.lista-zmian li {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0;
+  padding: 9px 12px;
+  border-left: 2px solid var(--edge2); border-radius: 0 12px 12px 0;
+  background: var(--chip);
+  font-size: 13px;
+}
+.lista-zmian li[data-na="up"] { border-left-color: var(--up); }
+.lista-zmian li[data-na="degraded"] { border-left-color: var(--degraded); }
+.lista-zmian li[data-na="down"] { border-left-color: var(--down); }
+.lista-zmian .kiedy {
+  flex: none; width: 44px; font: 400 12px/1 var(--font-mono); color: var(--ink3);
+}
+.lista-zmian .powod {
+  min-width: 0; font: 400 12px/1.3 var(--font-mono); color: var(--ink3);
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── podpowiadanie z Dockera ──────────────────────────────────────────── */
+
+#okno-docker { width: min(680px, 94vw); }
+
+.lista-kandydatow {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px; max-height: 46vh; overflow-y: auto;
+}
+.lista-kandydatow li {
+  display: grid; grid-template-columns: auto auto 1fr auto;
+  align-items: center; gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--chip);
+}
+.lista-kandydatow li.znana { opacity: .5; }
+.lista-kandydatow img { width: 22px; height: 22px; object-fit: contain; }
+.lista-kandydatow input[type="checkbox"] { accent-color: var(--acc); }
+.lista-kandydatow .nazwa-k { font-weight: 600; font-size: 14px; }
+.lista-kandydatow .adres {
+  display: block;
+  font: 11px/1.4 var(--font-mono); color: var(--ink3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lista-kandydatow .powod { font-size: 11px; color: var(--ink3); text-align: right; }
+
+.do-grupy { display: flex; align-items: center; gap: 8px; }
+.do-grupy select { width: auto; }
+
+/* ── toast ────────────────────────────────────────────────────────────── */
+
+.komunikat {
+  position: fixed; left: 50%; bottom: 28px; z-index: 70;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 40px);
+  padding: 10px 16px;
+  border: 1px solid var(--edge2); border-radius: 999px;
+  background: var(--panel); color: var(--ink);
+  font-size: 13px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow);
+  animation: sg-pop .25s var(--ease) both;
+}
+.komunikat.ostrzezenie { border-color: rgba(232,163,61,.55); }
+
+/* ── stopka ───────────────────────────────────────────────────────────── */
+
+.stopka {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 40px; padding: 8px 8px 0;
+  font-size: 12px; color: var(--ink2);
+}
+.kropka-sep { opacity: .5; }
+
+.polaczenie { display: inline-flex; align-items: center; gap: 6px; }
+.polaczenie::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--acc);
+}
+.polaczenie.zerwane { color: var(--down-tekst); }
+.polaczenie.zerwane::before { background: var(--down); }
+/* Zerwany strumień wygasza liczniki — pokazują stan sprzed chwili. */
+.polaczenie.zerwane ~ .chip, body:has(.polaczenie.zerwane) .chip { opacity: .55; }
+
+.skroty {
+  margin-left: auto;
+  font: 400 11px/1 var(--font-mono); letter-spacing: .02em; color: var(--ink2);
+}
+
+.wyloguj { display: inline; }
+.stopka .skroty + .wyloguj { margin-left: 0; }
+.wyloguj .btn {
+  padding: 0; border: 0; background: none;
+  color: var(--ink2); font-size: 12px; font-weight: 400;
+  text-decoration: underline;
+}
+.wyloguj .btn:hover { background: none; color: var(--ink); }
+
+/* ── ekran logowania ──────────────────────────────────────────────────── */
+
+body.brama {
+  display: grid; place-items: center;
+  min-height: 100dvh; padding: 24px;
+}
+.brama-karta {
+  position: relative; z-index: 1;
+  width: min(380px, 100%);
+  display: grid; gap: 12px; justify-items: center;
+  padding: 32px 28px;
+  border: 1px solid var(--edge2); border-radius: 28px;
+  background: var(--panel);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--shine), 0 40px 100px -30px rgba(0,0,0,.7);
+  text-align: center;
+  animation: sg-pop .35s var(--ease) both;
+}
+.brama-karta h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.brama-opis { margin: 0 0 6px; color: var(--ink2); font-size: 13.5px; }
+.brama-karta form { display: grid; gap: 12px; width: 100%; text-align: left; }
+.brama-karta label { display: grid; gap: 5px; font-size: 13px; }
+.brama-karta label > span { color: var(--ink2); }
+.brama-karta input {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--field); color: var(--ink);
+  font: inherit; font-size: 14px;
+}
+.brama-karta input:focus {
+  outline: none;
+  border-color: var(--acc-55);
+  box-shadow: 0 0 0 3px var(--acc-32);
+}
+.brama-karta button[type="submit"] {
+  width: 100%; margin-top: 4px; padding: 12px 14px;
+  border: 0; border-radius: 999px;
+  background: var(--acc); color: var(--acc-fg);
+  font: inherit; font-weight: 600; font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -12px var(--acc-80);
+  transition: filter .2s;
+}
+.brama-karta button[type="submit"]:hover { filter: brightness(1.05); }
+.brama-karta button[type="submit"]:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--acc-32);
+}
+.brama-blad {
+  width: 100%; margin: 0; padding: 10px 12px;
+  border: 1px solid rgba(229,72,77,.35); border-radius: var(--r-duza);
+  background: rgba(229,72,77,.14); color: var(--down-tekst);
+  font-size: 13px;
+}
+.brama-podpowiedz { margin: -4px 0 0; font-size: 12px; color: var(--ink3); }
+.brama-stopka { margin: 8px 0 0; font-size: 11.5px; color: var(--ink3); }
+.brama-jezyk { margin: 2px 0 0; }
+.brama-jezyk a { color: var(--ink3); font-size: 12.5px; text-decoration: underline; }
+.brama-jezyk a:hover { color: var(--ink); }
+
+/* ── maskotka ─────────────────────────────────────────────────────────── */
+
+/* Rastrowa, więc pilnujemy ostrości przy skalowaniu w dół. */
+.logo {
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.3));
+}
+.brama-karta .logo { margin-bottom: 2px; }
+
+/* ── responsywność ────────────────────────────────────────────────────── */
+
+/* Progi 640 i 1040 są w projekcie liczone w JS (resize + ResizeObserver +
+   interwał 1 s). U nas robi to CSS — układ nie może zależeć od skryptu. */
+
+@media (max-width: 639.98px) {
+  body { padding-bottom: 48px; }
+
+  .top { gap: 10px; padding: 10px 12px; border-radius: 22px; }
+  .brand { width: 100%; margin-right: 0; }
+  .search { flex: 1 1 100%; max-width: none; order: 3; }
+  .tools { width: 100%; justify-content: flex-end; order: 4; flex-wrap: wrap; }
+
+  .menu-panel, .picker-tla { right: 0; left: 0; width: auto; margin: 0 auto; }
+  .picker-siatka { grid-template-columns: repeat(2, 1fr); }
+
+  .siatka { grid-template-columns: 1fr; }
+
+  /* Bento na wąskim ekranie: duża karta zajmuje pełną szerokość siatki. */
+  body[data-widok="bento"] .siatka { grid-template-columns: repeat(2, 1fr); }
+  body[data-widok="bento"] .karta[data-rozmiar="lg"] { grid-column: span 2; grid-row: span 5; }
+
+  /* Wiersz listy: nazwa + stan + akcje. Kolumna akcji jest zadeklarowana
+     wprost, żeby nie powstawała kolumna domyślna poza szablonem siatki. */
+  body[data-widok="list"] .karta { grid-template-columns: minmax(0, 1fr) auto auto; }
+  body[data-widok="list"] .szczegoly { grid-column: 2; }
+  body[data-widok="list"] .karta-akcje,
+  body[data-widok="list"] .edycja-akcje { grid-column: 3; grid-row: 1; }
+  body[data-widok="list"] .karta { padding: 10px 12px; gap: 10px; }
+
+  .skroty { display: none; }
+  .stopka { margin-top: 28px; }
+  .wyloguj { margin-left: auto; }
+}
+
+/* Kolumny host / wykres / uptime / akcje pojawiają się dopiero, gdy jest
+   dla nich miejsce — poniżej 1040 wiersz listy zostaje przy nazwie i stanie. */
+@media (max-width: 1039.98px) {
+  body[data-widok="list"] .karta { grid-template-columns: minmax(0, 1fr) auto auto; }
+  body[data-widok="list"] .szczegoly { grid-column: 2; }
+  body[data-widok="list"] .karta-akcje,
+  body[data-widok="list"] .edycja-akcje { grid-column: 3; }
+  body[data-widok="list"] .karta-meta,
+  body[data-widok="list"] .wykres { display: none; }
+}
+
+@media (min-width: 1040px) {
+  body[data-widok="list"] .karta {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto auto;
+  }
+  body[data-widok="list"] .wykres { width: 80px; }
+}
+
+/* Ekran dotykowy nie ma hovera — akcje muszą być widoczne od razu,
+   inaczej na tablecie w kuchni nie da się ich dosięgnąć. */
+@media (hover: none) {
+  .karta-akcje { opacity: 1; pointer-events: auto; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   System .btn (Faza 2 / Task 7) — jedna baza, zamknięty zestaw wariantów.
+   TYLKO DODAJE: żaden z trzynastu dzisiejszych idiomów (.przycisk, .ikonka,
+   .grupa-akcja, .karta-akcje > *, .edycja-akcje button, .menu-pozycja,
+   .kafel-presetu/-tapety, .picker-*, button.cichy/.grozna, .wyloguj button,
+   bezklasowy submit) wyżej w pliku nie zmienia się ani nie znika — kasowanie
+   i podpięcie w szablonach to Task 8, robione osobnym commitem celowo, żeby
+   dało się odrzucić jedno bez drugiego.
+
+   Tokeny (--btn-bg/-bg-hover/-edge/-ink/-radius/-ease w :root, patrz wyżej)
+   to ALIASY na już istniejące zmienne (--chip, --glass2, --edge, --ink2) —
+   dokładnie te, których dzisiejsze .ikonka/.przycisk już używają. Canvas
+   Shy-Garlic-Glass.dc.html rysuje styl w atrybutach style=, nie w klasach,
+   i tylko dwa ekrany („Homelab panel", „Service details") — poniższe reguły
+   to ta sama para wartości co dzisiejsze .przycisk/.ikonka/.menu-pozycja/
+   .kafel-presetu (już raz wyprowadzone z tego samego canvasu, patrz nagłówek
+   pliku), plus warianty, których canvas nigdy nie narysował (disabled,
+   .btn--lg) — te są oznaczone niżej wprost jako wyprowadzone przez analogię,
+   nie z rysunku. */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 40px; padding: 0 16px;
+  border: 1px solid var(--btn-edge);
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  color: var(--btn-ink);
+  font: 500 13.5px/1 var(--font-sans);
+  /* Baza siedzi też na <a> (język w pasku, „otwórz" na karcie i w
+     szczegółach) — bez tego link dostaje podkreślenie od przeglądarki i
+     wygląda jak obcy element między dwoma przyciskami. */
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--btn-ease), color var(--btn-ease),
+              border-color var(--btn-ease), transform var(--btn-ease),
+              filter var(--btn-ease), box-shadow var(--btn-ease);
+}
+.btn:hover { background: var(--btn-bg-hover); color: var(--ink); }
+/* Ring jak wszędzie indziej w pliku (.przycisk:focus-visible i cała reszta
+   mega-selektora niżej w sekcji „przyciski") — jeden pierścień, akcentowy,
+   niezależnie od wariantu, żeby fokus był spójny. */
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--acc-32);
+}
+/* Canvas nie rysuje ani jednego disabled — nic w dwóch zaprojektowanych
+   ekranach nigdy nie jest wyłączone. Nieprzezroczystość .45 nie jest więc
+   z rysunku: to jedyny istniejący w pliku precedens wyblakłego/nieaktywnego
+   stanu, .menu-pozycja[aria-disabled="true"] (Docker niedostępny — blednie,
+   zamiast znikać, patrz komentarz przy tamtej regule). Powtarzam tę samą
+   wartość zamiast wymyślać nową. */
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--btn-bg); color: var(--btn-ink); }
+.btn svg { width: 15px; height: 15px; flex: none; }
+
+/* Stany toggle/tab na atrybutach ARIA, nie na klasach — atrybut i tak musi
+   być ustawiony dla czytnika ekranu, a druga równoległa prawda w postaci
+   klasy .wybrany dziś się z nim rozjeżdża (patrz System przycisków w specu).
+   Canvas ma DWA różne wizualne "włączone", więc dwie osobne reguły:
+   aria-pressed = tint akcentowy (edit/tło w pasku — .ikonka[aria-pressed]),
+   aria-selected = szkło + pierścień (przełącznik widoku — seg() z canvasu). */
+.btn[aria-pressed="true"] {
+  background: var(--acc-22); color: var(--acc-ink); border-color: var(--acc-55);
+}
+.btn[aria-selected="true"] {
+  background: var(--btn-bg-hover); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--edge2), 0 2px 6px -2px rgba(0,0,0,.3);
+}
+
+/* ── primary — dzisiejsze .przycisk / canvas: przycisk "Service" (menu
+   akcji, linia z onClick={{ toggleMenu }}) i "Check now" w Service details.
+   bg/kolor tekstu/cień to dosłownie var(--acc)/var(--acc-fg)/var(--acc-80)
+   z canvasu (accent-fg dobrany po luminancji, --acc-80 = "cień przycisku
+   akcentowego" — już tak nazwany w tokenach na górze pliku). ── */
+.btn--primary {
+  border-color: transparent;
+  background: var(--acc); color: var(--acc-fg);
+  font-weight: 600;
+  box-shadow: 0 10px 24px -12px var(--acc-80);
+}
+.btn--primary:hover {
+  background: var(--acc); color: var(--acc-fg);
+  transform: translateY(-1px); filter: brightness(1.05);
+}
+.btn--primary:disabled { box-shadow: none; transform: none; filter: none; }
+
+/* ── quiet — dzisiejsze .przycisk.cichy / .cichy: ten sam kształt co primary
+   (pigułka), ale szklana. Krawędź --edge2 (mocniejsza niż baza .btn) i pełny
+   --ink zamiast --ink2 to dosłowne różnice z .przycisk.cichy wobec .btn. ── */
+.btn--quiet {
+  border-color: var(--edge2);
+  color: var(--ink);
+}
+.btn--quiet:hover { background: var(--btn-bg-hover); color: var(--ink); }
+
+/* ── danger — scala dwa dzisiejsze idiomy grozna: pigułkę (.przycisk.grozna,
+   krawędź czerwona już w spoczynku, tło czerwienieje na hover) i akcję-ikonę
+   (.grupa-akcja.grozna / .edycja-akcje button.grozna — czerwień pojawia się
+   DOPIERO na hover, w canvasie linie z onClick={{ s.del }}/{{ soonDelete }}
+   i style-hover="color:#FF7B7F;border-color:rgba(229,72,77,.6)"). Jeden
+   wariant robi oba: delikatna czerwona krawędź od razu, pełna czerwień
+   (tło + tekst + krawędź) na hover — Task 8 dostaje jedną klasę zamiast
+   dwóch zachowań do wyboru. ── */
+.btn--danger { border-color: var(--down-obwodka, rgba(229,72,77,.35)); }
+.btn--danger:hover {
+  background: rgba(229,72,77,.16);
+  color: var(--down-tekst);
+  border-color: rgba(229,72,77,.6);
+}
+
+/* ── icon — dzisiejsze .ikonka (38×38, kółko) scalone z .karta-akcje > *
+   i .grupa-akcja (mniejsze kwadratowe akcje w wierszu karty). Canvas ma tu
+   NIESPÓJNE promienie między kontekstami (999px / 9px / 7px) — normalizuję
+   na jeden kształt (koło, przez --btn-radius) i różnicuję tylko rozmiarem
+   przez .btn--sm, zamiast dorzucać trzeci token promienia. ── */
+.btn--icon { width: 38px; height: 38px; padding: 0; flex: none; }
+.btn--icon svg { width: 16px; height: 16px; }
+
+/* ── tile — dzisiejsze .kafel-presetu / .kafel-tapety (siatka presetów tła
+   w pickerze). W canvasie i w dzisiejszym CSS ten "przycisk" nie ma własnego
+   tła/krawędzi wcale — cały chrom niesie miniatura w środku, więc wariant
+   zdejmuje geometrię pigułki z bazy .btn zamiast ją zachowywać. ── */
+.btn--tile {
+  flex-direction: column; align-items: stretch; justify-content: flex-start;
+  height: auto; width: 100%; padding: 0;
+  border: 0; border-radius: 0;
+  background: none;
+  text-align: left; gap: 6px;
+}
+.btn--tile:hover { background: none; color: var(--btn-ink); }
+
+/* ── menu — dzisiejsze .menu-pozycja (pozycje w rozwijanym menu "Service").
+   Promień 12px jest dosłowny z canvasu i w dzisiejszym CSS też jest literałem
+   (nie tokenem) — nie dodaję dla niego zmiennej. Hover na --chip, NIE na
+   --btn-bg-hover: pozycja menu siedzi już na nieprzezroczystym tle popovera,
+   więc kontrast --glass2 byłby tu za mocny wobec tego, co widać w canvasie. ── */
+.btn--menu {
+  width: 100%; justify-content: space-between;
+  height: auto; padding: 9px 12px;
+  border: 0; border-radius: 12px;
+  background: none; color: var(--ink);
+  font-size: 13.5px; text-align: left;
+}
+.btn--menu:hover { background: var(--chip); color: var(--ink); }
+
+/* ── rozmiary — .btn--sm to dosłownie dzisiejsze .przycisk.maly; .btn--lg
+   nie istnieje ani w canvasie, ani dziś w pliku (nic w dwóch zaprojektowanych
+   ekranach nie jest większe od .przycisk). Wyprowadzony przez analogię: ten
+   sam krok, odwrotny kierunek (baza→sm = -10px wysokości/-4px paddingu/
+   -1px fontu, więc baza→lg = +10px/+4px/+1px), żeby zachować proporcję,
+   o którą prosi zadanie, bez zgadywania wartości znikąd. ── */
+.btn--sm { height: 30px; padding: 0 12px; font-size: 12.5px; font-weight: 500; }
+.btn--sm.btn--icon { width: 28px; height: 28px; padding: 0; }
+.btn--sm svg { width: 13px; height: 13px; }
+.btn--lg { height: 50px; padding: 0 20px; font-size: 14.5px; }
+
+/* ── ustawienia: zakładki ─────────────────────────────────────────────── */
+
+.zakladki {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin: -4px 0 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--edge);
+}
+.okno-ustawien section { display: flex; flex-direction: column; gap: 10px; }
+.okno-ustawien section h4:not(:first-child) { margin-top: 6px; }
+
+.pole-formy { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink2); }
+.pole-formy input { width: 100%; }
+.pole-formy input[type="number"] { width: 5.5rem; }
+.pole-formy input:disabled { opacity: .55; cursor: not-allowed; }
+
+.tabela-instancji { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tabela-instancji th {
+  text-align: left; padding: 5px 8px 5px 0;
+  font-weight: 600; color: var(--ink3);
+  border-bottom: 1px solid var(--edge);
+}
+.tabela-instancji td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--edge); vertical-align: top; }
+.instancja-klucz { font-family: var(--font-mono); color: var(--ink); white-space: nowrap; }
+.instancja-wartosc { font-family: var(--font-mono); color: var(--ink2); word-break: break-all; }
+.instancja-zrodlo { color: var(--ink3); white-space: nowrap; }
+
+/* Kafel niesie zaznaczenie pierścieniem wokół miniatury — tło z bazy .btn
+   podświetlałoby jeszcze podpis, przez co wybrany kafel wyglądał na wyższy. */
+.btn--tile[aria-pressed="true"] { background: none; }
+
+/* ── edytor pliku ─────────────────────────────────────────────────────────
+   Kolory rysuje <pre> LEŻĄCY POD przezroczystym <textarea>. Cała sztuczka
+   stoi na tym, że obie warstwy mają identyczną typografię, padding i
+   zawijanie — rozjazd choćby o pół piksela i tekst zaczyna pływać nad
+   kolorami. Dlatego wspólne wartości siedzą w zmiennych. */
+
+.naglowek-edytora {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.naglowek-edytora .drobne { margin: 0; }
+
+.edytor-yaml {
+  --ed-font: 12.5px/1.55 var(--font-mono);
+  --ed-padding: 10px 12px;
+  position: relative;
+  border: 1px solid var(--edge); border-radius: var(--r-duza);
+  background: var(--field);
+  overflow: hidden;
+}
+.edytor-yaml:focus-within { border-color: var(--acc-55); }
+
+.edytor-yaml .podswietlenie,
+.edytor-yaml textarea {
+  margin: 0;
+  padding: var(--ed-padding);
+  font: var(--ed-font);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  tab-size: 2;
+  border: 0;
+  min-height: 260px;
+}
+
+.edytor-yaml .podswietlenie {
+  position: absolute; inset: 0;
+  overflow: auto;
+  pointer-events: none;
+  color: var(--ink2);
+}
+.edytor-yaml .podswietlenie code { font: inherit; background: none; padding: 0; }
+
+.edytor-yaml textarea {
+  position: relative;
+  display: block; width: 100%;
+  resize: vertical;
+  background: transparent;
+  /* Tekst niewidoczny — widać go przez warstwę kolorów pod spodem. Kursor i
+     zaznaczenie zostają, bo maluje je przeglądarka osobno. */
+  color: transparent;
+  caret-color: var(--ink);
+}
+.edytor-yaml textarea::selection { background: var(--acc-32); color: transparent; }
+.edytor-yaml textarea:focus { outline: none; border-color: transparent; }
+
+/* Tokeny YAML-a. Kolory z palety motywu, żeby oba tony działały bez
+   osobnych wartości. */
+.tok-komentarz { color: var(--ink3); font-style: italic; }
+.tok-klucz     { color: var(--acc-ink); }
+.tok-tekst     { color: var(--ink); }
+/* --degraded-ink, nie --degraded: ten drugi to czysty pomarańcz kropki stanu,
+   który na białym tle tonu jasnego jest nieczytelny. Token -ink istnieje
+   dokładnie po to i jest już ściemniony dla jasnego. */
+.tok-liczba    { color: var(--degraded-ink); }
+.tok-slowo     { color: var(--degraded-ink); }
+.tok-kotwica   { color: var(--down-tekst); }
+.tok-myslnik   { color: var(--ink3); }
+
+/* ── pełny ekran ──────────────────────────────────────────────────────────
+   Bez drugiego <dialog>: jeden modal to jedna pułapka fokusu i jeden stan
+   do zamknięcia. Powiększamy ten, który już jest otwarty. */
+#okno-ustawien.pelny-ekran {
+  width: 100vw; max-width: 100vw;
+  height: 100dvh; max-height: 100dvh;
+  border-radius: 0; border: 0;
+}
+#okno-ustawien.pelny-ekran .tresc-okna {
+  height: 100%;
+  /* ! Ukryte dzieci wypadają z siatki, więc po schowaniu zakładek, menu i
+     pozostałych paneli zostają dokładnie dwa wiersze: nagłówek i edytor.
+     Rozpisanie ich „na zapas" zostawiało edytor w wierszu auto i pół ekranu
+     pustki pod spodem. */
+  grid-template-rows: auto 1fr;
+  padding: 20px 24px;
+}
+#okno-ustawien.pelny-ekran .zakladki,
+#okno-ustawien.pelny-ekran menu,
+#okno-ustawien.pelny-ekran section:not(#panel-plik) { display: none; }
+#okno-ustawien.pelny-ekran #panel-plik {
+  min-height: 0;
+  grid-template-rows: auto 1fr auto;
+}
+#okno-ustawien.pelny-ekran .edytor-yaml { min-height: 0; height: 100%; }
+#okno-ustawien.pelny-ekran .edytor-yaml textarea {
+  height: 100%; resize: none;
+}
+
+/* Plik poza limitem kolorowania — wracamy do gołego pola. */
+.edytor-yaml.bez-kolorow .podswietlenie { display: none; }
+.edytor-yaml.bez-kolorow textarea { color: var(--ink); }

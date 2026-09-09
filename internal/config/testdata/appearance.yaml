@@ -1,0 +1,22 @@
+# Nagłówek — musi przetrwać.
+
+title: "Homelab"        # cudzysłów celowo
+
+appearance:
+  background:
+    preset: nebula      # komentarz końca linii
+    blur: 18
+    tone: dark
+  view: bento
+
+defaults: &defaults
+  check: { interval: 30s }
+
+groups:
+  - name: Sieć
+    services:
+      - name: Router
+        url: http://192.168.0.1
+        <<: *defaults
+
+# Stopka: nic tu nie ma, ale komentarz ma zostać.

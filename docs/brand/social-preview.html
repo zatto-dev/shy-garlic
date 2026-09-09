@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Podgląd społecznościowy repo (GitHub → Settings → Social preview). Regeneracja:
+     google-chrome --headless --window-size=1200,300 --default-background-color=00000000 \
+       --window-size=1280,640 --screenshot=docs/brand/social-preview.png docs/brand/social-preview.html
+     Trzymamy to w repo, żeby baner dało się odtworzyć, a nie tylko podmienić. -->
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Hanken Grotesk"; font-weight: 700;
+    src: url("../../internal/server/assets/fonts/hanken-grotesk-700.woff2") format("woff2"); }
+  @font-face { font-family: "Hanken Grotesk"; font-weight: 400;
+    src: url("../../internal/server/assets/fonts/hanken-grotesk-400.woff2") format("woff2"); }
+  @font-face { font-family: "DM Mono"; font-weight: 400;
+    src: url("../../internal/server/assets/fonts/dm-mono-400.woff2") format("woff2"); }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 640px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;
+    padding: 0 72px;
+    background:
+      radial-gradient(120% 160% at 8% 50%, rgba(164,207,54,.22), transparent 60%),
+      radial-gradient(90% 140% at 92% 20%, rgba(45,140,120,.20), transparent 62%),
+      #0E1210;
+    font-family: "Hanken Grotesk", system-ui, sans-serif;
+    color: #F3F0E8;
+  }
+  img { width: 210px; height: 210px; flex: none; margin-bottom: 14px; }
+  h1 { font-size: 76px; font-weight: 700; letter-spacing: -.015em; line-height: 1; }
+  p  { margin-top: 16px; font-size: 25px; font-weight: 400; color: rgba(243,240,232,.72); }
+  ul { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 30px; }
+  li {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06);
+    font-family: "DM Mono", ui-monospace, monospace; font-size: 15px;
+    color: rgba(243,240,232,.86);
+  }
+  li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #A4CF36; }
+  li.b::before { background: #E8A33D; }
+</style>
+<img src="../../internal/server/assets/logo-512.png" alt="">
+<div>
+  <h1>Shy Garlic</h1>
+  <p>A homelab dashboard where the file and the UI are the same thing.</p>
+  <ul>
+    <li>round-trip-safe YAML</li>
+    <li>server-side heartbeat</li>
+    <li>no CDN in your browser</li>
+    <li class="b">one 14 MB binary · 4200 icons</li>
+  </ul>
+</div>
