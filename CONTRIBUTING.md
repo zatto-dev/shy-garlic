@@ -51,3 +51,14 @@ an `<iframe>` of the wanted width.
 A change is done when `./x test` is green. If you touch the config engine, add a
 test that proves the write still leaves untouched lines untouched — that is the
 whole point of this project.
+
+## Releasing
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: binaries, GitHub Release
+and the `ghcr.io/zatto-dev/shy-garlic` image.
+
+- **The GHCR package must be public.** A package first published by a workflow in
+  an organisation is created *private*, and GitHub has no API to change that. Once,
+  per package: Package settings → Danger Zone → Change visibility → Public. The
+  last release job pulls the image anonymously and fails with a clear message if
+  the package is still private.

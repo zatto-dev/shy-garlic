@@ -84,3 +84,29 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Strażnik widoczności. Paczka GHCR tworzona przez workflow w organizacji
+      # jest domyślnie PRYWATNA, a GitHub nie ma API do zmiany tego — robi się to
+      # tylko w UI. Bez tego kroku wydanie wygląda na udane, a `docker pull`
+      # bez logowania daje `unauthorized` (issue #1). Sprawdzamy pull całkiem
+      # anonimowo: własny token bez uwierzytelnienia, czysty curl, zero akcji.
+      - name: Sprawdź anonimowy pull obrazu
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY,,}"
+          tag="${TAG#v}"
+          blad() {
+            echo "::error title=Obraz prywatny::Obraz ghcr.io/${repo}:${tag} nie daje się pobrać anonimowo ($1) — obraz prywatny, przestaw widoczność w ustawieniach paczki: https://github.com/orgs/${repo%%/*}/packages/container/${repo#*/}/settings (Danger Zone → Change visibility → Public)"
+            exit 1
+          }
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])') \
+            || blad "brak anonimowego tokenu"
+          kod=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${repo}/manifests/${tag}")
+          [ "$kod" = "200" ] || blad "HTTP ${kod}"
+          echo "OK: ghcr.io/${repo}:${tag} jest publiczny"
