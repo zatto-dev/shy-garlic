@@ -10,6 +10,8 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-15
+
 ### Added
 
 - **Kubernetes install.** A Helm chart (`charts/shy-garlic`, published as an
@@ -18,6 +20,13 @@ the entries below say when it does.
   Single replica with a persistent volume for the database and the editable
   config, Pod Security "restricted"-compliant, optional Ingress and Gateway API
   HTTPRoute, tested on Talos Linux. See "Kubernetes / Talos Linux" in the README.
+
+### Fixed
+
+- **The container image is public.** `docker pull ghcr.io/zatto-dev/shy-garlic`
+  returned `unauthorized` because the package had been published as private
+  (#1). The release workflow now pulls the image and the chart anonymously as
+  its last step and fails if either is not public.
 
 ## [0.11.0] — 2026-09-09
 
@@ -100,6 +109,7 @@ First working version: the dashboard, the heartbeat, sign-in, and an editor
 that writes YAML back through byte-level splicing, so comments, anchors and
 formatting survive every edit made through the UI.
 
+[0.12.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.12.0
 [0.11.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.11.0
 [0.10.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.10.0
 [0.9.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.9.0

@@ -292,7 +292,7 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
 **Zwykły kubectl** (kustomize, przypięty do taga wydania):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.11.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.12.0"
 ```
 
 Potem wejdź do panelu i załóż administratora przy pierwszej wizycie (zob.
