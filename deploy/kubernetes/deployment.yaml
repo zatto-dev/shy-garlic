@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shy-garlic
+spec:
+  # SQLite on a ReadWriteOnce volume: one pod, old one gone before the new starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shy-garlic
+      app.kubernetes.io/instance: shy-garlic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shy-garlic
+        app.kubernetes.io/instance: shy-garlic
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: seed-config
+          image: ghcr.io/zatto-dev/shy-garlic
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/config
+              if [ ! -e /data/config/shygarlic.yaml ]; then
+                cp /seed/shygarlic.yaml /data/config/shygarlic.yaml
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: seed, mountPath: /seed, readOnly: true}
+      containers:
+        - name: shy-garlic
+          image: ghcr.io/zatto-dev/shy-garlic
+          args: [serve, -config, /data/config/shygarlic.yaml, -addr, ":8080"]
+          env:
+            - {name: SHYG_CONFIG, value: /data/config/shygarlic.yaml}
+            - {name: SHYG_DATA, value: /data/shygarlic.db}
+            # Behind an ingress add SHYG_TRUSTED_PROXY=<proxy CIDR> here.
+          ports:
+            - {name: http, containerPort: 8080}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: shy-garlic}
+        - name: seed
+          configMap: {name: shy-garlic-seed}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

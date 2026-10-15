@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "shy-garlic.fullname" . }}-seed
+  labels:
+    {{- include "shy-garlic.labels" . | nindent 4 }}
+data:
+  # Only a seed: copied to the volume when the config file is missing.
+  shygarlic.yaml: |
+{{- if .Values.config.initial }}
+{{ .Values.config.initial | indent 4 }}
+{{- else }}
+{{ .Files.Get "files/homelab.yaml" | indent 4 }}
+{{- end }}

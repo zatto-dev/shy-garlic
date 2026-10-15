@@ -1,0 +1,140 @@
+# Default values for the Shy Garlic chart.
+#
+# Shy Garlic keeps its state in SQLite and writes its own YAML config, so it
+# always runs as ONE replica with a persistent volume. There is no replicaCount.
+
+image:
+  repository: ghcr.io/zatto-dev/shy-garlic
+  # Empty = the chart's appVersion. Pin a release; do not use `latest`.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Persistence ─────────────────────────────────────────────────────────────
+# One volume holds the database, the icon cache and the config file
+# (/data/config/shygarlic.yaml). The panel edits that file from its UI, so it
+# cannot live on a read-only ConfigMap.
+persistence:
+  # Use a claim you created yourself instead of letting the chart create one.
+  # ! `helm uninstall` KEEPS the chart-created claim (data survives an accident).
+  #   To reinstall onto it set this to the claim's name (<release>-shy-garlic,
+  #   or just <release> when the release name contains "shy-garlic").
+  existingClaim: ""
+  # "" = the cluster's default StorageClass. "-" = no class (static PV).
+  # ! A fresh Talos cluster has NO default StorageClass: install one first
+  #   (see the README), or the pod stays Pending.
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+  annotations: {}
+
+# ── Configuration ───────────────────────────────────────────────────────────
+config:
+  # Initial dashboard configuration, used ONLY when the config file does not
+  # exist yet. After that the file on the volume is the source of truth and is
+  # edited in the panel (Settings -> Config) - upgrading the chart or changing
+  # this value never overwrites it. Empty = the bundled example (home.arpa).
+  initial: ""
+
+# ── Administrator account ───────────────────────────────────────────────────
+# By default nothing is set: the first visit to /setup creates the admin.
+# Optionally create the account at start-up from a Secret.
+admin:
+  # Name of an existing Secret with the keys below. Takes precedence over
+  # `username`/`password`.
+  existingSecret: ""
+  existingSecretUserKey: SHYG_ADMIN_USER
+  existingSecretPasswordKey: SHYG_ADMIN_PASSWORD
+  # Or let the chart create the Secret. Prefer existingSecret: values end up in
+  # Helm release history. Both must be set, otherwise no Secret is created.
+  username: ""
+  password: ""
+
+# ── Networking ──────────────────────────────────────────────────────────────
+# CIDRs of the reverse proxy / ingress controller allowed to set
+# X-Forwarded-For and X-Forwarded-Proto (comma-separated, e.g. the pod CIDR
+# "10.244.0.0/16"). Empty = those headers are ignored. Set it when you use
+# `ingress` or `httpRoute`, otherwise the sign-in rate limiter sees the
+# proxy's address for every visitor.
+trustedProxy: ""
+
+# Extra environment variables (SHYG_WEBHOOK, SHYG_ICONS, ...).
+# ! Do not put credentials here - use extraEnvFrom with a Secret.
+extraEnv: []
+#  - name: SHYG_ICONS
+#    value: /data/icons.zip
+extraEnvFrom: []
+#  - secretRef:
+#      name: shyg-webhook
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: shyg.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: shyg-tls
+  #    hosts: [shyg.example.com]
+
+# Gateway API. Needs the Gateway API CRDs and an existing Gateway.
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+  #  - name: my-gateway
+  #    namespace: gateway-system
+  hostnames: []
+  #  - shyg.example.com
+
+# The defaults satisfy the Pod Security "restricted" profile (Talos enforces
+# "baseline" by default, so this also runs on locked-down namespaces).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Health checks hit GET /healthz.
+probes:
+  startup:
+    failureThreshold: 30
+    periodSeconds: 2
+  liveness:
+    periodSeconds: 20
+    timeoutSeconds: 3
+  readiness:
+    periodSeconds: 10
+    timeoutSeconds: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
