@@ -31,3 +31,18 @@ jobs:
       # Ten sam sposób budowania co w wydaniu — żeby błąd kompilacji dla
       # innej architektury nie wyszedł dopiero przy tagowaniu.
       - run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/shyg
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: .github/scripts/install-helm.sh
+      # The chart and the kustomize base each carry a copy of the example
+      # config (a chart cannot read files outside its directory).
+      - name: Example config copies are in sync
+        run: |
+          diff -u examples/homelab.yaml charts/shy-garlic/files/homelab.yaml
+          diff -u examples/homelab.yaml deploy/kubernetes/homelab.yaml
+      - run: helm lint charts/shy-garlic
+      - run: helm template t charts/shy-garlic --set admin.username=a --set admin.password=b --set ingress.enabled=true --set httpRoute.enabled=true > /dev/null
+      - run: kubectl kustomize deploy/kubernetes > /dev/null

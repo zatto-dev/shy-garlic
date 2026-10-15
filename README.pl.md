@@ -274,6 +274,67 @@ shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
 go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.25
 ```
 
+### Kubernetes / Talos Linux
+
+Potrzebna StorageClass z wolumenem `ReadWriteOnce`. Shy Garlic trzyma SQLite i
+własny plik YAML na jednym wolumenie, więc zawsze działa jako pojedyncza replika.
+Pod spełnia profil Pod Security **restricted** (non-root uid 65532, wszystkie
+capabilities zdjęte, seccomp `RuntimeDefault`), więc przejdzie w namespace'ach
+z domyślnym dla Talosa `baseline` i w ostrzejszych.
+
+**Helm** (chart jako artefakt OCI):
+
+```bash
+helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
+  --namespace shy-garlic --create-namespace
+```
+
+**Zwykły kubectl** (kustomize, przypięty do taga wydania):
+
+```bash
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.12.0"
+```
+
+Potem wejdź do panelu i załóż administratora przy pierwszej wizycie (zob.
+*Pierwsze uruchomienie*):
+
+```bash
+kubectl -n shy-garlic port-forward svc/shy-garlic 8080:80    # http://localhost:8080
+```
+
+Na stały adres włącz w values `ingress` albo `httpRoute` (Gateway API) i ustaw
+`trustedProxy` na CIDR proxy. Wszystkie opcje są opisane w
+[`charts/shy-garlic/values.yaml`](charts/shy-garlic/values.yaml). Żeby pominąć
+stronę `/setup`, wskaż `admin.existingSecret` na Secret z `SHYG_ADMIN_USER`
+i `SHYG_ADMIN_PASSWORD`.
+
+Świeży klaster Talos **nie ma domyślnej StorageClass**, więc claim zostaje
+`Pending`, a z nim pod. Zainstaluj ją najpierw, np.
+[local-path-provisioner](https://github.com/rancher/local-path-provisioner#installation)
+(dane na dysku węzła; aktualny manifest jest w jego README). Talos domyślnie
+egzekwuje Pod Security `baseline`, a pody pomocnicze provisionera używają
+`hostPath`, którego `baseline` zabrania — więc oznacz jego namespace i ustaw
+klasę jako domyślną:
+
+```bash
+kubectl create namespace local-path-storage
+kubectl label namespace local-path-storage pod-security.kubernetes.io/enforce=privileged
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
+kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+```
+
+Jeśli woluminy nadal się nie tworzą, zajrzyj do
+[przewodnika Talosa o lokalnym storage](https://www.talos.dev/latest/kubernetes-guides/configuration/local-storage/).
+
+`helm uninstall` celowo zostawia wolumen, żeby dane przeżyły pomyłkę; żeby
+zainstalować ponownie na nim, dodaj `--set persistence.existingClaim=shy-garlic`.
+
+Dwie rzeczy różnią się od Dockera. Config leży na wolumenie
+(`/data/config/shygarlic.yaml`): przy pierwszym starcie powstaje z wbudowanego
+przykładu, potem edytujesz go w panelu, a aktualizacja go nie nadpisuje. I nie
+ma gniazda Dockera, więc odkrywanie kontenerów jest po prostu wyłączone —
+usługi bierze się z pliku configu.
+
 ### Pierwsze uruchomienie
 
 Pierwsze wejście prowadzi na `/setup`, gdzie zakładasz konto administratora.

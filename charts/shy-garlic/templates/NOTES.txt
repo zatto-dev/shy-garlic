@@ -1,0 +1,39 @@
+Shy Garlic {{ .Chart.AppVersion }} is installing.
+
+1. Wait for the pod:
+     kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "shy-garlic.fullname" . }}
+
+2. Open the panel:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+     http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if .Values.httpRoute.enabled }}
+{{- range .Values.httpRoute.hostnames }}
+     https://{{ . }}   (check your Gateway listener for the scheme)
+{{- end }}
+{{- else }}
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "shy-garlic.fullname" . }} 8080:{{ .Values.service.port }}
+     then browse to http://localhost:8080
+{{- end }}
+
+3. First sign-in:
+{{- if include "shy-garlic.adminSecretName" . }}
+     The administrator account is created from Secret "{{ include "shy-garlic.adminSecretName" . }}"
+     (keys SHYG_ADMIN_USER / SHYG_ADMIN_PASSWORD). Sign in with it.
+{{- else }}
+     Nobody can get past /setup until an account exists, so open it first and
+     create the administrator. Once one exists, /setup is closed.
+{{- end }}
+
+Notes:
+  - Config and data live on the PVC: edit the dashboard in the panel
+    (Settings). Changing `config.initial` later does NOT overwrite the file.
+  - There is no Docker socket in Kubernetes, so Docker service discovery is off.
+{{- if not .Values.trustedProxy }}
+{{- if or .Values.ingress.enabled .Values.httpRoute.enabled }}
+  - WARNING: you expose the panel through a proxy but `trustedProxy` is empty.
+    Set it to the proxy's CIDR or every visitor looks like one address to the
+    sign-in rate limiter.
+{{- end }}
+{{- end }}

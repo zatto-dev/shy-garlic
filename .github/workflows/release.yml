@@ -110,3 +110,52 @@ jobs:
             "https://ghcr.io/v2/${repo}/manifests/${tag}")
           [ "$kod" = "200" ] || blad "HTTP ${kod}"
           echo "OK: ghcr.io/${repo}:${tag} jest publiczny"
+
+  # Chart Helm jako OCI na ghcr.io/zatto-dev/charts/shy-garlic. Wersja chartu
+  # i appVersion biorą się z taga, więc `helm install ... --version X` daje
+  # dokładnie ten obraz, który wyszedł w tym samym wydaniu.
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Zainstaluj Helma (przypięta wersja + suma)
+        run: .github/scripts/install-helm.sh
+
+      - name: Zapakuj i wypchnij chart
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wersja="${TAG#v}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          helm lint charts/shy-garlic --set "image.tag=${wersja}"
+          helm package charts/shy-garlic --version "$wersja" --app-version "$wersja" --destination dist
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_ACTOR" --password-stdin
+          helm push "dist/shy-garlic-${wersja}.tgz" "oci://ghcr.io/${owner}/charts"
+
+      # Ten sam strażnik co dla obrazu: paczka chartu też powstaje jako
+      # PRYWATNA i widoczność przestawia się tylko w UI.
+      - name: Sprawdź anonimowy pull chartu
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo="${owner}/charts/shy-garlic"
+          tag="${TAG#v}"
+          blad() {
+            echo "::error title=Chart prywatny::Chart oci://ghcr.io/${repo}:${tag} nie daje się pobrać anonimowo ($1) — paczka prywatna, przestaw widoczność w ustawieniach paczki: https://github.com/orgs/${owner}/packages/container/charts%2Fshy-garlic/settings (Danger Zone → Change visibility → Public)"
+            exit 1
+          }
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])') \
+            || blad "brak anonimowego tokenu"
+          kod=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+            "https://ghcr.io/v2/${repo}/manifests/${tag}")
+          [ "$kod" = "200" ] || blad "HTTP ${kod}"
+          echo "OK: oci://ghcr.io/${repo}:${tag} jest publiczny"

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shy-garlic
+spec:
+  accessModes: [ReadWriteOnce]
+  # storageClassName: unset = the cluster's default StorageClass. A fresh Talos
+  # cluster has none: install one first (see the README) or the pod stays Pending.
+  resources:
+    requests:
+      storage: 1Gi
