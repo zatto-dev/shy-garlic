@@ -8,6 +8,17 @@ Versions stay below `1.0.0` until the project has been through a security
 review. Until then a minor bump may still change behaviour you relied on;
 the entries below say when it does.
 
+## [Unreleased]
+
+### Added
+
+- **Kubernetes install.** A Helm chart (`charts/shy-garlic`, published as an
+  OCI artifact at `oci://ghcr.io/zatto-dev/charts/shy-garlic` with each
+  release) and a kustomize base (`deploy/kubernetes`) for people without Helm.
+  Single replica with a persistent volume for the database and the editable
+  config, Pod Security "restricted"-compliant, optional Ingress and Gateway API
+  HTTPRoute, tested on Talos Linux. See "Kubernetes / Talos Linux" in the README.
+
 ## [0.11.0] — 2026-09-09
 
 ### Added

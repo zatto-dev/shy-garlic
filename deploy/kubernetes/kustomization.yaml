@@ -1,0 +1,28 @@
+# Plain-kubectl install, no Helm needed:
+#
+#   kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.11.0"
+#
+# Same resources as the Helm chart with default values. Make your own overlay
+# to change the image tag, storage class, size, or to add an Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: shy-garlic
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  - name: shy-garlic-seed
+    files:
+      - shygarlic.yaml=homelab.yaml
+    options:
+      disableNameSuffixHash: true
+
+# Keep in step with the release you install (?ref=vX).
+images:
+  - name: ghcr.io/zatto-dev/shy-garlic
+    newTag: "0.11.0"

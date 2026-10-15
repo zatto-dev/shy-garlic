@@ -274,6 +274,67 @@ shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
 go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.25
 ```
 
+### Kubernetes / Talos Linux
+
+Needs a StorageClass that provides a `ReadWriteOnce` volume. Shy Garlic keeps
+SQLite and its own YAML config on one volume, so it always runs as a single
+replica. The pod meets the Pod Security **restricted** profile (non-root uid
+65532, all capabilities dropped, seccomp `RuntimeDefault`), so it is admitted on
+Talos's default `baseline` namespaces and on stricter ones.
+
+**Helm** (chart published as an OCI artifact):
+
+```bash
+helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
+  --namespace shy-garlic --create-namespace
+```
+
+**Plain kubectl** (kustomize, pinned to a release tag):
+
+```bash
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.11.0"
+```
+
+Then reach the panel and create the administrator on the first visit (see
+*First run*):
+
+```bash
+kubectl -n shy-garlic port-forward svc/shy-garlic 8080:80    # http://localhost:8080
+```
+
+For a permanent address, enable `ingress` or `httpRoute` (Gateway API) in the
+chart values and set `trustedProxy` to the proxy's CIDR. All options are
+commented in [`charts/shy-garlic/values.yaml`](charts/shy-garlic/values.yaml).
+To skip the `/setup` page, point `admin.existingSecret` at a Secret with
+`SHYG_ADMIN_USER` and `SHYG_ADMIN_PASSWORD`.
+
+A fresh Talos cluster has **no default StorageClass**, so the volume claim stays
+`Pending` and so does the pod. Install one first, for example
+[local-path-provisioner](https://github.com/rancher/local-path-provisioner#installation)
+(storage on the node's disk; its README has the current manifest). Talos
+enforces `baseline` Pod Security by default and the provisioner's helper pods
+use `hostPath`, which `baseline` forbids, so label its namespace and make the
+class the default:
+
+```bash
+kubectl create namespace local-path-storage
+kubectl label namespace local-path-storage pod-security.kubernetes.io/enforce=privileged
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.37/deploy/local-path-storage.yaml
+kubectl patch storageclass local-path -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+```
+
+If volumes still do not get created on your nodes, see Talos's own
+[local storage guide](https://www.talos.dev/latest/kubernetes-guides/configuration/local-storage/).
+
+`helm uninstall` keeps the volume on purpose, so your data survives an accident;
+to reinstall onto it, add `--set persistence.existingClaim=shy-garlic`.
+
+Two things differ from Docker. The config lives on the volume
+(`/data/config/shygarlic.yaml`): it is seeded from the bundled example on first
+start and edited in the panel afterwards, so upgrading never overwrites it. And
+there is no Docker socket, so container discovery is simply off; services come
+from the config file.
+
 ### First run
 
 The first visit lands on `/setup`, where you create the administrator account.

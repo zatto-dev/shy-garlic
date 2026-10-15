@@ -1,0 +1,11 @@
+apiVersion: v2
+name: shy-garlic
+description: A self-hosted homelab dashboard with honest health checks and a config you can read.
+type: application
+version: 0.1.0
+appVersion: "0.11.0"
+home: https://github.com/zatto-dev/shy-garlic
+sources:
+  - https://github.com/zatto-dev/shy-garlic
+keywords: [dashboard, homelab, monitoring]
+kubeVersion: ">=1.25.0-0"
