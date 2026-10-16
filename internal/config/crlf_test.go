@@ -145,3 +145,16 @@ func TestReplaceAllZachowujeStylKońców(t *testing.T) {
 	}
 	czysteCRLF(t, d.Bytes())
 }
+
+func TestReplaceAllMieszaneKońceWPlikuCRLF(t *testing.T) {
+	d, err := Parse(crlf(ruchSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pierwsza linia z CRLF, reszta z LF — np. ręczny PUT przez API
+	nowa := strings.Replace(ruchSrc, "\n", "\r\n", 1)
+	if err := d.ReplaceAll([]byte(nowa)); err != nil {
+		t.Fatal(err)
+	}
+	czysteCRLF(t, d.Bytes())
+}

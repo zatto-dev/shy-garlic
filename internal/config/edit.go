@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
@@ -405,6 +406,11 @@ func (d *Document) ReplaceAll(nowa []byte) error {
 	// treść z samymi CRLF (np. z textarea) zapisujemy jako CRLF; treść z LF
 	// dostaje styl pliku, który był.
 	nowa, crlf := normalizujKońce(nowa)
+	if !crlf && d.crlf {
+		// mieszane końce w pliku CRLF — Bytes() dołoży \r do każdej linii,
+		// więc istniejące \r\n dałyby \r\r\n
+		nowa = bytes.ReplaceAll(nowa, []byte("\r\n"), []byte("\n"))
+	}
 	stary := d.crlf
 	if crlf {
 		d.crlf = true

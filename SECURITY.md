@@ -64,6 +64,10 @@ Knowing where the boundary is drawn saves everyone time.
 - No external security review has been carried out. That is the reason the
   version number still starts with a zero.
 - There is no rate limit on the API beyond sign-in and failed API tokens.
+- Sign-in has a global cap of 30 failed attempts per minute on top of the
+  per-address limit (IPv6 counted per /64). An attacker spread over many
+  addresses can keep that cap tripped and so block new sign-ins, including the
+  owner's; existing sessions and API tokens keep working.
 - Changing a password signs out every other session of that account (the one
   you are using stays). API tokens are **not** revoked on a password change;
   revoke them under API tokens. Deleting an account does revoke the tokens it
