@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 )
 
 // Load czyta konfigurację semantycznie: rozwija merge-keye (`<<: *defaults`),
@@ -14,7 +13,7 @@ import (
 // Load NIE nadaje się do edycji pliku — do tego jest Parse/Document.
 func Load(src []byte) (*Config, error) {
 	var cfg Config
-	if err := yaml.Unmarshal(src, &cfg); err != nil {
+	if err := safeUnmarshal(src, &cfg); err != nil {
 		b := rozbierzSurowy(err)
 		if b.Linia == 0 {
 			b.Linia = lokalizuj(src, b.Komunikat)
@@ -147,7 +146,7 @@ func podaneSuwaki(src []byte) (blur, dim bool) {
 			} `yaml:"background"`
 		} `yaml:"appearance"`
 	}
-	if err := yaml.Unmarshal(src, &pomocniczy); err != nil {
+	if err := safeUnmarshal(src, &pomocniczy); err != nil {
 		return false, false
 	}
 	b := pomocniczy.Appearance.Background

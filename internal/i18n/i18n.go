@@ -344,6 +344,7 @@ var teksty = map[string]map[Lang]string{
 
 	// edycja sekcji „Sprawdzanie" (GH #6)
 	"blad_czas_sprawdzania": {EN: "Interval and timeout take a duration of at least 1s, such as 30s, 2m or 1h.", PL: "Co ile i timeout przyjmują czas od 1s w górę, np. 30s, 2m albo 1h."},
+	"blad_uklad_pliku":      {EN: "This part of the file is laid out in a way the editor cannot change safely. Nothing was saved — edit it in the file.", PL: "Ta część pliku ma układ, którego edytor nie zmieni bezpiecznie. Nic nie zapisano — zmień to w pliku."},
 	"blad_kody_http":        {EN: "Accepted codes: HTTP status codes from 100 to 599, separated by commas.", PL: "Akceptowane kody: kody HTTP od 100 do 599, oddzielone przecinkami."},
 
 	"konflikt_pliku": {

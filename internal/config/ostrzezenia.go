@@ -8,7 +8,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 )
 
 // Dwie rzeczy, które mogą być nie tak z plikiem, mają różną wagę:
@@ -97,7 +96,7 @@ func (z zbieraczKotwic) Visit(n ast.Node) ast.Visitor {
 // Ostrzeżenia szuka w źródle kluczy, których model nie zna. Niepoprawny YAML
 // daje pustą listę — o tym informuje Load.
 func Ostrzeżenia(src []byte) []Ostrzeżenie {
-	f, err := parser.ParseBytes(src, 0)
+	f, err := safeParseBytes(src, 0)
 	if err != nil || len(f.Docs) == 0 || f.Docs[0].Body == nil {
 		return nil
 	}

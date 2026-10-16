@@ -84,7 +84,7 @@ func needsQuoting(v string) bool {
 	case "true", "false", "yes", "no", "on", "off", "null", "~":
 		return true
 	}
-	return false
+	return !plainRoundTrips(v)
 }
 
 // lineIndent zwraca wcięcie (w bajtach) linii, w której leży offset.
