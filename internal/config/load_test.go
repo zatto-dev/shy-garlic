@@ -18,8 +18,8 @@ func TestLoadCzytaGrupyIUsługi(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Title != "Homelab Mariusza" {
-		t.Errorf("Title = %q, chcę %q", cfg.Title, "Homelab Mariusza")
+	if cfg.Title != "Homelab Demo" {
+		t.Errorf("Title = %q, chcę %q", cfg.Title, "Homelab Demo")
 	}
 	if len(cfg.Groups) != 2 {
 		t.Fatalf("grup = %d, chcę 2", len(cfg.Groups))

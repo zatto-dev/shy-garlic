@@ -13,10 +13,10 @@ func TestDemoDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.AddService("Sieć", Service{Name: "AdGuard", URL: "http://192.168.0.29:3000", Icon: "adguard-home"}); err != nil {
+	if err := d.AddService("Sieć", Service{Name: "AdGuard", URL: "http://10.0.0.2:3000", Icon: "adguard-home"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetServiceField("Media", "Sonarr", "url", "http://192.168.0.195:8990"); err != nil {
+	if err := d.SetServiceField("Media", "Sonarr", "url", "http://10.0.0.5:8990"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile("/tmp/shyg-demo-out.yaml", d.Bytes(), 0o644); err != nil {

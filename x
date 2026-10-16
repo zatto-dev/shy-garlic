@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# Shy Garlic — jedyna droga do buildu i testów.
+# Shy Garlic — the one way to build and test.
 #
-# ! Go NIGDY nie wykonuje się na CT111. Uruchomiony gdziekolwiek indziej niż na
-# CT101 (agent-worker), skrypt kopiuje drzewo na sandbox i odpala się tam.
-# Zmiany w go.mod/go.sum wracają, żeby lokalne drzewo się nie rozjechało.
+# Runs Go right here unless a build host is configured. With SHYG_BUILD_HOST
+# set and this machine being a different host, it syncs the tree to the build
+# host over ssh and runs there; go.mod/go.sum changes come back so the local
+# tree does not drift. Settings come from the environment or from an
+# untracked .x.local next to this script:
+#   SHYG_BUILD_HOST  hostname of the machine that runs Go
+#   SHYG_REMOTE      its ssh target (user@host)
+#   SHYG_RDIR        the directory on it to sync into
 set -eu
-
-# ! Nadpisywalne, żeby dwa równoległe klony nie kasowały sobie drzewa na
-# sandboxie — rsync leci z --delete, więc bez tego druga sesja wywala pierwszą.
-REMOTE=${SHYG_REMOTE:-zatto@192.168.0.178}
-RDIR=${SHYG_RDIR:-/home/zatto/projects/Shy-Garlic}
 cd "$(dirname "$0")"
+if [ -f .x.local ]; then . ./.x.local; fi
 
-if [ "$(hostname)" != "agent-worker" ]; then
+if [ -n "${SHYG_BUILD_HOST:-}" ] && [ "$(hostname)" != "$SHYG_BUILD_HOST" ]; then
+  REMOTE=${SHYG_REMOTE:?set SHYG_REMOTE (user@host) in .x.local}
+  # ! a separate RDIR per clone: rsync runs with --delete, so two clones
+  # syncing into one directory would wipe each other's tree
+  RDIR=${SHYG_RDIR:?set SHYG_RDIR in .x.local}
   rsync -a --delete \
-    --exclude '.git/' --exclude 'bin/' --exclude 'web/node_modules/' \
+    --exclude '.git/' --exclude 'bin/' --exclude 'web/node_modules/' --exclude '.x.local' \
     ./ "$REMOTE:$RDIR/"
   set +e
   ssh "$REMOTE" "cd $RDIR && ./x $*"
