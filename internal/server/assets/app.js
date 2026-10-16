@@ -622,7 +622,9 @@
         k.hidden = !pasuje;
         if (pasuje) wGrupie++;
       });
-      grupa.hidden = wGrupie === 0;
+      // pusta grupa znika tylko przy aktywnym filtrze — bez niego musi dać się
+      // upuścić do niej kartę
+      grupa.hidden = (q || tylkoProblemy) && wGrupie === 0;
       widoczne += wGrupie;
     });
     pusto.hidden = widoczne > 0;
