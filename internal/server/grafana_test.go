@@ -38,12 +38,20 @@ func TestDashboardGrafanyJestPoprawnyIUżywaZmiennejŹródła(t *testing.T) {
 	if err := json.Unmarshal(surowy, &d); err != nil {
 		t.Fatalf("dashboard nie jest poprawnym JSON-em: %v", err)
 	}
-	if len(d.Inputs) != 1 || d.Inputs[0].Name != "DS_PROMETHEUS" || d.Inputs[0].Type != "datasource" {
+	// wejścia importu: źródło danych + nazwa joba Prometheusa (stała)
+	wejścia := map[string]string{}
+	for _, in := range d.Inputs {
+		wejścia[in.Name] = in.Type
+	}
+	if len(d.Inputs) != 2 || wejścia["DS_PROMETHEUS"] != "datasource" || wejścia["VAR_JOB"] != "constant" {
 		t.Errorf("__inputs: %+v", d.Inputs)
 	}
 	typy := map[string]bool{}
 	for _, p := range d.Panels {
 		typy[p.Type] = true
+		if len(p.Targets) == 0 {
+			continue // panel tekstowy — nie pyta żadnego źródła
+		}
 		if p.Datasource.UID != "${DS_PROMETHEUS}" {
 			t.Errorf("panel %q: datasource uid %q, chcę ${DS_PROMETHEUS}", p.Title, p.Datasource.UID)
 		}
@@ -51,8 +59,8 @@ func TestDashboardGrafanyJestPoprawnyIUżywaZmiennejŹródła(t *testing.T) {
 			if tg.Datasource.UID != "${DS_PROMETHEUS}" {
 				t.Errorf("panel %q: target z datasource %q", p.Title, tg.Datasource.UID)
 			}
-			if !strings.Contains(tg.Expr, "shyg_service_") {
-				t.Errorf("panel %q: zapytanie %q nie używa metryk shyg_service_*", p.Title, tg.Expr)
+			if !strings.Contains(tg.Expr, "shyg_service_") && !strings.Contains(tg.Expr, "shyg_build_info") {
+				t.Errorf("panel %q: zapytanie %q nie używa metryk shyg_*", p.Title, tg.Expr)
 			}
 		}
 	}
@@ -74,7 +82,7 @@ func TestDashboardGrafanyJestPoprawnyIUżywaZmiennejŹródła(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range []string{"shyg_service_up", "shyg_service_degraded", "shyg_service_response_seconds", "shyg_service_availability_ratio"} {
+	for _, m := range []string{"shyg_service_up", "shyg_service_degraded", "shyg_service_response_seconds", "shyg_service_availability_ratio", "shyg_service_last_check_timestamp_seconds", "shyg_build_info"} {
 		if !strings.Contains(string(kod), `"`+m+`"`) {
 			t.Errorf("metryka %s nie jest wystawiana", m)
 		}
