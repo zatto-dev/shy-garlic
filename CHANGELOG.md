@@ -53,6 +53,26 @@ the entries below say when it does.
   reading the body. Redirects are not followed. `path` can never change the
   host, and `path: health` (no leading slash) is corrected with a log line.
   Config-only for now: the service dialog does not edit these keys.
+- **Prometheus metrics and read-only API tokens.** Settings → Instance → API
+  tokens creates a named token (`shyg_` + 256 random bits), shown once with a
+  copy button and stored only as a SHA-256 hash, with creation and last-use
+  time (written at most once a minute); tokens can be revoked. A token is
+  honoured only for `GET /metrics`, `GET /api/status` and `GET /api/history` —
+  every other route ignores it and wants a session — and an unauthenticated
+  request to those routes gets `401`, never a redirect to sign-in. Failed
+  attempts are rate limited per address (60 in 5 minutes, separate from the
+  sign-in limit) and logged once a minute per address. `GET /metrics` is hand
+  written Prometheus text (`shyg_service_up`, `_degraded`, `_response_seconds`,
+  `_availability_ratio{window="24h"}`, `_last_check_timestamp_seconds`,
+  `shyg_build_info`, labels `group` and `service`, label values escaped); a
+  service that was never checked has no series instead of a misleading `0`.
+  `--metrics-allow` / `SHYG_METRICS_ALLOW` lists networks that may read
+  `/metrics` without a token (default: none). Behind a proxy the client address
+  is the right-most `X-Forwarded-For` entry that is not a trusted proxy, and a
+  request with proxy headers from a peer that is not a trusted proxy is refused.
+  `deploy/grafana/shy-garlic.json` is a ready dashboard; the README has
+  Prometheus, curl and Home Assistant examples. New endpoints: `GET /metrics`,
+  `GET`/`POST /api/tokens`, `DELETE /api/tokens/{id}`.
 - `./x race` runs the tests with the race detector.
 - **Description and tags on a service.** Two optional keys, `description:` (one
   line, up to 200 characters) and `tags:` (a list, up to 12 tags of 32
@@ -92,6 +112,9 @@ the entries below say when it does.
   password signs out every other session of that user. Session tokens are
   stored as SHA-256 hashes; existing sessions are migrated, nobody is signed
   out. Editing a `tcp://` service no longer writes `#ZgotmplZ` back to the file.
+- **The sign-in rate limiter could be walked around behind a trusted proxy.** It
+  keyed on the first (left-most) `X-Forwarded-For` entry, which the client
+  writes itself; it now uses the right-most entry that is not a trusted proxy.
 - **Races.** The file watcher could reload the config in the middle of a save
   from the panel, and concurrent reloads raced on the health monitor's
   start/stop state (orphaned check loops). Reloads are serialised now.

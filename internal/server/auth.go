@@ -35,11 +35,20 @@ func UżytkownikZŻądania(r *http.Request) *store.Użytkownik {
 type limiter struct {
 	mu    sync.Mutex
 	próby map[string][]time.Time
+	próg  int
 }
 
-func nowyLimiter() *limiter { return &limiter{próby: map[string][]time.Time{}} }
+func nowyLimiter() *limiter { return nowyLimiterZProgiem(5) }
 
-// wolno zwraca false, gdy z tego adresu było już 5 nieudanych prób w 5 minut.
+func nowyLimiterZProgiem(próg int) *limiter {
+	return &limiter{próby: map[string][]time.Time{}, próg: próg}
+}
+
+// maksAdresówWLimiterze — twarda górna granica pamięci: mapa rośnie o adres
+// przy każdym pierwszym błędzie, a /metrics może stać w internecie.
+const maksAdresówWLimiterze = 10000
+
+// wolno zwraca false, gdy z tego adresu było już `próg` nieudanych prób w 5 minut.
 func (l *limiter) wolno(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -51,12 +60,15 @@ func (l *limiter) wolno(ip string) bool {
 		}
 	}
 	l.próby[ip] = świeże
-	return len(świeże) < 5
+	return len(świeże) < l.próg
 }
 
 func (l *limiter) zapiszPorażkę(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if _, znany := l.próby[ip]; !znany && len(l.próby) >= maksAdresówWLimiterze {
+		l.próby = map[string][]time.Time{}
+	}
 	l.próby[ip] = append(l.próby[ip], time.Now())
 }
 
@@ -119,9 +131,25 @@ func celZReferera(r *http.Request) string {
 
 // wymagajLogowania przepuszcza tylko z ważną sesją. Gdy w bazie nie ma jeszcze
 // żadnego konta, przekierowuje na /setup — panel nie może stać otworem.
+//
+// Poza sesją są dwa wąskie wyjątki, oba tylko dla GET (patrz tokeny.go):
+// token API na trzech trasach tylko-do-odczytu i nieuwierzytelnione /metrics
+// dla sieci z --metrics-allow. Trasy tokenowe i /api/* nigdy nie odsyłają na
+// /login — klient maszynowy dostaje 401.
 func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/metrics" && s.metrykiZCIDR(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		_, maBearer := bearerZNagłówka(r)
+		maszynowa := trasaTokenowa(r) && (maBearer || r.URL.Path == "/metrics")
+
 		if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
+			if maszynowa {
+				odmówBezSesji(w, r)
+				return
+			}
 			http.Redirect(w, r, "/setup", http.StatusSeeOther)
 			return
 		}
@@ -134,8 +162,16 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 			}
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.Header.Get("Accept") == "text/event-stream" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if trasaTokenowa(r) && maBearer {
+			if s.uwierzytelnijToken(w, r) {
+				next.ServeHTTP(w, r)
+			}
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" ||
+			r.Header.Get("Accept") == "text/event-stream" {
+			odmówBezSesji(w, r)
 			return
 		}
 		cel := "/login"

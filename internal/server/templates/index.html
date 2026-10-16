@@ -600,6 +600,22 @@
         </thead>
         <tbody></tbody>
       </table>
+
+      <h4>{{.T.tokeny_tytul}}</h4>
+      <p class="drobne">{{.T.tokeny_opis}}</p>
+      <ul id="lista-tokenow" class="lista-kont lista-tokenow"></ul>
+      <form id="form-tokenu" class="wiersz-formy">
+        <input name="name" placeholder="{{.T.tokeny_nazwa}}" maxlength="64" autocomplete="off" required>
+        <button type="submit" class="btn btn--quiet">{{.T.tokeny_utworz}}</button>
+      </form>
+      <div class="nowy-token" id="nowy-token" hidden>
+        <p class="drobne">{{.T.tokeny_pokazany_raz}}</p>
+        <div class="wiersz-formy">
+          <input id="nowy-token-wartosc" readonly spellcheck="false" autocomplete="off"
+                 aria-label="{{.T.tokeny_tytul}}">
+          <button type="button" id="kopiuj-token" class="btn btn--quiet">{{.T.kopiuj}}</button>
+        </div>
+      </div>
     </section>
 
     <p class="ok-okna" id="ok-ustawien" hidden></p>

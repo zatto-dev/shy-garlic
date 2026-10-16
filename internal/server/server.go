@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -50,6 +51,21 @@ type Server struct {
 	// jest własnością deployu.
 	prógZFlagi bool
 	instancja  []OpisOpcji
+	// Tokeny API i /metrics (SHYG-49).
+	limTokenów  *limiter     // błędne tokeny — osobno od limitu logowania
+	logiTokenów *tłumikLogów // jedna linia logu na adres na minutę
+	// metrykiCIDR — sieci, z których /metrics odpowiada bez tokenu; ustawiane
+	// raz w New, potem tylko do odczytu.
+	metrykiCIDR []netip.Prefix
+
+	muUżycie      sync.Mutex
+	użycieTokenów map[int64]time.Time // kiedy ostatnio zapisaliśmy last_used_at
+
+	muDostępności   sync.Mutex
+	dostępnościMapa map[string]store.DostępnośćUsługi
+	dostępnościDo   time.Time
+	dostępnościTTL  time.Duration
+
 	// klientProxy pobiera ikony podane pełnym adresem; osobne pole, bo test
 	// musi umieć podstawić klienta bez blokady adresów prywatnych
 	klientProxy *http.Client
@@ -103,6 +119,7 @@ type Opcje struct {
 	PrógAwarii    int      // ile nieudanych sprawdzeń z rzędu zanim powiadomimy
 	DockerSock    string   // gniazdo Dockera do podpowiadania usług (pusty = domyślne)
 	TrustedProxy  []string // CIDR-y proxy, którym wolno mówić X-Forwarded-*
+	MetricsAllow  []string // CIDR-y, z których /metrics odpowiada bez tokenu (domyślnie: żadne)
 
 	// WebhookZeŚrodowiska — adres przyszedł z flagi albo ze zmiennej, więc
 	// panel go nie nadpisze. Deploy ma wygrywać z klikaniem: inaczej restart
@@ -147,6 +164,14 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 		klientProxy: klientIkonZewnętrznych(),
 		subWygląd:   map[chan struct{}]struct{}{},
 		ostatnie:    map[string]time.Time{},
+
+		limTokenów:     nowyLimiterZProgiem(progBłędnychTokenów),
+		logiTokenów:    &tłumikLogów{okres: time.Minute},
+		użycieTokenów:  map[int64]time.Time{},
+		dostępnościTTL: 30 * time.Second,
+	}
+	if err := s.ustawMetrykiAllow(o.MetricsAllow); err != nil {
+		return nil, err
 	}
 
 	// Adres z bazy podnosimy tylko wtedy, gdy środowisko nic nie narzuciło —
@@ -579,6 +604,10 @@ func (s *Server) Handler() http.Handler {
 	chronione.HandleFunc("GET /{$}", s.handleIndex)
 	chronione.HandleFunc("GET /api/status", s.handleStatus)
 	chronione.HandleFunc("GET /api/history", s.handleHistory)
+	chronione.HandleFunc("GET /metrics", s.handleMetrics)
+	chronione.HandleFunc("GET /api/tokens", s.handleTokensList)
+	chronione.HandleFunc("POST /api/tokens", s.handleTokenCreate)
+	chronione.HandleFunc("DELETE /api/tokens/{id}", s.handleTokenDelete)
 	chronione.HandleFunc("GET /api/service", s.handleService)
 	chronione.HandleFunc("POST /api/check", s.handleCheckNow)
 	chronione.HandleFunc("POST /api/notify/test", s.handleNotifyTest)

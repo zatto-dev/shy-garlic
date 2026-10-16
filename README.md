@@ -496,9 +496,9 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
-| The SQLite database   | webhook address, accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
+| The SQLite database   | webhook address, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
 
 Every flag has an `SHYG_`-prefixed environment variable (`SHYG_ADDR`,
@@ -524,16 +524,108 @@ panel does and does not defend against, and how it expects to be deployed, is
 written down in [SECURITY.md](SECURITY.md) — read it before you expose this to
 anything wider than a LAN.
 
+## Metrics and read-only API tokens
+
+Shy Garlic can feed your existing monitoring. **Settings → Instance → API
+tokens** creates a token (`shyg_…`, 256 bits of randomness) with a name of your
+choice. It is shown once, with a copy button, and stored only as a SHA-256 hash
+in the database — if you lose it, revoke it and create another.
+
+A token is **read-only by construction**: the `Authorization: Bearer shyg_…`
+header is honoured only for `GET` on three routes — `/metrics`, `/api/status`
+and `/api/history`. Everywhere else it is ignored and the route wants a session,
+so a token that leaks from your Prometheus cannot change the config, create an
+account or mint another token. Requests without a valid token get `401`, never a
+redirect to the sign-in page. Failed attempts are rate limited per address and
+logged once a minute per address.
+
+```sh
+# a quick look, token kept in a file rather than in your shell history
+curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/shyg.token)" \
+  https://garlic.home.arpa/metrics
+```
+
+### Prometheus
+
+```yaml
+scrape_configs:
+  - job_name: shy-garlic
+    scrape_interval: 30s
+    scheme: https
+    authorization:                                # Prometheus 2.26+
+      type: Bearer
+      credentials_file: /etc/prometheus/shyg.token
+    # older versions: bearer_token_file: /etc/prometheus/shyg.token
+    static_configs:
+      - targets: ["garlic.home.arpa"]
+```
+
+| Metric                                         | Meaning                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `shyg_service_up`                              | `1` when the last check succeeded, `0` when the service is degraded or down |
+| `shyg_service_degraded`                        | `1` when it answers, but with the wrong status code or content          |
+| `shyg_service_response_seconds`                | response time of the last check; absent when nothing answered           |
+| `shyg_service_availability_ratio{window="24h"}` | share of successful checks in 24 hours, `0`–`1`                          |
+| `shyg_service_last_check_timestamp_seconds`    | Unix time of the last check                                              |
+| `shyg_build_info{version}`                     | always `1`                                                               |
+
+All service metrics carry the labels `group` and `service`. A service that has
+not been checked yet (or has no address) has **no series at all** — a `0` would
+read as "down" and wake you up for nothing. An alert that fires only on a real
+outage: `shyg_service_up == 0 and shyg_service_degraded == 0`.
+
+A ready dashboard — up/degraded/down counters, a 24-hour availability table,
+response times and a state timeline per service — is in
+[`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json). In Grafana:
+Dashboards → New → Import → upload the file, and pick your Prometheus data
+source when asked.
+
+### Without a token, from your own network
+
+By default `/metrics` needs a token. If Prometheus runs on a trusted network and
+you would rather not manage a token, list that network:
+
+```sh
+shyg serve --metrics-allow 192.168.0.0/24          # or SHYG_METRICS_ALLOW=192.168.0.0/24,fd00::/8
+```
+
+This opens **only** `GET /metrics`, and only for those addresses. Behind a
+reverse proxy set `--trusted-proxy` as well: the client address is then taken
+from `X-Forwarded-For` as the right-most entry that is not a trusted proxy (the
+left-hand entries are written by the client). A request that carries proxy
+headers from a peer you did **not** list as a trusted proxy is refused —
+otherwise a proxy standing in your LAN would let the whole internet read the
+metrics.
+
+### Home Assistant
+
+```yaml
+# configuration.yaml — secrets.yaml holds:  shyg_authorization: "Bearer shyg_…"
+rest:
+  - resource: https://garlic.home.arpa/api/status
+    scan_interval: 60
+    headers:
+      Authorization: !secret shyg_authorization
+    sensor:
+      - name: "Garlic: services not up"
+        value_template: "{{ value_json.values() | rejectattr('state', 'equalto', 'up') | list | length }}"
+    binary_sensor:
+      - name: "Jellyfin up"
+        device_class: connectivity
+        value_template: "{{ value_json['Media/Jellyfin'].state == 'up' }}"
+```
+
 ## API
 
-Everything sits behind the session. The dashboard uses exactly the same
-endpoints you would.
+Everything sits behind the session — except that `/api/status`, `/api/history`
+and `/metrics` also accept a [read-only token](#metrics-and-read-only-api-tokens).
+The dashboard uses exactly the same endpoints you would.
 
 | Method   | Path                             | What it does                                              |
 | -------- | -------------------------------- | --------------------------------------------------------- |
-| `GET`    | `/api/status`                    | current state of every service                             |
+| `GET`    | `/api/status`                    | current state of every service (session or API token)      |
 | `GET`    | `/events`                        | SSE stream of state changes                                |
-| `GET`    | `/api/history?key=Group/Service` | check history and 24-hour uptime                           |
+| `GET`    | `/api/history?key=Group/Service` | check history and 24-hour uptime (session or API token)    |
 | `GET`    | `/api/service?key=Group/Service` | everything about one service: stats, chart, state changes  |
 | `POST`   | `/api/check?key=Group/Service`   | check that service right now                               |
 | `GET`    | `/api/info`                      | what this instance has enabled                             |
@@ -563,6 +655,10 @@ endpoints you would.
 | `GET`    | `/api/background`                | list uploaded wallpapers                                   |
 | `DELETE` | `/api/background/{name}`         | delete one (`409` while it is in use)                      |
 | `GET`    | `/bg/{name}`                     | serve a wallpaper — signed-in only                         |
+| `GET`    | `/metrics`                       | Prometheus metrics — session or API token                  |
+| `GET`    | `/api/tokens`                    | list API tokens (never the secret itself)                  |
+| `POST`   | `/api/tokens`                    | create a token; the secret is in this one response only    |
+| `DELETE` | `/api/tokens/{id}`               | revoke a token                                             |
 | `GET`    | `/healthz`                       | liveness, the one route that needs no session              |
 
 Account management (`/api/users`, `/api/password`) follows the same rules.

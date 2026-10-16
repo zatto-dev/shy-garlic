@@ -496,9 +496,9 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 
 | Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
 | Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
-| Baza SQLite                  | adres webhooka, konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
+| Baza SQLite                  | adres webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
 | Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
 
 Każda flaga ma odpowiednik w zmiennej środowiskowej z przedrostkiem `SHYG_`
@@ -523,15 +523,106 @@ Nie ma uprawnień per użytkownik: każde konto może wszystko. Przed czym panel
 broni, a przed czym nie, i jak zakłada, że go wdrożysz, spisane jest w
 [SECURITY.md](SECURITY.md) — przeczytaj, zanim wystawisz to szerzej niż na LAN.
 
+## Metryki i tokeny API tylko do odczytu
+
+Shy Garlic potrafi karmić Twój istniejący monitoring. **Ustawienia → Instancja →
+Tokeny API** tworzy token (`shyg_…`, 256 bitów losowości) z wybraną nazwą.
+Pokazujemy go raz, z przyciskiem „Kopiuj", a w bazie leży tylko jego skrót
+SHA-256 — jeśli go zgubisz, odwołaj go i utwórz nowy.
+
+Token jest **tylko do odczytu z konstrukcji**: nagłówek `Authorization: Bearer
+shyg_…` jest honorowany wyłącznie dla `GET` na trzech trasach — `/metrics`,
+`/api/status` i `/api/history`. Wszędzie indziej jest ignorowany i trasa żąda
+sesji, więc token wyciekły z Prometheusa nie zmieni configu, nie założy konta i
+nie wystawi kolejnego tokenu. Żądanie bez ważnego tokenu dostaje `401`, nigdy
+przekierowanie na logowanie. Nieudane próby są limitowane per adres, a w logu
+pojawiają się raz na minutę na adres.
+
+```sh
+# szybki podgląd; token w pliku, nie w historii powłoki
+curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/shyg.token)" \
+  https://garlic.home.arpa/metrics
+```
+
+### Prometheus
+
+```yaml
+scrape_configs:
+  - job_name: shy-garlic
+    scrape_interval: 30s
+    scheme: https
+    authorization:                                # Prometheus 2.26+
+      type: Bearer
+      credentials_file: /etc/prometheus/shyg.token
+    # starsze wersje: bearer_token_file: /etc/prometheus/shyg.token
+    static_configs:
+      - targets: ["garlic.home.arpa"]
+```
+
+| Metryka                                        | Znaczenie                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `shyg_service_up`                              | `1`, gdy ostatnie sprawdzenie się udało; `0` dla degraded i down          |
+| `shyg_service_degraded`                        | `1`, gdy odpowiada, ale złym kodem albo złą treścią                       |
+| `shyg_service_response_seconds`                | czas odpowiedzi ostatniego sprawdzenia; brak, gdy nic nie odpowiedziało   |
+| `shyg_service_availability_ratio{window="24h"}` | odsetek udanych sprawdzeń w 24 godzinach, `0`–`1`                         |
+| `shyg_service_last_check_timestamp_seconds`    | czas Unix ostatniego sprawdzenia                                          |
+| `shyg_build_info{version}`                     | zawsze `1`                                                                |
+
+Wszystkie metryki usług mają etykiety `group` i `service`. Usługa, której jeszcze
+nie sprawdzono (albo bez adresu), **nie ma żadnej serii** — `0` czytałoby się
+jako „leży" i budziło bez powodu. Alert, który odpala się tylko przy prawdziwej
+awarii: `shyg_service_up == 0 and shyg_service_degraded == 0`.
+
+Gotowy dashboard — liczniki up/degraded/down, tabela dostępności z 24 godzin,
+czasy odpowiedzi i oś stanów per usługa — leży w
+[`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json). W Grafanie:
+Dashboards → New → Import → wgraj plik i wskaż swoje źródło Prometheus.
+
+### Bez tokenu, z własnej sieci
+
+Domyślnie `/metrics` wymaga tokenu. Jeśli Prometheus stoi w zaufanej sieci i
+wolisz nie zarządzać tokenem, wymień tę sieć:
+
+```sh
+shyg serve --metrics-allow 192.168.0.0/24          # albo SHYG_METRICS_ALLOW=192.168.0.0/24,fd00::/8
+```
+
+To otwiera **wyłącznie** `GET /metrics` i tylko dla tych adresów. Za reverse
+proxy ustaw też `--trusted-proxy`: adres klienta jest wtedy brany z
+`X-Forwarded-For` jako skrajnie prawy wpis, który nie jest zaufanym proxy
+(wpisy z lewej pisze klient). Żądanie z nagłówkami proxy od peera, którego
+**nie** wpisano jako zaufane proxy, jest odrzucane — inaczej proxy stojące w
+Twoim LAN-ie pozwalałoby czytać metryki całemu internetowi.
+
+### Home Assistant
+
+```yaml
+# configuration.yaml — w secrets.yaml:  shyg_authorization: "Bearer shyg_…"
+rest:
+  - resource: https://garlic.home.arpa/api/status
+    scan_interval: 60
+    headers:
+      Authorization: !secret shyg_authorization
+    sensor:
+      - name: "Garlic: usługi nie-up"
+        value_template: "{{ value_json.values() | rejectattr('state', 'equalto', 'up') | list | length }}"
+    binary_sensor:
+      - name: "Jellyfin działa"
+        device_class: connectivity
+        value_template: "{{ value_json['Media/Jellyfin'].state == 'up' }}"
+```
+
 ## API
 
-Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
+Wszystko za sesją — z wyjątkiem `/api/status`, `/api/history` i `/metrics`, które
+przyjmują też [token tylko do odczytu](#metryki-i-tokeny-api-tylko-do-odczytu).
+Panel używa dokładnie tych samych endpointów co Ty.
 
 | Metoda   | Ścieżka                          | Co robi                                                |
 | -------- | -------------------------------- | ------------------------------------------------------ |
-| `GET`    | `/api/status`                    | aktualny stan wszystkich usług                          |
+| `GET`    | `/api/status`                    | aktualny stan wszystkich usług (sesja albo token API)   |
 | `GET`    | `/events`                        | strumień SSE ze zmianami stanu                          |
-| `GET`    | `/api/history?key=Grupa/Usługa`  | historia sprawdzeń i dostępność 24 h                    |
+| `GET`    | `/api/history?key=Grupa/Usługa`  | historia sprawdzeń i dostępność 24 h (sesja albo token) |
 | `GET`    | `/api/service?key=Grupa/Usługa`  | wszystko o jednej usłudze: staty, wykres, zmiany stanu  |
 | `POST`   | `/api/check?key=Grupa/Usługa`    | sprawdź tę usługę natychmiast                           |
 | `GET`    | `/api/info`                      | co ta instancja ma włączone                             |
@@ -561,6 +652,10 @@ Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
 | `GET`    | `/api/background`                | lista wgranych tapet                                    |
 | `DELETE` | `/api/background/{nazwa}`        | usuń tapetę (`409`, gdy jest w użyciu)                  |
 | `GET`    | `/bg/{nazwa}`                    | serwowanie tapety — tylko dla zalogowanych              |
+| `GET`    | `/metrics`                       | metryki Prometheusa — sesja albo token API              |
+| `GET`    | `/api/tokens`                    | lista tokenów API (nigdy sam sekret)                    |
+| `POST`   | `/api/tokens`                    | utwórz token; sekret tylko w tej jednej odpowiedzi      |
+| `DELETE` | `/api/tokens/{id}`               | odwołaj token                                           |
 | `GET`    | `/healthz`                       | liveness, jedyna trasa bez sesji                        |
 
 Zarządzanie kontami (`/api/users`, `/api/password`) działa na tych samych

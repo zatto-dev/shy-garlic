@@ -1473,6 +1473,7 @@
     await wczytajInfo();
     await wczytajPowiadomienia();
     await wczytajInstancje();
+    await wczytajTokeny();
     await wczytajWersje();
     await wczytajYaml();
     oknoUstawien.showModal();
@@ -1576,6 +1577,91 @@
       tbody.append(wiersz);
     }
   }
+
+  // ── tokeny API (tylko do odczytu) ─────────────────────────────────────────
+
+  const nowyTokenBox = $("#nowy-token");
+  const nowyTokenPole = $("#nowy-token-wartosc");
+
+  function ukryjNowyToken() {
+    nowyTokenBox.hidden = true;
+    nowyTokenPole.value = "";
+  }
+
+  async function wczytajTokeny() {
+    const lista = $("#lista-tokenow");
+    lista.textContent = "";
+    ukryjNowyToken();
+    try {
+      const d = await api("GET", "/api/tokens");
+      if (!d.tokens.length) {
+        const li = document.createElement("li");
+        li.textContent = tr("tokeny_brak");
+        lista.append(li);
+        return;
+      }
+      for (const t of d.tokens) {
+        const li = document.createElement("li");
+        const opis = document.createElement("span");
+        const nazwa = document.createElement("strong");
+        nazwa.textContent = t.name;
+        const meta = document.createElement("span");
+        meta.className = "token-meta";
+        const uzyty = t.lastUsed
+          ? podstaw(tr("tokeny_uzyty"), new Date(t.lastUsed).toLocaleString(LANG))
+          : tr("tokeny_nieuzyty");
+        meta.textContent = `${t.hint}… · ${uzyty}`;
+        opis.append(nazwa, meta);
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("tokeny_odwolaj");
+        b.addEventListener("click", async () => {
+          if (!(await potwierdz(podstaw(tr("tokeny_potwierdz"), t.name)))) return;
+          try { await api("DELETE", `/api/tokens/${t.id}`); await wczytajTokeny(); pokazOk(tr("tokeny_odwolany")); }
+          catch (err) { pokazBlad(err.message); }
+        });
+        li.append(opis, b);
+        lista.append(li);
+      }
+    } catch (err) { pokazBlad(err.message); }
+  }
+
+  $("#form-tokenu").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      const d = await api("POST", "/api/tokens", { name: f.name.value.trim() });
+      f.reset();
+      await wczytajTokeny();
+      // wartość trafia do pola dopiero po odświeżeniu listy (ono czyści pole),
+      // i tylko tam — nigdzie indziej w DOM-ie ani w pamięci przeglądarki
+      nowyTokenPole.value = d.token;
+      nowyTokenBox.hidden = false;
+      nowyTokenPole.focus();
+      nowyTokenPole.select();
+      bladUstawien.hidden = true;
+      pokazOk(tr("tokeny_utworzony"));
+    } catch (err) { pokazBlad(err.message); }
+  });
+
+  $("#kopiuj-token").addEventListener("click", async () => {
+    const wartosc = nowyTokenPole.value;
+    if (!wartosc) return;
+    let ok = false;
+    // navigator.clipboard istnieje tylko w bezpiecznym kontekście (https,
+    // localhost); panel w LAN po http musi zejść do execCommand
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(wartosc);
+        ok = true;
+      }
+    } catch (_) {}
+    if (!ok) {
+      nowyTokenPole.focus();
+      nowyTokenPole.select();
+      try { ok = document.execCommand("copy"); } catch (_) {}
+    }
+    if (ok) pokazOk(tr("skopiowano"));
+  });
 
   async function wczytajKonta() {
     const lista = $("#lista-kont");

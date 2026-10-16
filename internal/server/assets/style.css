@@ -1316,6 +1316,13 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 .lista-kont button:hover { color: var(--down-tekst); }
 .lista-kont button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
 
+.lista-tokenow li > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.token-meta { font: 400 12px/1.2 var(--font-mono); color: var(--ink3); overflow-wrap: anywhere; }
+.nowy-token {
+  margin-top: 10px; padding: 12px; border-radius: var(--r-duza);
+  border: 1px solid var(--acc); background: var(--chip);
+}
+.nowy-token input { font-family: var(--font-mono); font-size: 12px; }
 .wiersz-formy { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .wiersz-formy input { flex: 1; min-width: 120px; }
 

@@ -56,6 +56,8 @@ func run() error {
 		"katalog wgranych tapet (domyślnie podkatalog bg/ obok pliku bazy)")
 	zaufaneProxy := fs.String("trusted-proxy", envLub("SHYG_TRUSTED_PROXY", ""),
 		"CIDR-y proxy, którym wolno ustawiać X-Forwarded-For i X-Forwarded-Proto (po przecinku)")
+	metricsAllow := fs.String("metrics-allow", envLub("SHYG_METRICS_ALLOW", ""),
+		"CIDR-y, z których /metrics odpowiada bez tokenu (po przecinku; domyślnie żadne — wymagany token)")
 	debug := fs.Bool("debug", false, "logi debug")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -71,7 +73,7 @@ func run() error {
 		cfgPath: *cfgPath, addr: *addr, dataPath: *dataPath,
 		iconsZip: *iconsZip, cacheDir: *cacheDir, tłaDir: *tłaDir,
 		webhook: *webhook, prógAwarii: *prógAwarii, dockerSock: *dockerSock,
-		zaufaneProxy: *zaufaneProxy,
+		zaufaneProxy: *zaufaneProxy, metricsAllow: *metricsAllow,
 	}
 	o.prógZFlagi = źródło(fs, "fail-threshold", "") == "flaga"
 	o.instancja = opisInstancji(fs, o)
@@ -103,6 +105,7 @@ type opcjeCLI struct {
 	webhook      string
 	dockerSock   string
 	zaufaneProxy string
+	metricsAllow string
 	prógAwarii   int
 	prógZFlagi   bool
 	instancja    []server.OpisOpcji
@@ -140,6 +143,7 @@ func opisInstancji(fs *flag.FlagSet, o opcjeCLI) []server.OpisOpcji {
 		{Klucz: "icons", Wartość: o.iconsZip, Źródło: źródło(fs, "icons", "SHYG_ICONS")},
 		{Klucz: "docker", Wartość: o.dockerSock, Źródło: źródło(fs, "docker", "SHYG_DOCKER")},
 		{Klucz: "trusted-proxy", Wartość: o.zaufaneProxy, Źródło: źródło(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
+		{Klucz: "metrics-allow", Wartość: o.metricsAllow, Źródło: źródło(fs, "metrics-allow", "SHYG_METRICS_ALLOW")},
 	}
 }
 
@@ -182,6 +186,7 @@ func serve(o opcjeCLI) error {
 		IconsZip: o.iconsZip, CacheDir: o.cacheDir, BackgroundDir: o.tłaDir,
 		Webhook: o.webhook, PrógAwarii: o.prógAwarii, DockerSock: o.dockerSock,
 		TrustedProxy: rozdziel(o.zaufaneProxy),
+		MetricsAllow: rozdziel(o.metricsAllow),
 
 		WebhookZeŚrodowiska: o.webhook != "",
 		PrógZFlagi:          o.prógZFlagi,

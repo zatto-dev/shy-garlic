@@ -37,6 +37,14 @@ Knowing where the boundary is drawn saves everyone time.
   a client forge its own address, which affects both the log and the sign-in
   rate limit. It is deliberately a start-up flag and not something the panel
   can change about itself.
+- **API tokens are read-only and live in the database.** A token (`shyg_…`) is
+  honoured only for `GET` on `/metrics`, `/api/status` and `/api/history`; every
+  other route ignores it and requires a session. The database stores a SHA-256
+  hash, never the token. `--metrics-allow` lets listed networks read `/metrics`
+  without a token — use it only for networks you trust, and set
+  `--trusted-proxy` when a proxy sits in front (the address is then the
+  right-most `X-Forwarded-For` entry that is not a trusted proxy; a request
+  with proxy headers from an unlisted peer is refused).
 - **The Docker socket is read-only by design.** The bundled compose file puts
   a socket proxy in front of it with `POST` disabled, so discovery can list
   containers and nothing else. Handing the panel the bare socket gives it the
@@ -53,5 +61,5 @@ Knowing where the boundary is drawn saves everyone time.
 
 - No external security review has been carried out. That is the reason the
   version number still starts with a zero.
-- There is no rate limit on the API beyond sign-in.
+- There is no rate limit on the API beyond sign-in and failed API tokens.
 - Sessions are not invalidated when a password changes.

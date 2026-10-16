@@ -281,6 +281,23 @@ var teksty = map[string]map[Lang]string{
 	// błędy API pokazywane userowi
 	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
 	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
+	// tokeny API (SHYG-49)
+	"tokeny_tytul":        {EN: "API tokens", PL: "Tokeny API"},
+	"tokeny_opis":         {EN: "Read-only access for Prometheus, Home Assistant or a script: send Authorization: Bearer <token> to /metrics, /api/status or /api/history. A token cannot change anything and cannot sign in to the panel.", PL: "Dostęp tylko do odczytu dla Prometheusa, Home Assistanta albo skryptu: wyślij Authorization: Bearer <token> na /metrics, /api/status lub /api/history. Token niczego nie zmieni i nie zaloguje do panelu."},
+	"tokeny_nazwa":        {EN: "Name, e.g. prometheus", PL: "Nazwa, np. prometheus"},
+	"tokeny_utworz":       {EN: "Create token", PL: "Utwórz token"},
+	"tokeny_pokazany_raz": {EN: "Copy the token now. It is shown only once and cannot be read back — if you lose it, revoke it and create a new one.", PL: "Skopiuj token teraz. Pokazujemy go tylko raz i nie da się go odczytać później — jeśli go zgubisz, odwołaj go i utwórz nowy."},
+	"tokeny_brak":         {EN: "No tokens yet.", PL: "Brak tokenów."},
+	"tokeny_odwolaj":      {EN: "Revoke", PL: "Odwołaj"},
+	"tokeny_potwierdz":    {EN: "Revoke the token “%s”? Whatever uses it will get 401 from now on.", PL: "Odwołać token „%s”? Wszystko, co go używa, dostanie od teraz 401."},
+	"tokeny_uzyty":        {EN: "last used %s", PL: "ostatnio użyty %s"},
+	"tokeny_nieuzyty":     {EN: "never used", PL: "nigdy nieużyty"},
+	"tokeny_utworzony":    {EN: "Token created.", PL: "Token utworzony."},
+	"tokeny_odwolany":     {EN: "Token revoked.", PL: "Token odwołany."},
+	"kopiuj":              {EN: "Copy", PL: "Kopiuj"},
+	"skopiowano":          {EN: "Copied", PL: "Skopiowano"},
+	"blad_token_nazwa":    {EN: "Give the token a name (1–64 characters, no control characters).", PL: "Nazwij token (1–64 znaki, bez znaków sterujących)."},
+	"blad_token_limit":    {EN: "Too many tokens (50 at most). Revoke one you no longer use.", PL: "Za dużo tokenów (najwyżej 50). Odwołaj któryś, którego już nie używasz."},
 	// kontrola treści (SHYG-48)
 	"chip_tresc":           {EN: "wrong content", PL: "zła treść"},
 	"powod_stanu":          {EN: "Reason", PL: "Powód"},

@@ -102,6 +102,15 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL,
+  hash         TEXT NOT NULL UNIQUE,
+  hint         TEXT NOT NULL DEFAULT '',
+  author       TEXT NOT NULL DEFAULT '',
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at DATETIME
+);
 `)
 	if err != nil {
 		return err
