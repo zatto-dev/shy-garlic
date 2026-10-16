@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zatto-dev/shy-garlic/internal/health"
@@ -16,9 +17,15 @@ import (
 // check.path/contains dojechały do health.Target (zastosuj), a nie tylko że
 // każda warstwa osobno działa.
 func TestKontrolaTreściZConfiguDoWyniku(t *testing.T) {
-	var ścieżka string
+	// monitor sprawdza też sam w tle, więc zapis ścieżki idzie pod mutexem
+	var (
+		mu      sync.Mutex
+		ścieżka string
+	)
 	cel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		ścieżka = r.URL.Path
+		mu.Unlock()
 		if r.URL.Path == "/health" {
 			_, _ = w.Write([]byte(`{"status":"starting"}`))
 			return
@@ -41,8 +48,11 @@ func TestKontrolaTreściZConfiguDoWyniku(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ścieżka != "/health" {
-		t.Errorf("sprawdzanie poszło na %q, chcę /health", ścieżka)
+	mu.Lock()
+	ostatnia := ścieżka
+	mu.Unlock()
+	if ostatnia != "/health" {
+		t.Errorf("sprawdzanie poszło na %q, chcę /health", ostatnia)
 	}
 	if r.State != health.StateDegraded || !strings.HasPrefix(r.Err, health.PrefiksTreści) {
 		t.Fatalf("%+v", r)
