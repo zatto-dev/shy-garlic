@@ -337,7 +337,7 @@ func TestUstawTytuł(t *testing.T) {
 	if cfg, _ := Load(d.Bytes()); cfg.Title != "Nowy tytuł" {
 		t.Errorf("title = %q", cfg.Title)
 	}
-	assertOryginalneLinieNietknięte(t, strings.Replace(string(wczytajBasic(t)), "Homelab Mariusza", "Nowy tytuł", 1), string(d.Bytes()))
+	assertOryginalneLinieNietknięte(t, strings.Replace(string(wczytajBasic(t)), "Homelab Demo", "Nowy tytuł", 1), string(d.Bytes()))
 }
 
 func TestUstawTytułCytowanie(t *testing.T) {

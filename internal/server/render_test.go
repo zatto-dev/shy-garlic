@@ -409,7 +409,7 @@ const zaślepkaPodglądu = `<script>
     }
     if (u.startsWith("/api/users")) return json({ users: [{ id: 1, login: "mariusz" }] });
     if (u.startsWith("/api/versions")) return json({ versions: [] });
-    if (u.startsWith("/api/config")) return json({ yaml: "# Shy Garlic \u2014 homelab\n#\n# This file is the source of truth. The panel writes to it\n# without touching your comments or formatting.\n\ntitle: Homelab\n\ndefaults: \u0026defaults\n  check:\n    interval: 30s\n    timeout: 6s\n    expect: [200, 301, 302, 401, 403]\n\nappearance:\n  background:\n    preset: aurora\n    blur: 10\n    dim: 50\n  view: grid\n\nnotify:\n  threshold: 2\n\ngroups:\n  - name: Infrastructure\n    services:\n      - name: Proxmox anna\n        url: https://192.168.0.29:8006\n        icon: proxmox\n        check:\n          \u003c\u003c: *defaults\n          insecure: true   # self-signed certificate, on purpose\n" });
+    if (u.startsWith("/api/config")) return json({ yaml: "# Shy Garlic \u2014 homelab\n#\n# This file is the source of truth. The panel writes to it\n# without touching your comments or formatting.\n\ntitle: Homelab\n\ndefaults: \u0026defaults\n  check:\n    interval: 30s\n    timeout: 6s\n    expect: [200, 301, 302, 401, 403]\n\nappearance:\n  background:\n    preset: aurora\n    blur: 10\n    dim: 50\n  view: grid\n\nnotify:\n  threshold: 2\n\ngroups:\n  - name: Infrastructure\n    services:\n      - name: Proxmox\n        url: https://10.0.0.2:8006\n        icon: proxmox\n        check:\n          \u003c\u003c: *defaults\n          insecure: true   # self-signed certificate, on purpose\n" });
     return Promise.resolve(new Response("{}", { status: 503 }));
   };
 })();

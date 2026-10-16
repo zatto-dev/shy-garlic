@@ -38,10 +38,10 @@ func TestValueRangeWskazujeWartość(t *testing.T) {
 		path []any
 		want string
 	}{
-		{[]any{"groups", 0, "services", 1, "url"}, "http://192.168.0.195:8989"},
+		{[]any{"groups", 0, "services", 1, "url"}, "http://10.0.0.5:8989"},
 		{[]any{"groups", 0, "services", 1, "name"}, `"Sonarr"`}, // cudzysłowy w zakresie
 		{[]any{"groups", 0, "services", 0, "name"}, "Jellyfin"},
-		{[]any{"title"}, "Homelab Mariusza"},                             // komentarz odcięty
+		{[]any{"title"}, "Homelab Demo"},                             // komentarz odcięty
 		{[]any{"groups", 1, "services", 0, "check", "interval"}, "10s"},  // komentarz odcięty
 		{[]any{"defaults", "check", "expect"}, "[200, 301, 302, 401, 403]"},
 		{[]any{"groups", 1, "name"}, "Sieć"}, // wielobajtowy znak w linii

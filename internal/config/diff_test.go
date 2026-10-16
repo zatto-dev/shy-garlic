@@ -18,7 +18,7 @@ func TestDiffPokazujeDokładnieToCoZmienione(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetServiceField("Media", "Sonarr", "url", "http://192.168.0.195:8990"); err != nil {
+	if err := d.SetServiceField("Media", "Sonarr", "url", "http://10.0.0.5:8990"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -27,8 +27,8 @@ func TestDiffPokazujeDokładnieToCoZmienione(t *testing.T) {
 	if dodane != 1 || usunięte != 1 {
 		t.Fatalf("chcę +1/-1, mam +%d/-%d:\n%s", dodane, usunięte, diff)
 	}
-	if !strings.Contains(diff, "-        url: http://192.168.0.195:8989") ||
-		!strings.Contains(diff, "+        url: http://192.168.0.195:8990") {
+	if !strings.Contains(diff, "-        url: http://10.0.0.5:8989") ||
+		!strings.Contains(diff, "+        url: http://10.0.0.5:8990") {
 		t.Fatalf("diff nie pokazuje zmiany URL:\n%s", diff)
 	}
 	// kontekst ma być widoczny, żeby user wiedział, gdzie to jest
@@ -43,7 +43,7 @@ func TestDiffPokazujeDokładnieToCoZmienione(t *testing.T) {
 func TestDiffDodaniaUsługi(t *testing.T) {
 	src := wczytajBasic(t)
 	d, _ := Parse(src)
-	if err := d.AddService("Sieć", Service{Name: "AdGuard", URL: "http://192.168.0.29:3000"}); err != nil {
+	if err := d.AddService("Sieć", Service{Name: "AdGuard", URL: "http://10.0.0.2:3000"}); err != nil {
 		t.Fatal(err)
 	}
 	diff := Diff(src, d.Bytes(), 3)
