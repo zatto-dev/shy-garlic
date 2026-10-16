@@ -632,7 +632,12 @@ proxy ustaw też `--trusted-proxy`: adres klienta jest wtedy brany z
 `X-Forwarded-For` jako skrajnie prawy wpis, który nie jest zaufanym proxy
 (wpisy z lewej pisze klient). Żądanie z nagłówkami proxy od peera, którego
 **nie** wpisano jako zaufane proxy, jest odrzucane — inaczej proxy stojące w
-Twoim LAN-ie pozwalałoby czytać metryki całemu internetowi.
+Twoim LAN-ie pozwalałoby czytać metryki całemu internetowi. Z tego samego
+powodu zaufane proxy, które w ogóle **nie** wysyła `X-Forwarded-For`, jest przez
+`--metrics-allow` odrzucane (każde żądanie wyglądałoby jak adres samego proxy):
+nie używaj `--metrics-allow` za forwarderami L4 ani proxy, które nie dopisuje
+`X-Forwarded-For` (np. nginx skonfigurowany tylko z `X-Real-IP`). Tam używaj
+tokenu; tokeny działają dalej.
 
 ### Home Assistant
 

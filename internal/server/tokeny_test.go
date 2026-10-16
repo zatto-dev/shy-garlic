@@ -367,6 +367,12 @@ func TestMetrykiZCIDR(t *testing.T) {
 			[]string{"X-Forwarded-For", "unknown"}, 401},
 		{"zaufane proxy bez XFF — adres proxy decyduje (i nie jest na liście)",
 			[]string{"192.168.0.0/24"}, []string{"10.0.0.1"}, "10.0.0.1:1", nil, 401},
+		{"zaufane proxy bez XFF, a adres proxy jest na liście — odmowa (inaczej cały internet wygląda jak proxy)",
+			[]string{"10.0.0.0/24"}, []string{"10.0.0.1"}, "10.0.0.1:1", nil, 401},
+		{"zaufane proxy z pustym XFF, adres proxy na liście — odmowa",
+			[]string{"10.0.0.0/24"}, []string{"10.0.0.1"}, "10.0.0.1:1", []string{"X-Forwarded-For", " , "}, 401},
+		{"zaufane proxy z XFF, klient z listy — dalej działa",
+			[]string{"10.0.0.0/24"}, []string{"10.0.0.1"}, "10.0.0.1:1", []string{"X-Forwarded-For", "10.0.0.7"}, 200},
 		{"peer zaufany nie znaczy zezwolony", nil, []string{"10.0.0.1"}, "10.0.0.1:1",
 			[]string{"X-Forwarded-For", "192.168.0.7"}, 401},
 	}
@@ -445,5 +451,21 @@ func TestTekstyTokenówMająObaJęzyki(t *testing.T) {
 				t.Errorf("%s: brak tekstu %q", l, k)
 			}
 		}
+	}
+}
+
+// Token działa także tam, gdzie lista sieci jest zablokowana (zaufane proxy bez XFF).
+func TestMetrykiTokenDziałaGdyCIDRZablokowany(t *testing.T) {
+	t.Cleanup(func() { _ = UstawZaufaneProxy(nil) })
+	s := serwerTestowy(t)
+	ciasteczkoZalogowanego(t, s)
+	if err := s.ustawMetrykiAllow([]string{"10.0.0.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UstawZaufaneProxy([]string{"10.0.0.1"}); err != nil {
+		t.Fatal(err)
+	}
+	if w := wyślijZAdresu(s.Handler(), "10.0.0.1:1", "GET", "/metrics", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("bez tokenu: %d", w.Code)
 	}
 }

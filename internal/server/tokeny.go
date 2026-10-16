@@ -149,9 +149,15 @@ func (s *Server) ustawMetrykiAllow(lista []string) error {
 //   - żądanie z oznakami proxy, którego nie wpisano na listę zaufanych, jest
 //     odrzucane: widzimy wtedy adres pośrednika, nie klienta, a pośrednik stoi
 //     zwykle w tej samej sieci LAN, więc bez tej reguły --metrics-allow
-//     192.168.0.0/24 otwierałoby metryki całemu internetowi.
+//     192.168.0.0/24 otwierałoby metryki całemu internetowi;
+//   - zaufane proxy BEZ X-Forwarded-For (nginx z samym X-Real-IP, forwarder L4)
+//     też jest odrzucane: adres klienta byłby wtedy adresem proxy, czyli każde
+//     żądanie z internetu wyglądałoby jak LAN. Token dalej działa.
 func (s *Server) metrykiZCIDR(r *http.Request) bool {
 	if len(s.metrykiCIDR) == 0 || zPośrednikaBezZaufania(r) {
+		return false
+	}
+	if odZaufanegoProxy(r) && !maWpisyXFF(r) {
 		return false
 	}
 	a, ok := adresKlienta(r)

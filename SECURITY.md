@@ -44,7 +44,9 @@ Knowing where the boundary is drawn saves everyone time.
   without a token — use it only for networks you trust, and set
   `--trusted-proxy` when a proxy sits in front (the address is then the
   right-most `X-Forwarded-For` entry that is not a trusted proxy; a request
-  with proxy headers from an unlisted peer is refused).
+  with proxy headers from an unlisted peer is refused, and so is a trusted
+  proxy that sends no `X-Forwarded-For`). Do not use `--metrics-allow` behind
+  L4 forwarders or proxies that do not append `X-Forwarded-For`; use a token.
 - **The Docker socket is read-only by design.** The bundled compose file puts
   a socket proxy in front of it with `POST` disabled, so discovery can list
   containers and nothing else. Handing the panel the bare socket gives it the

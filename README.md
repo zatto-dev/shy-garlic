@@ -635,7 +635,11 @@ from `X-Forwarded-For` as the right-most entry that is not a trusted proxy (the
 left-hand entries are written by the client). A request that carries proxy
 headers from a peer you did **not** list as a trusted proxy is refused —
 otherwise a proxy standing in your LAN would let the whole internet read the
-metrics.
+metrics. For the same reason a trusted proxy that sends **no** `X-Forwarded-For`
+at all is refused by `--metrics-allow` (every request would look like the
+proxy's own address): do not use `--metrics-allow` behind L4 forwarders or
+proxies that do not append `X-Forwarded-For` (for example nginx configured with
+only `X-Real-IP`). Use a token there; tokens keep working.
 
 ### Home Assistant
 

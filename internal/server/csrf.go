@@ -183,6 +183,18 @@ func adresKlienta(r *http.Request) (addr netip.Addr, ok bool) {
 	return peer, false
 }
 
+// maWpisyXFF mówi, czy X-Forwarded-For niesie choć jeden niepusty wpis.
+func maWpisyXFF(r *http.Request) bool {
+	for _, h := range r.Header.Values("X-Forwarded-For") {
+		for _, e := range strings.Split(h, ",") {
+			if strings.TrimSpace(e) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // adresIP zwraca adres klienta jako tekst — klucz limitów i logów.
 // ! Wcześniej brał PIERWSZY wpis X-Forwarded-For, czyli ten, który klient
 // wpisuje sam — zmiana jednego nagłówka dawała „nowy adres" w limiterze.
