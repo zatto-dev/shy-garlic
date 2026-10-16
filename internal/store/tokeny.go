@@ -80,9 +80,15 @@ func (s *Store) NowyTokenAPI(ctx context.Context, nazwa, autor string) (string, 
 	token := PrefiksTokenu + hex.EncodeToString(b)
 	wskazówka := token[:len(PrefiksTokenu)+4]
 	teraz := time.Now().UTC()
+	// właściciel po loginie autora; brak konta (np. „?") = token bez właściciela
+	var właściciel sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE login = ?`, autor).Scan(&właściciel); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		return "", TokenAPI{}, err
+	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO api_tokens (name, hash, hint, author, created_at) VALUES (?, ?, ?, ?, ?)`,
-		nazwa, skrótTokenu(token), wskazówka, autor, teraz)
+		`INSERT INTO api_tokens (name, hash, hint, author, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		nazwa, skrótTokenu(token), wskazówka, autor, właściciel, teraz)
 	if err != nil {
 		return "", TokenAPI{}, err
 	}

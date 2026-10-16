@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -467,5 +468,37 @@ func TestMetrykiTokenDziałaGdyCIDRZablokowany(t *testing.T) {
 	}
 	if w := wyślijZAdresu(s.Handler(), "10.0.0.1:1", "GET", "/metrics", ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("bez tokenu: %d", w.Code)
+	}
+}
+
+// Konto usunięte przez API zabiera ze sobą tokeny; zmiana hasła ich nie rusza,
+// a komunikat sukcesu mówi o tym wprost.
+func TestUsunięcieKontaOdwołujeTokenyAZmianaHasłaNie(t *testing.T) {
+	s := serwerTestowy(t)
+	c := ciasteczkoZalogowanego(t, s) // admin
+	h := s.Handler()
+	inny, err := s.st.DodajUżytkownika(s.ctx, "inny", "haslo12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tInnego, _, _ := s.st.NowyTokenAPI(s.ctx, "inny-tok", "inny")
+	tAdmina, _, _ := s.st.NowyTokenAPI(s.ctx, "admin-tok", "admin")
+
+	if w := wyślij(h, c, "POST", "/api/password", `{"old":"haslo12345","new":"nowehaslo123"}`); w.Code != http.StatusOK {
+		t.Fatalf("zmiana hasła: %d %s", w.Code, w.Body)
+	}
+	if _, err := s.st.SprawdźTokenAPI(s.ctx, tAdmina); err != nil {
+		t.Errorf("zmiana hasła unieważniła token: %v", err)
+	}
+	if w := wyślij(h, c, "DELETE", "/api/users/"+strconv.FormatInt(inny.ID, 10), ""); w.Code != http.StatusOK {
+		t.Fatalf("usunięcie konta: %d %s", w.Code, w.Body)
+	}
+	if _, err := s.st.SprawdźTokenAPI(s.ctx, tInnego); err == nil {
+		t.Error("token usuniętego konta dalej działa")
+	}
+	for _, lang := range []i18n.Lang{i18n.EN, i18n.PL} {
+		if txt := i18n.T(lang, "haslo_zmienione"); !strings.Contains(txt, "API") {
+			t.Errorf("%s: komunikat nie wspomina o tokenach API: %q", lang, txt)
+		}
 	}
 }

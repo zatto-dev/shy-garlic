@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   hash         TEXT NOT NULL UNIQUE,
   hint         TEXT NOT NULL DEFAULT '',
   author       TEXT NOT NULL DEFAULT '',
+  user_id      INTEGER,
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_used_at DATETIME
 );
@@ -115,7 +116,33 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	if err != nil {
 		return err
 	}
+	if err := s.dopiszUserIDTokenów(); err != nil {
+		return err
+	}
 	return s.zahaszujSesje()
+}
+
+// dopiszUserIDTokenów: tokeny API pamiętały tylko tekstowy login autora, więc
+// usunięcie konta ich nie ruszało. user_id wiąże token z kontem (bez klucza
+// obcego — ALTER TABLE ADD COLUMN z REFERENCES jest w SQLite wybredny, a
+// usuwanie robi UsuńUżytkownika). Stare wiersze dostają user_id po loginie
+// autora; te, których autora nie ma w users, zostają bez właściciela.
+// Idempotentne.
+func (s *Store) dopiszUserIDTokenów() error {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('api_tokens') WHERE name = 'user_id'`)
+	if err != nil {
+		return err
+	}
+	jest := rows.Next()
+	rows.Close()
+	if !jest {
+		if _, err := s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN user_id INTEGER`); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(`UPDATE api_tokens SET user_id = (SELECT id FROM users WHERE login = api_tokens.author)
+		WHERE user_id IS NULL`)
+	return err
 }
 
 // skrótTokenu — w bazie leży sha256 tokenu, nie sam token: wyciek pliku .db
@@ -266,9 +293,21 @@ func (s *Store) Użytkownicy(ctx context.Context) ([]Użytkownik, error) {
 	return out, rows.Err()
 }
 
+// UsuńUżytkownika kasuje konto razem z jego sesjami (kaskada) i tokenami API —
+// token wystawiony przez usuniętego użytkownika nie ma prawa przeżyć jego konta.
 func (s *Store) UsuńUżytkownika(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ── sesje ────────────────────────────────────────────────────────────────────

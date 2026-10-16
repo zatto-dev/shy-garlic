@@ -119,7 +119,7 @@ var teksty = map[string]map[Lang]string{
 	"wczytaj_ponownie": {EN: "Reload", PL: "Wczytaj ponownie"},
 	"ty":               {EN: "you", PL: "Ty"},
 	"usun_male":        {EN: "delete", PL: "usuń"},
-	"haslo_zmienione":  {EN: "Password changed.", PL: "Hasło zmienione."},
+	"haslo_zmienione":  {EN: "Password changed. Other sessions were signed out. API tokens stay valid — revoke them under API tokens if you no longer trust one.", PL: "Hasło zmienione. Pozostałe sesje wylogowano. Tokeny API dalej działają — odwołaj je w sekcji Tokeny API, jeśli któremuś już nie ufasz."},
 
 	// wygląd i tło
 	"wyglad":           {EN: "Appearance", PL: "Wygląd"},

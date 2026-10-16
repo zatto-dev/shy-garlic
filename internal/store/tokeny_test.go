@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +166,76 @@ func TestDostępnościWszystkichUsług(t *testing.T) {
 	}
 	if _, ma := m["G/c"]; ma {
 		t.Error("usługa bez próbek w oknie nie powinna być w mapie")
+	}
+}
+
+// Usunięcie konta odwołuje tokeny, które to konto wystawiło; cudze zostają.
+func TestUsunięcieUżytkownikaOdwołujeJegoTokeny(t *testing.T) {
+	st := otwórzTestowy(t)
+	ctx := context.Background()
+	anna, _ := st.DodajUżytkownika(ctx, "anna", "haslo12345")
+	bartek, _ := st.DodajUżytkownika(ctx, "bartek", "haslo12345")
+	tAnny, _, err := st.NowyTokenAPI(ctx, "anny", "anna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tBartka, _, _ := st.NowyTokenAPI(ctx, "bartka", "bartek")
+	tSkryptu, _, _ := st.NowyTokenAPI(ctx, "obcy", "nieznany") // autor bez konta
+
+	if err := st.UsuńUżytkownika(ctx, anna.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SprawdźTokenAPI(ctx, tAnny); !errors.Is(err, ErrZłyToken) {
+		t.Errorf("token usuniętego konta dalej działa: %v", err)
+	}
+	for nazwa, tok := range map[string]string{"bartka": tBartka, "bez konta": tSkryptu} {
+		if _, err := st.SprawdźTokenAPI(ctx, tok); err != nil {
+			t.Errorf("token %s zniknął: %v", nazwa, err)
+		}
+	}
+	_ = bartek
+}
+
+// Stara baza (api_tokens bez user_id) dostaje kolumnę i przypisanie po loginie autora.
+func TestMigracjaTokenówDopisujeUserID(t *testing.T) {
+	ścieżka := filepath.Join(t.TempDir(), "stara.db")
+	db, err := sql.Open("sqlite", ścieżka)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := PrefiksTokenu + strings.Repeat("ab", 32)
+	_, err = db.Exec(`
+CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT NOT NULL UNIQUE COLLATE NOCASE, hash TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO users (id, login, hash) VALUES (7, 'Anna', 'x'), (8, 'bartek', 'x');
+CREATE TABLE api_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, hint TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at DATETIME);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO api_tokens (name, hash, hint, author) VALUES ('t', ?, 'shyg_abab', 'anna')`, skrótTokenu(token)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	st, err := Open(ścieżka)
+	if err != nil {
+		t.Fatalf("Open starej bazy: %v", err)
+	}
+	defer st.Close()
+	// drugie otwarcie (idempotencja migracji) nie może paść
+	st2, err := Open(ścieżka)
+	if err != nil {
+		t.Fatalf("drugie Open: %v", err)
+	}
+	st2.Close()
+
+	ctx := context.Background()
+	if _, err := st.SprawdźTokenAPI(ctx, token); err != nil {
+		t.Fatalf("token po migracji: %v", err)
+	}
+	if err := st.UsuńUżytkownika(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SprawdźTokenAPI(ctx, token); !errors.Is(err, ErrZłyToken) {
+		t.Errorf("token przypisany po loginie przetrwał usunięcie konta: %v", err)
 	}
 }
