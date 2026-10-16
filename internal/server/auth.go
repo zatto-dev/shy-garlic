@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -36,40 +37,126 @@ type limiter struct {
 	mu    sync.Mutex
 	próby map[string][]time.Time
 	próg  int
+
+	// maksGlobalnie: ile nieudanych prób na minutę przyjmujemy łącznie ze
+	// WSZYSTKICH adresów, zanim wstrzymamy kolejne (0 = bez limitu globalnego).
+	// To bezpiecznik na rozproszone zgadywanie z wielu adresów (rotacja /64,
+	// botnet); blokada jest chwilowa — wygasa, gdy okno minuty się przesunie.
+	maksGlobalnie int
+	globalnie     []time.Time
+
+	maksKluczy int              // twarda granica pamięci
+	teraz      func() time.Time // wstrzykiwane w testach
 }
 
-func nowyLimiter() *limiter { return nowyLimiterZProgiem(5) }
+func nowyLimiter() *limiter {
+	l := nowyLimiterZProgiem(5)
+	l.maksGlobalnie = maksPorażekLogowaniaNaMinutę
+	return l
+}
 
 func nowyLimiterZProgiem(próg int) *limiter {
-	return &limiter{próby: map[string][]time.Time{}, próg: próg}
+	return &limiter{próby: map[string][]time.Time{}, próg: próg,
+		maksKluczy: maksAdresówWLimiterze, teraz: time.Now}
 }
 
 // maksAdresówWLimiterze — twarda górna granica pamięci: mapa rośnie o adres
 // przy każdym pierwszym błędzie, a /metrics może stać w internecie.
 const maksAdresówWLimiterze = 10000
 
-// wolno zwraca false, gdy z tego adresu było już `próg` nieudanych prób w 5 minut.
+// maksPorażekLogowaniaNaMinutę — globalny bezpiecznik logowania (wszystkie adresy razem).
+const maksPorażekLogowaniaNaMinutę = 30
+
+const (
+	oknoLimitera         = 5 * time.Minute
+	oknoLimituGlobalnego = time.Minute
+)
+
+// kluczLimitera: IPv6 liczymy po prefiksie /64 (jedna sieć domowa dostaje
+// 2^64 adresów, więc limit per pełny adres nic nie dawał), IPv4 po pełnym adresie.
+func kluczLimitera(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		if p, err := a.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return a.String()
+}
+
+// wolno zwraca false, gdy z tego adresu było już `próg` nieudanych prób w 5 minut
+// albo gdy globalny limit porażek na minutę jest wyczerpany.
 func (l *limiter) wolno(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	próg := time.Now().Add(-5 * time.Minute)
-	świeże := l.próby[ip][:0]
-	for _, t := range l.próby[ip] {
+	teraz := l.teraz()
+	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) >= l.maksGlobalnie {
+		return false
+	}
+	klucz := kluczLimitera(ip)
+	próg := teraz.Add(-oknoLimitera)
+	świeże := l.próby[klucz][:0]
+	for _, t := range l.próby[klucz] {
 		if t.After(próg) {
 			świeże = append(świeże, t)
 		}
 	}
-	l.próby[ip] = świeże
+	if len(świeże) == 0 {
+		delete(l.próby, klucz)
+	} else {
+		l.próby[klucz] = świeże
+	}
 	return len(świeże) < l.próg
+}
+
+func (l *limiter) świeżeGlobalnie(teraz time.Time) []time.Time {
+	od := teraz.Add(-oknoLimituGlobalnego)
+	i := 0
+	for i < len(l.globalnie) && !l.globalnie[i].After(od) {
+		i++
+	}
+	l.globalnie = l.globalnie[i:]
+	return l.globalnie
 }
 
 func (l *limiter) zapiszPorażkę(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, znany := l.próby[ip]; !znany && len(l.próby) >= maksAdresówWLimiterze {
-		l.próby = map[string][]time.Time{}
+	teraz := l.teraz()
+	klucz := kluczLimitera(ip)
+	if _, znany := l.próby[klucz]; !znany && len(l.próby) >= l.maksKluczy {
+		l.zwolnijMiejsce(teraz)
 	}
-	l.próby[ip] = append(l.próby[ip], time.Now())
+	l.próby[klucz] = append(l.próby[klucz], teraz)
+	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) < l.maksGlobalnie {
+		l.globalnie = append(l.globalnie, teraz)
+	}
+}
+
+// zwolnijMiejsce robi miejsce na nowy klucz, nie zapominając wszystkich naraz:
+// najpierw wygasłe wpisy, a jeśli to za mało — jeden, najdawniej używany.
+func (l *limiter) zwolnijMiejsce(teraz time.Time) {
+	próg := teraz.Add(-oknoLimitera)
+	for k, ts := range l.próby {
+		if len(ts) == 0 || !ts[len(ts)-1].After(próg) {
+			delete(l.próby, k)
+		}
+	}
+	if len(l.próby) < l.maksKluczy {
+		return
+	}
+	var najstarszy string
+	var kiedy time.Time
+	for k, ts := range l.próby {
+		if o := ts[len(ts)-1]; najstarszy == "" || o.Before(kiedy) {
+			najstarszy, kiedy = k, o
+		}
+	}
+	delete(l.próby, najstarszy)
 }
 
 // adresIP i poHTTPS mieszkają w csrf.go — obie zależą od listy zaufanych proxy.
