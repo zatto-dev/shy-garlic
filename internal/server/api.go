@@ -39,6 +39,23 @@ func jsonBłąd(w http.ResponseWriter, kod int, msg string) {
 	jsonOdp(w, kod, odpBłąd{Błąd: msg})
 }
 
+// Limity ciała żądań JSON. Bez nich jeden POST na kilka GB kładł proces
+// (json.Decoder czyta do końca, a zalogowany to nie zawsze zaufany).
+const (
+	limitJSON    = 1 << 20 // 1 MiB — ciało każdego zwykłego żądania to kilkaset bajtów
+	limitConfigu = 2 << 20 // 2 MiB — PUT /api/config niesie cały YAML w JSON-ie
+)
+
+// dekodujJSON czyta ciało żądania do v, nie więcej niż limitJSON bajtów.
+func dekodujJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return dekodujJSONLimit(w, r, v, limitJSON)
+}
+
+func dekodujJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 // zEdycją otwiera plik, woła fn, pokazuje albo zapisuje zmianę.
 //
 // Z parametrem ?dry=1 nic nie zapisuje — zwraca diff, żeby użytkownik zobaczył
@@ -183,12 +200,16 @@ func poprawnaNazwaWpisu(v string) bool {
 
 func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	var ż żądanieUsługi
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
 	if ż.Nazwa == "" || ż.Grupa == "" {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
+		return
+	}
+	if !config.PoprawnyAdresUsługi(ż.URL) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
 		return
 	}
 	svc := config.Service{Name: ż.Nazwa, URL: ż.URL, Icon: ż.Ikona, Size: rozmiarZŻądania(ż.Rozmiar)}
@@ -219,7 +240,7 @@ func przeliczCheck(ż żądanieUsługi) config.Check {
 
 func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	var ż żądanieUsługi
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -227,8 +248,11 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
 		return
 	}
-
 	lang := i18n.Wybierz(r)
+	if !config.PoprawnyAdresUsługi(ż.URL) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
+		return
+	}
 	opis := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_usluge"), ż.Nazwa)
 	if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
 		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.NowaGrupa)
@@ -306,7 +330,7 @@ func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
 		Pozycja *int   `json:"index"`
 	}
 	lang := i18n.Wybierz(r)
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -338,7 +362,7 @@ func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
 		Pozycja *int   `json:"index"`
 	}
 	lang := i18n.Wybierz(r)
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -361,7 +385,7 @@ func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
 		Tytuł string `json:"title"`
 	}
 	lang := i18n.Wybierz(r)
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -389,7 +413,7 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 	var ż struct {
 		Nazwa string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil || ż.Nazwa == "" {
+	if err := dekodujJSON(w, r, &ż); err != nil || ż.Nazwa == "" {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name")
 		return
 	}
@@ -404,7 +428,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		Nazwa     string `json:"name"`
 		NowaNazwa string `json:"newName"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil || ż.Nazwa == "" || ż.NowaNazwa == "" {
+	if err := dekodujJSON(w, r, &ż); err != nil || ż.Nazwa == "" || ż.NowaNazwa == "" {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name i newName")
 		return
 	}
@@ -460,7 +484,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	var ż struct {
 		YAML string `json:"yaml"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSONLimit(w, r, &ż, limitConfigu); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -560,7 +584,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		Login string `json:"login"`
 		Hasło string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -599,7 +623,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		Stare string `json:"old"`
 		Nowe  string `json:"new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -615,6 +639,13 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.ZmieńHasło(r.Context(), ja.ID, ż.Nowe); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// ! Zmiana hasła musi wyrzucić resztę sesji. Ktoś z ukradzionym ciasteczkiem
+	// inaczej zostawał w panelu do końca 30 dni. Bieżąca sesja zostaje.
+	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
+		if err := s.st.UsuńInneSesje(r.Context(), ja.ID, c.Value); err != nil {
+			slog.Error("kończenie innych sesji po zmianie hasła", "err", err)
+		}
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -842,7 +873,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 		Webhook *string `json:"webhook"`
 		Próg    *int    `json:"prog"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -1003,7 +1034,7 @@ type żądanieWyglądu struct {
 func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.Wybierz(r)
 	var ż żądanieWyglądu
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -1181,13 +1212,19 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		Grupa  string          `json:"group"`
 		Usługi []żądanieUsługi `json:"services"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
 	if len(ż.Usługi) == 0 {
 		jsonBłąd(w, http.StatusBadRequest, "pusta lista")
 		return
+	}
+	for _, u := range ż.Usługi {
+		if !config.PoprawnyAdresUsługi(u.URL) {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
+			return
+		}
 	}
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)

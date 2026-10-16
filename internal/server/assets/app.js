@@ -824,6 +824,16 @@
     return tr("brak_powodu");
   }
 
+  // zwraca adres tylko dla http(s); wszystko inne (javascript:, data:, tcp://…) → ""
+  function bezpiecznyHref(adres) {
+    try {
+      const u = new URL(String(adres || ""));
+      return u.protocol === "http:" || u.protocol === "https:" ? u.href : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
   async function otworzDetale(klucz) {
     aktualnyKlucz = klucz;
     try {
@@ -832,8 +842,13 @@
       $("#detale-nazwa").textContent = d.name;
       const link = $("#detale-url");
       link.textContent = d.url;
-      link.href = d.url;
-      $("#detale-otworz").href = d.url;
+      // ! tylko http(s) trafia do href — `javascript:` z pliku YAML to XSS
+      const href = bezpiecznyHref(d.url);
+      const otworz = $("#detale-otworz");
+      for (const a of [link, otworz]) {
+        if (href) a.href = href; else a.removeAttribute("href");
+      }
+      otworz.hidden = !href;
 
       const ikona = $("#detale-ikona");
       ikona.textContent = "";
@@ -1009,7 +1024,7 @@
     $("#tytul-uslugi").textContent = karta ? tr("edytuj_usluge") : tr("nowa_usluga");
     if (karta) {
       formaUslugi.name.value = karta.dataset.nazwa;
-      formaUslugi.url.value = karta.dataset.url;
+      formaUslugi.url.value = karta.dataset.adres;
       wybor.value = karta.dataset.grupa;
       wybor.disabled = false; // zmiana grupy = przeniesienie usługi
       ustawIkonaZWariantem(karta.dataset.ikona || "");

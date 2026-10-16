@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,10 @@ import (
 )
 
 const ciasteczkoSesji = "shyg_session"
+
+// limitFormularza — formularze logowania/setupu/języka to kilka pól; reszta to
+// próba zapchania pamięci.
+const limitFormularza = 64 << 10
 
 type kluczKontekstu string
 
@@ -57,6 +62,59 @@ func (l *limiter) zapiszPorażkę(ip string) {
 
 // adresIP i poHTTPS mieszkają w csrf.go — obie zależą od listy zaufanych proxy.
 
+// bezpiecznyCel zwraca `next` tylko wtedy, gdy jest ścieżką wewnątrz panelu;
+// w każdym innym przypadku "/". Jedyne miejsce prawdy dla przekierowań po
+// logowaniu i po zmianie języka.
+//
+// ! Sam test `HasPrefix("/") && !HasPrefix("//")` przepuszczał `/\evil.com`:
+// przeglądarki traktują `\` jak `/`, więc Location: /\evil.com to adres
+// zewnętrzny. Odrzucamy backslash (także zakodowany), znaki sterujące i
+// wszystko, co url.Parse widzi jako schemat albo host.
+func bezpiecznyCel(next string) string {
+	const domyślny = "/"
+	if next == "" || next[0] != '/' || strings.HasPrefix(next, "//") {
+		return domyślny
+	}
+	for _, r := range next {
+		if r == '\\' || r < 0x20 || r == 0x7f {
+			return domyślny
+		}
+	}
+	// zakodowany backslash albo znak sterujący: dekodujemy i sprawdzamy jeszcze raz
+	if dek, err := url.PathUnescape(next); err != nil {
+		return domyślny
+	} else {
+		for _, r := range dek {
+			if r == '\\' || r < 0x20 || r == 0x7f {
+				return domyślny
+			}
+		}
+		if strings.HasPrefix(dek, "//") {
+			return domyślny
+		}
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || !strings.HasPrefix(u.Path, "/") {
+		return domyślny
+	}
+	return next
+}
+
+// celZReferera — powrót na stronę, z której przyszło żądanie, ale tylko jeśli
+// Referer wskazuje TEN SAM host. GET /lang nie jest chroniony przez
+// wymagajSameOrigin, więc obcy Referer to był otwarty redirect.
+func celZReferera(r *http.Request) string {
+	ref := r.Header.Get("Referer")
+	if ref == "" {
+		return "/"
+	}
+	u, err := url.Parse(ref)
+	if err != nil || !strings.EqualFold(u.Host, r.Host) {
+		return "/"
+	}
+	return bezpiecznyCel(u.RequestURI())
+}
+
 // ── middleware ───────────────────────────────────────────────────────────────
 
 // wymagajLogowania przepuszcza tylko z ważną sesją. Gdy w bazie nie ma jeszcze
@@ -82,7 +140,7 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 		}
 		cel := "/login"
 		if r.URL.Path != "/" {
-			cel += "?next=" + r.URL.Path
+			cel += "?next=" + url.QueryEscape(r.URL.Path)
 		}
 		http.Redirect(w, r, cel, http.StatusSeeOther)
 	})
@@ -137,6 +195,7 @@ type widokLogowania struct {
 // (bramki SSO, WAF-y) potrafią zjeść POST-a, a przełącznik języka ma działać
 // wszędzie, także w przeglądarce bez JavaScriptu.
 func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	_ = r.ParseForm()
 	l := i18n.Rozpoznaj(r.FormValue("lang"))
 	if l == "" {
@@ -150,12 +209,10 @@ func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
 		MaxAge: 365 * 24 * 3600, HttpOnly: false,
 		Secure: poHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
-	cel := r.FormValue("next")
-	if cel == "" || !strings.HasPrefix(cel, "/") || strings.HasPrefix(cel, "//") {
-		cel = r.Header.Get("Referer")
-	}
-	if cel == "" {
-		cel = "/"
+	next := r.FormValue("next")
+	cel := bezpiecznyCel(next)
+	if cel == "/" && next != "/" { // brak albo zły next → wracamy skąd przyszło
+		cel = celZReferera(r)
 	}
 	http.Redirect(w, r, cel, http.StatusSeeOther)
 }
@@ -177,16 +234,14 @@ func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
 	hasło := r.FormValue("password")
-	next := r.FormValue("next")
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
-	}
+	next := bezpiecznyCel(r.FormValue("next"))
 
 	ip := adresIP(r)
 	if !s.lim.wolno(ip) {
@@ -246,6 +301,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			Setup: true, Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return

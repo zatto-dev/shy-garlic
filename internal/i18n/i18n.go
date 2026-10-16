@@ -282,6 +282,7 @@ var teksty = map[string]map[Lang]string{
 	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
 	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
 	"blad_tytul_znaki":  {EN: "The title must be a single line without control characters.", PL: "Tytuł musi być jedną linią, bez znaków sterujących."},
+	"blad_adres_uslugi": {EN: "Invalid address: use http://, https:// or tcp://host:port.", PL: "Zły adres: użyj http://, https:// albo tcp://host:port."},
 	"blad_przenoszenie": {EN: "Could not move: invalid group, name or position.", PL: "Nie można przenieść: zła grupa, nazwa albo pozycja."},
 	"konflikt_pliku": {
 		EN: "the file changed on disk since it was loaded — refresh the page and repeat the change",

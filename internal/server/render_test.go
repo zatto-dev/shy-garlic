@@ -382,7 +382,7 @@ const zaślepkaPodglądu = `<script>
       }
       return json({
         key: klucz, name: (el && el.dataset.nazwa) || klucz,
-        url: (el && el.dataset.url) || "", icon: (el && el.dataset.ikona) || "",
+        url: (el && el.dataset.adres) || "", icon: (el && el.dataset.ikona) || "",
         interval: "30s", timeout: "6s", expect: [200, 301, 302, 401, 403], insecure: false,
         now: teraz,
         day: { samples: 2871, uptime: h.uptime, p50: 46, p95: 128, max: 512 },

@@ -8,8 +8,10 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -101,7 +103,47 @@ CREATE TABLE IF NOT EXISTS settings (
   at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.zahaszujSesje()
+}
+
+// skrótTokenu — w bazie leży sha256 tokenu, nie sam token: wyciek pliku .db
+// (backup, snapshot) nie daje wtedy działających ciasteczek. Token ma 256 bitów
+// losowości, więc szybki skrót wystarcza (bcrypt byłby tu bez sensu).
+func skrótTokenu(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// zahaszujSesje przepisuje jawne tokeny ze starych baz na skróty, żeby po
+// aktualizacji nikt nie został wylogowany. Idempotentne: skrót ma 64 znaki
+// (hex), jawny token 43 (base64 z 32 bajtów).
+func (s *Store) zahaszujSesje() error {
+	rows, err := s.db.Query(`SELECT token FROM sessions WHERE length(token) <> 64`)
+	if err != nil {
+		return err
+	}
+	var jawne []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			rows.Close()
+			return err
+		}
+		jawne = append(jawne, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, t := range jawne {
+		if _, err := s.db.Exec(`UPDATE sessions SET token = ? WHERE token = ?`, skrótTokenu(t), t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ── ustawienia instancji ─────────────────────────────────────────────────────
@@ -230,7 +272,7 @@ func (s *Store) NowaSesja(ctx context.Context, userID int64) (string, time.Time,
 	token := base64.RawURLEncoding.EncodeToString(b)
 	wygasa := time.Now().Add(CzasSesji)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, token, userID, wygasa)
+		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, skrótTokenu(token), userID, wygasa)
 	return token, wygasa, err
 }
 
@@ -239,7 +281,7 @@ func (s *Store) Sesja(ctx context.Context, token string) (*Użytkownik, error) {
 	err := s.db.QueryRowContext(ctx, `
 SELECT u.id, u.login, u.created_at FROM sessions s
 JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, token).
+WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, skrótTokenu(token)).
 		Scan(&u.ID, &u.Login, &u.Utworzony)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrBrakUżytkow
@@ -248,7 +290,15 @@ WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, token).
 }
 
 func (s *Store) UsuńSesję(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, skrótTokenu(token))
+	return err
+}
+
+// UsuńInneSesje kończy wszystkie sesje użytkownika poza wskazaną. Po zmianie
+// hasła ktoś, kto miał skradzione ciasteczko, nie może dalej siedzieć w panelu.
+func (s *Store) UsuńInneSesje(ctx context.Context, userID int64, zostaw string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND token <> ?`, userID, skrótTokenu(zostaw))
 	return err
 }
 

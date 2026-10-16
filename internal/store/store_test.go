@@ -143,3 +143,99 @@ func TestPrzenieśKluczeŁączyZIstniejącymiIPustaMapaToNic(t *testing.T) {
 		t.Errorf("po scaleniu %d wierszy, chcę 5", len(h))
 	}
 }
+
+// ── SHYG-43d: sesje ──────────────────────────────────────────────────────────
+
+func TestUsuńInneSesjeZostawiaWskazanąIInnychUżytkowników(t *testing.T) {
+	st := otwórzTestowy(t)
+	ctx := context.Background()
+	a, _ := st.DodajUżytkownika(ctx, "anna", "haslo12345")
+	b, _ := st.DodajUżytkownika(ctx, "bartek", "haslo12345")
+	t1, _, _ := st.NowaSesja(ctx, a.ID)
+	t2, _, _ := st.NowaSesja(ctx, a.ID)
+	t3, _, _ := st.NowaSesja(ctx, b.ID)
+
+	if err := st.UsuńInneSesje(ctx, a.ID, t1); err != nil {
+		t.Fatalf("UsuńInneSesje: %v", err)
+	}
+	if _, err := st.Sesja(ctx, t1); err != nil {
+		t.Errorf("wskazana sesja ma zostać: %v", err)
+	}
+	if _, err := st.Sesja(ctx, t2); err == nil {
+		t.Error("druga sesja użytkownika ma zniknąć")
+	}
+	if _, err := st.Sesja(ctx, t3); err != nil {
+		t.Errorf("sesja innego użytkownika ma zostać: %v", err)
+	}
+}
+
+// Token w bazie to skrót — wyciek pliku .db nie daje działających ciasteczek.
+func TestSesjaWBaziePrzechowywanaJakoSkrót(t *testing.T) {
+	st := otwórzTestowy(t)
+	ctx := context.Background()
+	u, _ := st.DodajUżytkownika(ctx, "anna", "haslo12345")
+	tok, _, err := st.NowaSesja(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wBazie string
+	if err := st.db.QueryRow(`SELECT token FROM sessions`).Scan(&wBazie); err != nil {
+		t.Fatal(err)
+	}
+	if wBazie == tok || len(wBazie) != 64 {
+		t.Errorf("w bazie leży %q (token %q) — ma być sha256 hex", wBazie, tok)
+	}
+	if _, err := st.Sesja(ctx, tok); err != nil {
+		t.Errorf("sesja po tokenie nie działa: %v", err)
+	}
+	if _, err := st.Sesja(ctx, wBazie); err == nil {
+		t.Error("skrót z bazy nie może działać jako token")
+	}
+	if err := st.UsuńSesję(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sesja(ctx, tok); err == nil {
+		t.Error("sesja po wylogowaniu nadal działa")
+	}
+}
+
+// Stara baza trzyma tokeny jawnie; po aktualizacji zalogowani zostają zalogowani.
+func TestMigracjaJawnychTokenówSesji(t *testing.T) {
+	ścieżka := filepath.Join(t.TempDir(), "stara.db")
+	st, err := Open(ścieżka)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	u, _ := st.DodajUżytkownika(ctx, "anna", "haslo12345")
+	const stary = "jawnyTokenZeStarejWersjiAplikacji0123456789ab"
+	if _, err := st.db.Exec(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		stary, u.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	st, err = Open(ścieżka) // migruj() przy ponownym otwarciu
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Sesja(ctx, stary); err != nil {
+		t.Errorf("sesja ze starej wersji przestała działać: %v", err)
+	}
+	var wBazie string
+	_ = st.db.QueryRow(`SELECT token FROM sessions`).Scan(&wBazie)
+	if wBazie == stary {
+		t.Error("jawny token został w bazie")
+	}
+	// idempotentne: kolejne otwarcie nie hashuje skrótu drugi raz
+	st.Close()
+	st, err = Open(ścieżka)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Sesja(ctx, stary); err != nil {
+		t.Errorf("sesja padła po drugiej migracji: %v", err)
+	}
+}

@@ -218,9 +218,9 @@
     <ul class="siatka">
     {{range .Services}}
       <li class="karta" data-rozmiar="{{.Rozmiar}}" data-key="{{.Key}}" data-grupa="{{.Group}}"
-          data-nazwa="{{.Name}}" data-url="{{.URL}}" data-ikona="{{.IconName}}"
+          data-nazwa="{{.Name}}" data-adres="{{.URL}}" data-ikona="{{.IconName}}"
           data-szukaj="{{.Name}} {{.Host}}">
-        <a class="glowna" href="{{.URL}}" target="_blank" rel="noopener noreferrer">
+        <a class="glowna"{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{end}}>
           <span class="ikona">
             {{if .Icon.WariantCiemny}}<span class="ikona-motyw ikona-motyw--ciemny"><img src="{{.Icon.WariantCiemny}}" alt="" loading="lazy" width="28" height="28"></span><span class="ikona-motyw ikona-motyw--jasny"><img src="{{.Icon.WariantJasny}}" alt="" loading="lazy" width="28" height="28"></span>
             {{else if .Icon.Src}}<img src="{{.Icon.Src}}" alt="" loading="lazy" width="28" height="28">
@@ -243,7 +243,7 @@
         </button>
         <span class="karta-meta"><b></b><span></span></span>
         <span class="karta-akcje">
-          <a href="{{.URL}}" class="btn btn--icon btn--sm" target="_blank" rel="noopener noreferrer" data-akcja="otworz"
+          <a{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{else}} hidden{{end}} class="btn btn--icon btn--sm" data-akcja="otworz"
              title="{{$.T.otworz}}" aria-label="{{$.T.otworz}} {{.Name}}">
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"
                  stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5M19 5l-8 8M10 6H6v12h12v-4"></path></svg>

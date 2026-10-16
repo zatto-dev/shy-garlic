@@ -492,6 +492,9 @@ type widokUsługi struct {
 	Group    string
 	Name     string
 	URL      string
+	// Href — to samo co URL, ale tylko gdy wolno go wstawić do atrybutu href
+	// (http/https); pusty dla tcp:// i dla wszystkiego podejrzanego.
+	Href     string
 	Host     string
 	IconName string
 	Icon     iconRef
@@ -684,6 +687,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 				Group:    g.Name,
 				Name:     svc.Name,
 				URL:      svc.URL,
+				Href:     hrefZ(svc.URL),
 				Host:     hostZ(svc.URL),
 				IconName: svc.Icon,
 				Icon:     s.rozwiążIkonę(svc.Icon, svc.Name),
@@ -827,6 +831,14 @@ func (s *Server) układInstancji() układAPI {
 		u.Grupy = append(u.Grupy, ug)
 	}
 	return u
+}
+
+// hrefZ oddaje adres do atrybutu href albo "" — patrz config.AdresKlikalny.
+func hrefZ(raw string) string {
+	if config.AdresKlikalny(raw) {
+		return raw
+	}
+	return ""
 }
 
 func hostZ(raw string) string {
