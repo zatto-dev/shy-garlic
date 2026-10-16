@@ -111,6 +111,8 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 			komunikat = i18n.T(i18n.Wybierz(r), "blad_duplikat_nazwy")
 		case errors.Is(err, config.ErrPoleDziedziczone):
 			komunikat = i18n.T(i18n.Wybierz(r), "blad_pole_dziedziczone")
+		case errors.Is(err, config.ErrUnsupportedLayout):
+			komunikat = i18n.T(i18n.Wybierz(r), "blad_uklad_pliku")
 		}
 		jsonBłąd(w, kod, komunikat)
 		return false
@@ -293,6 +295,11 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
 		return
 	}
+	check, kluczCheck := ż.parseCheck()
+	if kluczCheck != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), kluczCheck))
+		return
+	}
 	nowyOpis, noweTagi, błąd := ż.opisITagi()
 	if błąd != "" {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
@@ -305,7 +312,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	if noweTagi != nil {
 		svc.Tags = config.Tagi(*noweTagi)
 	}
-	svc.Check = przeliczCheck(ż)
+	svc.Check = check
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_usluge"), ż.Nazwa, ż.Grupa)
 	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.AddService(ż.Grupa, svc) }) {
@@ -313,25 +320,42 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func przeliczCheck(ż żądanieUsługi) config.Check {
+// parseCheck reads and validates the check fields of a request. POST, bulk
+// and PATCH share it, so an invalid value is rejected with 400 everywhere
+// instead of being silently dropped on create (SHYG-52). Returns the i18n key
+// of the problem, or "".
+func (ż żądanieUsługi) parseCheck() (config.Check, string) {
 	var c config.Check
-	if ż.Interval != nil {
-		if v, err := time.ParseDuration(*ż.Interval); err == nil {
-			c.Interval = config.Duration(v)
+	for _, f := range []struct {
+		in  *string
+		out *config.Duration
+	}{{ż.Interval, &c.Interval}, {ż.Timeout, &c.Timeout}} {
+		if f.in == nil {
+			continue
 		}
-	}
-	if ż.Timeout != nil {
-		if v, err := time.ParseDuration(*ż.Timeout); err == nil {
-			c.Timeout = config.Duration(v)
+		t := strings.TrimSpace(*f.in)
+		if t == "" {
+			continue // empty = default
 		}
+		v, err := time.ParseDuration(t)
+		// below one second the ticker would flood the checked service
+		if err != nil || v < time.Second {
+			return c, "blad_czas_sprawdzania"
+		}
+		*f.out = config.Duration(v)
 	}
 	if ż.Expect != nil {
+		for _, k := range *ż.Expect {
+			if k < 100 || k > 599 {
+				return c, "blad_kody_http"
+			}
+		}
 		c.Expect = *ż.Expect
 	}
 	if ż.Insecure != nil {
 		c.Insecure = *ż.Insecure
 	}
-	return c
+	return c, ""
 }
 
 // zmianaSprawdzania przelicza pola sekcji „Sprawdzanie" z żądania edycji.
@@ -339,42 +363,27 @@ func przeliczCheck(ż żądanieUsługi) config.Check {
 // co pokazał, a domyślne nie mają lądować w pliku. Zwraca klucz tekstu błędu.
 func (ż żądanieUsługi) zmianaSprawdzania(bieżąca config.Check) (config.ZmianaSprawdzania, string) {
 	var z config.ZmianaSprawdzania
-	czas := func(pole *string, obecny config.Duration, domyślny time.Duration) (*config.Duration, bool) {
-		if pole == nil {
-			return nil, true
-		}
-		var v time.Duration
-		if t := strings.TrimSpace(*pole); t != "" {
-			var err error
-			// poniżej sekundy ticker zalewałby sprawdzaną usługę
-			if v, err = time.ParseDuration(t); err != nil || v < time.Second {
-				return nil, false
-			}
+	c, klucz := ż.parseCheck()
+	if klucz != "" {
+		return z, klucz
+	}
+	czas := func(podane bool, v, obecny config.Duration, domyślny time.Duration) *config.Duration {
+		if !podane {
+			return nil
 		}
 		efektywny := v
 		if v == 0 {
-			efektywny = domyślny
+			efektywny = config.Duration(domyślny)
 		}
-		if config.Duration(efektywny) == obecny {
-			return nil, true
+		if efektywny == obecny {
+			return nil
 		}
-		d := config.Duration(v)
-		return &d, true
+		return &v
 	}
-	var ok bool
-	if z.Interval, ok = czas(ż.Interval, bieżąca.Interval, config.DefaultInterval); !ok {
-		return z, "blad_czas_sprawdzania"
-	}
-	if z.Timeout, ok = czas(ż.Timeout, bieżąca.Timeout, config.DefaultTimeout); !ok {
-		return z, "blad_czas_sprawdzania"
-	}
+	z.Interval = czas(ż.Interval != nil, c.Interval, bieżąca.Interval, config.DefaultInterval)
+	z.Timeout = czas(ż.Timeout != nil, c.Timeout, bieżąca.Timeout, config.DefaultTimeout)
 	if ż.Expect != nil {
-		for _, k := range *ż.Expect {
-			if k < 100 || k > 599 {
-				return z, "blad_kody_http"
-			}
-		}
-		efektywne := *ż.Expect
+		efektywne := c.Expect
 		if len(efektywne) == 0 {
 			efektywne = config.DefaultExpect
 		}
@@ -1499,6 +1508,10 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
 			return
 		}
+		if _, klucz := u.parseCheck(); klucz != "" {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), klucz))
+			return
+		}
 	}
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)
@@ -1517,7 +1530,7 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			if tagi != nil {
 				svc.Tags = config.Tagi(*tagi)
 			}
-			svc.Check = przeliczCheck(u)
+			svc.Check, _ = u.parseCheck() // checked above
 			if err := d.AddService(grupa, svc); err != nil {
 				return fmt.Errorf("%s: %w", u.Nazwa, err)
 			}

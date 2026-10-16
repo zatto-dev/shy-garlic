@@ -12,6 +12,22 @@ the entries below say when it does.
 
 ### Fixed
 
+- **A malformed config no longer crashes the server.** One line such as
+  `expect: !x` made the YAML library panic while loading; it is now an
+  ordinary load error shown in the banner.
+- **The editor no longer writes into the wrong place.** Every edit is read back
+  before it is kept; if the file does not show the new value (unusual layouts,
+  lone CR line endings), nothing is saved and the dialog says to edit the file.
+  Values that YAML would read as something else, such as `0x10` or `.inf`, are
+  now quoted. Description spaces are collapsed on save the same way they are
+  on load.
+- **Adding services validates the Checking section** like editing does: an
+  invalid or sub-second interval/timeout, or a code outside 100–599, returns
+  `400` instead of being dropped or saved; a bulk add with one bad entry saves
+  nothing.
+- **Icon picker requested broken URLs** for icons with dark/light variants
+  (two 404s per icon); variants now load from `/icon/…`.
+
 - **Editing a service now saves the "Checking" section** (#6). Ticking "Ignore
   certificate errors", changing accepted codes, interval or timeout on an
   existing service was dropped and the preview said nothing would change; the
@@ -27,6 +43,12 @@ the entries below say when it does.
   `size: md` to a service whose size you did not change.
 - **Durations with a trailing comment** such as `interval: 1m  # slow box` were
   read as `1s`. They now read as written.
+
+### Added
+
+- Fuzz tests for the config editor (`FuzzLoadParse`, `FuzzEdit`,
+  `FuzzEditValue`) and a short fuzz pass in CI, so a change in the YAML library
+  that breaks editing is caught before release.
 
 ## [0.13.1] — 2026-10-16
 

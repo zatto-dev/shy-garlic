@@ -1212,6 +1212,17 @@
     }
   }
 
+  // /api/icons returns variant FILE NAMES, while renderujIkone needs paths on
+  // our server. Bare names went out as relative src and every icon with
+  // variants cost two 404s (SHYG-53).
+  function sciezkiWariantow(d) {
+    const out = {};
+    for (const [n, w] of Object.entries((d && d.warianty) || {})) {
+      out[n] = w.map((x) => `/icon/${encodeURIComponent(x)}`);
+    }
+    return out;
+  }
+
   // ustawIkonaZWariantem to ustawIkone dla ikony, o której na starcie nie
   // wiemy, czy ma warianty (np. otwarcie edycji istniejącej usługi) —
   // dopytuje /api/icons o konkretną nazwę, żeby dostać wc/wj.
@@ -1220,7 +1231,7 @@
     let wariant;
     try {
       const d = await api("GET", `/api/icons?q=${encodeURIComponent(nazwa)}&limit=5`);
-      wariant = (d.warianty || {})[nazwa];
+      wariant = sciezkiWariantow(d)[nazwa];
     } catch (_) {}
     ustawIkone(nazwa, wariant);
   }
@@ -1236,7 +1247,7 @@
     try {
       const d = await api("GET", `/api/icons?q=${encodeURIComponent(q)}&limit=48`);
       siatka.textContent = "";
-      const warianty = d.warianty || {};
+      const warianty = sciezkiWariantow(d);
       for (const n of d.icons) {
         const b = document.createElement("button");
         b.type = "button";
