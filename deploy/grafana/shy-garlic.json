@@ -3,10 +3,17 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "The Prometheus that scrapes Shy Garlic",
+      "description": "",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "VAR_JOB",
+      "label": "Prometheus job",
+      "description": "job_name of the scrape config that scrapes Shy Garlic",
+      "type": "constant",
+      "value": "shy-garlic"
     }
   ],
   "__requires": [
@@ -14,7 +21,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.0.0"
+      "version": "11.0.0"
     },
     {
       "type": "datasource",
@@ -24,8 +31,20 @@
     },
     {
       "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
       "id": "stat",
       "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "state-timeline",
+      "name": "State timeline",
       "version": ""
     },
     {
@@ -36,27 +55,123 @@
     },
     {
       "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
+      "id": "text",
+      "name": "Text",
       "version": ""
     },
     {
       "type": "panel",
-      "id": "state-timeline",
-      "name": "State timeline",
+      "id": "timeseries",
+      "name": "Time series",
       "version": ""
     }
   ],
-  "annotations": {
-    "list": []
-  },
-  "description": "Shy Garlic — service states, availability and response times. Needs Prometheus scraping /metrics (see the README).",
+  "id": null,
+  "version": 1,
+  "uid": "shy-garlic",
+  "title": "Shy Garlic — services",
+  "tags": [
+    "shy-garlic",
+    "homelab",
+    "uptime"
+  ],
+  "description": "Service health from Shy Garlic /metrics: what is up, degraded or down, 24-hour availability and response times.",
+  "timezone": "browser",
   "editable": true,
   "graphTooltip": 1,
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "30s",
   "links": [],
   "panels": [
     {
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "# SHY GARLIC / services\nState of the services checked by Shy Garlic. The **Group** filter narrows everything; the time range applies to the history charts.\n\n🟢 Up &nbsp; 🟡 Degraded (answers, but wrong) &nbsp; 🔴 Down"
+      },
       "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 19,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Shy Garlic version",
+      "description": "Version from shyg_build_info.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#A78BFA"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (version) (shyg_build_info{job=\"$job\"})",
+          "legendFormat": "{{version}}",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 34
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 19,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      }
+    },
+    {
       "type": "stat",
       "title": "Up",
       "description": "Services whose last check succeeded.",
@@ -64,46 +179,40 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "sum(shyg_service_up{group=~\"$group\"}) or vector(0)",
-          "legendFormat": "",
-          "refId": "A",
-          "format": "time_series",
-          "instant": true,
-          "range": false
-        }
-      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "decimals": 0,
+          "unit": "short",
+          "noValue": "—",
           "color": {
-            "mode": "fixed",
-            "fixedColor": "green"
+            "mode": "thresholds"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "value": null,
+                "color": "#34D399"
               }
             ]
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(max by (group, service) (shyg_service_up{job=\"$job\", group=~\"$group\"}) == 1) or vector(0)",
+          "legendFormat": "Up",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -112,61 +221,71 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
+        "colorMode": "value",
+        "graphMode": "area",
         "textMode": "value",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 4,
+        "h": 4
       }
     },
     {
-      "id": 2,
       "type": "stat",
       "title": "Degraded",
-      "description": "Services that answer, but with the wrong status code or content.",
+      "description": "The server answers, but not as expected (wrong status code or content).",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "sum(shyg_service_degraded{group=~\"$group\"}) or vector(0)",
-          "legendFormat": "",
-          "refId": "A",
-          "format": "time_series",
-          "instant": true,
-          "range": false
-        }
-      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "decimals": 0,
+          "unit": "short",
+          "noValue": "—",
           "color": {
-            "mode": "fixed",
-            "fixedColor": "orange"
+            "mode": "thresholds"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "orange",
-                "value": null
+                "value": null,
+                "color": "#94A3B8"
+              },
+              {
+                "value": 1,
+                "color": "#FBBF24"
               }
             ]
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(max by (group, service) (shyg_service_degraded{job=\"$job\", group=~\"$group\"}) == 1) or vector(0)",
+          "legendFormat": "Degraded",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -175,61 +294,71 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
+        "colorMode": "value",
+        "graphMode": "area",
         "textMode": "value",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 4,
+        "y": 4,
+        "w": 4,
+        "h": 4
       }
     },
     {
-      "id": 3,
       "type": "stat",
       "title": "Down",
-      "description": "Services that did not answer at all.",
+      "description": "Services that did not answer the last check.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "count((shyg_service_up{group=~\"$group\"} == 0) and (shyg_service_degraded{group=~\"$group\"} == 0)) or vector(0)",
-          "legendFormat": "",
-          "refId": "A",
-          "format": "time_series",
-          "instant": true,
-          "range": false
-        }
-      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "decimals": 0,
+          "unit": "short",
+          "noValue": "—",
           "color": {
-            "mode": "fixed",
-            "fixedColor": "red"
+            "mode": "thresholds"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
+                "value": null,
+                "color": "#94A3B8"
+              },
+              {
+                "value": 1,
+                "color": "#F87171"
               }
             ]
-          }
+          },
+          "min": 0
         },
         "overrides": []
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "count(max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"}) == 2) or vector(0)",
+          "legendFormat": "Down",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
       "options": {
         "reduceOptions": {
           "calcs": [
@@ -238,77 +367,583 @@
           "fields": "",
           "values": false
         },
-        "colorMode": "background",
-        "graphMode": "none",
+        "colorMode": "value",
+        "graphMode": "area",
         "textMode": "value",
-        "justifyMode": "center"
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 4,
+        "h": 4
       }
     },
     {
-      "id": 4,
-      "type": "table",
-      "title": "Availability, last 24 hours",
+      "type": "stat",
+      "title": "Availability",
+      "description": "Average over all services: share of successful checks in the last 24 h (computed by Shy Garlic). Green ≥ 99.9 %, yellow ≥ 99 %.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#F87171"
+              },
+              {
+                "value": 99,
+                "color": "#FBBF24"
+              },
+              {
+                "value": 99.9,
+                "color": "#34D399"
+              }
+            ]
+          },
+          "decimals": 2,
+          "min": 0
+        },
+        "overrides": []
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "shyg_service_availability_ratio{window=\"24h\",group=~\"$group\"}",
-          "legendFormat": "",
-          "refId": "A",
-          "format": "table",
-          "instant": true,
-          "range": false
+          "expr": "avg(shyg_service_availability_ratio{job=\"$job\", group=~\"$group\", window=\"24h\"}) * 100",
+          "legendFormat": "Availability",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
         }
       ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Median resp.",
+      "description": "Typical response time (median) across all services that answered.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              },
+              {
+                "value": 300,
+                "color": "#FBBF24"
+              },
+              {
+                "value": 1000,
+                "color": "#F87171"
+              }
+            ]
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "quantile(0.5, shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "Median resp.",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "p95 resp.",
+      "description": "Response time, 95th percentile: only the slowest ~5 % of services answer slower.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              },
+              {
+                "value": 300,
+                "color": "#FBBF24"
+              },
+              {
+                "value": 1000,
+                "color": "#F87171"
+              }
+            ]
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "quantile(0.95, shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "p95 resp.",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 42
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "x": 20,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      }
+    },
+    {
+      "type": "table",
+      "title": "01 / WHAT IS WRONG NOW",
+      "description": "Only services that are degraded or down. “Last up” = the last successful check within 24 h; if there was none in 24 h, it shows the start of the data (then “For” means at least). 24-hour availability is in the table below.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "All services up ✓",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "minWidth": 70
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Up",
+                        "color": "#34D399",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Degraded",
+                        "color": "#FBBF24",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Down",
+                        "color": "#F87171",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "#34D399"
+                    },
+                    {
+                      "value": 1,
+                      "color": "#FBBF24"
+                    },
+                    {
+                      "value": 2,
+                      "color": "#F87171"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic",
+                  "applyToRow": false
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 105
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last up"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time:MMM D, HH:mm"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "For"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dthms"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"}) > 0",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "(max by (group, service) (max_over_time(timestamp(shyg_service_up{job=\"$job\", group=~\"$group\"} == 1)[24h:30s])) or max by (group, service) (min_over_time(timestamp(shyg_service_up{job=\"$job\", group=~\"$group\"})[24h:30s]))) * 1000 and on (group, service) (max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"}) > 0)",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "time() - (max by (group, service) (max_over_time(timestamp(shyg_service_up{job=\"$job\", group=~\"$group\"} == 1)[24h:30s])) or max by (group, service) (min_over_time(timestamp(shyg_service_up{job=\"$job\", group=~\"$group\"})[24h:30s]))) and on (group, service) (max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"}) > 0)",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "State",
+            "desc": true
+          }
+        ]
+      },
       "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "window": true,
-              "job": true,
-              "instance": true
+              "Time": true
             },
             "renameByName": {
               "group": "Group",
               "service": "Service",
-              "Value": "Availability"
+              "Value #A": "State",
+              "Value #B": "Last up",
+              "Value #C": "For"
             },
             "indexByName": {
-              "group": 0,
+              "Value #A": 0,
               "service": 1,
-              "Value": 2
+              "group": 2,
+              "Value #B": 3,
+              "Value #C": 4
             }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "Availability",
-                "desc": false
-              }
-            ]
           }
         }
       ],
+      "id": 9,
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "SLOWEST NOW",
+      "description": "Response time of the last check, slowest first. Services that did not answer have no time. Green < 300 ms, yellow < 1 s, red ≥ 1 s.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "fieldConfig": {
         "defaults": {
+          "unit": "ms",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              },
+              {
+                "value": 300,
+                "color": "#FBBF24"
+              },
+              {
+                "value": 1000,
+                "color": "#F87171"
+              }
+            ]
+          },
+          "min": 0,
+          "max": null,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sort_desc(max by (group, service) (shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000)",
+          "legendFormat": "{{service}}",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "sizing": "manual",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "minVizHeight": 14,
+        "maxVizHeight": 22,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 15
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "table",
+      "title": "02 / ALL SERVICES — NOW",
+      "description": "Every service: state, 24-hour availability (bar starts at 90 %), last response time and how long ago it was checked (yellow after 2 min, red after 5 min — with the default 30 s interval that means checks have stalled). Problems on top.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              }
+            ]
+          },
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -320,31 +955,33 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Availability"
+              "options": "State"
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "percentunit"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              },
-              {
-                "id": "min",
-                "value": 0
-              },
-              {
-                "id": "max",
-                "value": 1
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "basic"
-                }
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Up",
+                        "color": "#34D399",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Degraded",
+                        "color": "#FBBF24",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Down",
+                        "color": "#F87171",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
               },
               {
                 "id": "thresholds",
@@ -352,17 +989,502 @@
                   "mode": "absolute",
                   "steps": [
                     {
-                      "color": "red",
-                      "value": null
+                      "value": null,
+                      "color": "#34D399"
                     },
                     {
-                      "color": "orange",
-                      "value": 0.95
+                      "value": 1,
+                      "color": "#FBBF24"
                     },
                     {
-                      "color": "green",
-                      "value": 0.999
+                      "value": 2,
+                      "color": "#F87171"
                     }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic",
+                  "applyToRow": false
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Group"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Availability 24 h"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 90
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "#F87171"
+                    },
+                    {
+                      "value": 99,
+                      "color": "#FBBF24"
+                    },
+                    {
+                      "value": 99.9,
+                      "color": "#34D399"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Response"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "#34D399"
+                    },
+                    {
+                      "value": 300,
+                      "color": "#FBBF24"
+                    },
+                    {
+                      "value": 1000,
+                      "color": "#F87171"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Checked"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: s ago"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "#34D399"
+                    },
+                    {
+                      "value": 120,
+                      "color": "#FBBF24"
+                    },
+                    {
+                      "value": 300,
+                      "color": "#F87171"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"})",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (group, service) (shyg_service_availability_ratio{job=\"$job\", group=~\"$group\", window=\"24h\"}) * 100",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (group, service) (shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "time() - max by (group, service) (shyg_service_last_check_timestamp_seconds{job=\"$job\", group=~\"$group\"})",
+          "legendFormat": "__auto",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "State",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "group": "Group",
+              "service": "Service",
+              "Value #A": "State",
+              "Value #B": "Availability 24 h",
+              "Value #C": "Response",
+              "Value #D": "Checked"
+            },
+            "indexByName": {
+              "Value #A": 0,
+              "service": 1,
+              "group": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5
+            }
+          }
+        }
+      ],
+      "id": 11,
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 14
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "03 / STATE HISTORY",
+      "description": "One bar per service: green = up, yellow = degraded, red = down. A gap = no data.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "—",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#94A3B8"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Up",
+                  "color": "#34D399",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Degraded",
+                  "color": "#FBBF24",
+                  "index": 1
+                },
+                "2": {
+                  "text": "Down",
+                  "color": "#F87171",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (group, service) (2 - 2 * shyg_service_up{job=\"$job\", group=~\"$group\"} - shyg_service_degraded{job=\"$job\", group=~\"$group\"})",
+          "legendFormat": "{{group}} · {{service}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.75,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "interval": "1m",
+      "id": 12,
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 12
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "04 / RESPONSE TIME — ALL SERVICES",
+      "description": "Instead of a line per service: median, 95th percentile and the slowest service that answered.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "#34D399"
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "lineInterpolation": "smooth",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0,
+            "axisBorderShow": false,
+            "axisColorMode": "text"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Median"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#38BDF8"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#A78BFA"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Slowest service"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F472B6"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
                   ]
                 }
               }
@@ -370,55 +1492,49 @@
           }
         ]
       },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm"
-      }
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Response time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 4
-      },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "shyg_service_response_seconds{group=~\"$group\"}",
-          "legendFormat": "{{group}} / {{service}}",
-          "refId": "A",
+          "expr": "quantile(0.5, shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "Median",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "quantile(0.95, shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "p95",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max(shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "Slowest service",
+          "range": true,
+          "instant": false,
           "format": "time_series"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
       "options": {
         "legend": {
           "displayMode": "table",
           "placement": "bottom",
+          "showLegend": true,
           "calcs": [
             "mean",
             "max",
@@ -429,122 +1545,158 @@
           "mode": "multi",
           "sort": "desc"
         }
+      },
+      "interval": "1m",
+      "id": 13,
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 12,
+        "h": 9
       }
     },
     {
-      "id": 6,
-      "type": "state-timeline",
-      "title": "State of each service",
+      "type": "timeseries",
+      "title": "05 / RESPONSE TIME — BY GROUP",
+      "description": "Average response time of the services in each group. Legend sorted slowest first.",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "up = 1, degraded = 2, down = 0 (shyg_service_up + 2 * shyg_service_degraded).",
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 12
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "shyg_service_up{group=~\"$group\"} + 2 * shyg_service_degraded{group=~\"$group\"}",
-          "legendFormat": "{{group}} / {{service}}",
-          "refId": "A",
-          "format": "time_series"
-        }
-      ],
       "fieldConfig": {
         "defaults": {
+          "unit": "ms",
+          "noValue": "—",
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
-          "custom": {
-            "fillOpacity": 80,
-            "lineWidth": 0
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "down",
-                  "color": "red",
-                  "index": 0
-                },
-                "1": {
-                  "text": "up",
-                  "color": "green",
-                  "index": 1
-                },
-                "2": {
-                  "text": "degraded",
-                  "color": "orange",
-                  "index": 2
-                }
-              }
-            }
-          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
+                "value": null,
+                "color": "#34D399"
               }
             ]
-          }
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "lineInterpolation": "smooth",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0,
+            "axisBorderShow": false,
+            "axisColorMode": "text"
+          },
+          "decimals": 0
         },
         "overrides": []
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "avg by (group) (shyg_service_response_seconds{job=\"$job\", group=~\"$group\"}) * 1000",
+          "legendFormat": "{{group}}",
+          "range": true,
+          "instant": false,
+          "format": "time_series"
+        }
+      ],
       "options": {
-        "mergeValues": true,
-        "showValue": "never",
-        "alignValue": "center",
-        "rowHeight": 0.8,
         "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
           "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom"
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "sortBy": "Mean",
+          "sortDesc": true
         },
         "tooltip": {
-          "mode": "single"
+          "mode": "multi",
+          "sort": "desc"
         }
+      },
+      "interval": "1m",
+      "id": 14,
+      "gridPos": {
+        "x": 12,
+        "y": 43,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "options": {
+        "mode": "markdown",
+        "content": "**How to read** · State is the result of the last check. *Degraded* = the server answers, but not the way it should. 24-hour availability is computed by Shy Garlic from its own history (share of successful checks), independent of the dashboard time range. Only services that answered have a response time.\n\n**Source** · Shy Garlic `/metrics` → Prometheus (job `$job`; set at import, change it in Dashboard settings → Variables). Services without an address or not checked yet have no series."
+      },
+      "id": 15,
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 3
       }
     }
-  ],
-  "refresh": "30s",
-  "schemaVersion": 39,
-  "tags": [
-    "shy-garlic",
-    "homelab"
   ],
   "templating": {
     "list": [
       {
+        "type": "constant",
+        "name": "job",
+        "label": "Prometheus job",
+        "hide": 2,
+        "skipUrlSync": false,
+        "description": "job_name of the Prometheus scrape config for Shy Garlic",
+        "query": "${VAR_JOB}",
+        "current": {
+          "text": "${VAR_JOB}",
+          "value": "${VAR_JOB}"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "${VAR_JOB}",
+            "value": "${VAR_JOB}"
+          }
+        ]
+      },
+      {
+        "type": "query",
         "name": "group",
         "label": "Group",
-        "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
         "query": {
-          "query": "label_values(shyg_service_up, group)",
-          "refId": "StandardVariableQuery"
+          "query": "label_values(shyg_service_up{job=\"$job\"}, group)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "definition": "label_values(shyg_service_up, group)",
+        "definition": "label_values(shyg_service_up{job=\"$job\"}, group)",
         "refresh": 2,
-        "sort": 1,
-        "multi": true,
         "includeAll": true,
+        "multi": true,
         "allValue": ".*",
         "current": {
-          "selected": true,
           "text": [
             "All"
           ],
@@ -552,17 +1704,12 @@
             "$__all"
           ]
         },
-        "options": []
+        "options": [],
+        "sort": 1
       }
     ]
   },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "Shy Garlic",
-  "uid": "shy-garlic",
-  "version": 1
+  "annotations": {
+    "list": []
+  }
 }

@@ -10,6 +10,16 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-10-16
+
+### Changed
+
+- **New Grafana dashboard** (`deploy/grafana/shy-garlic.json`): status tiles,
+  "what is wrong now" table, slowest services, every service with 24-hour
+  availability, state history and response-time percentiles. Import-ready —
+  Grafana asks for the Prometheus datasource and the scrape job name. Built-in
+  panels only, Grafana 11.0 or newer. See "Grafana dashboard" in the README.
+
 ## [0.13.0] — 2026-10-16
 
 ### Added
@@ -255,6 +265,7 @@ First working version: the dashboard, the heartbeat, sign-in, and an editor
 that writes YAML back through byte-level splicing, so comments, anchors and
 formatting survive every edit made through the UI.
 
+[0.13.1]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.1
 [0.13.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.0
 [0.12.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.12.0
 [0.11.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.11.0
