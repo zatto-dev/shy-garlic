@@ -418,7 +418,18 @@ func (d *Document) RemoveGroup(name string) error {
 // ReplaceAll podmienia całą treść pliku — używane przez edytor „surowy YAML".
 // Zmiana jest odrzucana, jeśli nowa treść się nie parsuje.
 func (d *Document) ReplaceAll(nowa []byte) error {
-	return d.replaceRange(0, len(d.src), nowa)
+	// treść z samymi CRLF (np. z textarea) zapisujemy jako CRLF; treść z LF
+	// dostaje styl pliku, który był.
+	nowa, crlf := normalizujKońce(nowa)
+	stary := d.crlf
+	if crlf {
+		d.crlf = true
+	}
+	if err := d.replaceRange(0, len(d.src), nowa); err != nil {
+		d.crlf = stary
+		return err
+	}
+	return nil
 }
 
 // RenameGroup zmienia nazwę grupy, nie ruszając jej zawartości.

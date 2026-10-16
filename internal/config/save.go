@@ -53,7 +53,8 @@ func OpenSurowy(path string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &Document{src: raw, path: path, hash: sha256.Sum256(raw), mode: fi.Mode().Perm()}
+	src, crlf := normalizujKońce(raw)
+	d := &Document{src: src, crlf: crlf, path: path, hash: sha256.Sum256(raw), mode: fi.Mode().Perm()}
 	_ = d.reparse() // poprawny plik dostaje AST; zepsuty zostaje bez
 	return d, nil
 }
@@ -80,18 +81,19 @@ func (d *Document) Save() error {
 		return err
 	}
 
-	err := zapiszAtomowo(cel, d.src, d.mode)
+	treść := d.Bytes()
+	err := zapiszAtomowo(cel, treść, d.mode)
 	if err != nil && wartoZapisaćWMiejscu(err) {
 		// ! ponowna kontrola: między pierwszą a drugą próbą ktoś mógł dotknąć pliku
 		if err := d.sprawdźOdcisk(cel); err != nil {
 			return err
 		}
-		err = zapiszWMiejscu(cel, d.src)
+		err = zapiszWMiejscu(cel, treść)
 	}
 	if err != nil {
 		return err
 	}
-	d.hash = sha256.Sum256(d.src)
+	d.hash = sha256.Sum256(treść)
 	return nil
 }
 
