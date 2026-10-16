@@ -105,6 +105,9 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 		switch {
 		case errors.Is(err, config.ErrServiceNotFound), errors.Is(err, config.ErrGroupNotFound):
 			kod = http.StatusNotFound
+		case errors.Is(err, config.ErrDuplikat):
+			kod = http.StatusConflict
+			komunikat = i18n.T(i18n.Wybierz(r), "blad_duplikat_nazwy")
 		case errors.Is(err, config.ErrPoleDziedziczone):
 			komunikat = i18n.T(i18n.Wybierz(r), "blad_pole_dziedziczone")
 		}

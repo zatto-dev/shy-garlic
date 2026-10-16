@@ -14,6 +14,9 @@ var (
 	ErrPathNotFound    = errors.New("path not found in config")
 	ErrServiceNotFound = errors.New("service not found")
 	ErrGroupNotFound   = errors.New("group not found")
+	// ErrDuplikat — nazwa już zajęta w tej samej liście (usługa w grupie, grupa).
+	// Dwie usługi o tej samej nazwie scaliłyby historię sprawdzeń pod jednym kluczem.
+	ErrDuplikat = errors.New("name already exists")
 )
 
 // Document to konfiguracja widziana jako TEKST, nie jako struktura danych.

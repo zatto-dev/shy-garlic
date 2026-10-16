@@ -256,6 +256,11 @@ func (d *Document) SetServiceField(group, service, field, value string) error {
 	if err != nil {
 		return err
 	}
+	if field == "name" && value != service {
+		if _, _, err := d.findService(group, value); err == nil {
+			return fmt.Errorf("%w: service %q in group %q", ErrDuplikat, value, group)
+		}
+	}
 	start, end, err := d.valueRange("groups", gi, "services", si, field)
 	if errors.Is(err, ErrPathNotFound) {
 		return d.wstawKlucz(field, quoteLike(nil, value), "groups", gi, "services", si)
@@ -420,7 +425,7 @@ func (d *Document) RenameGroup(stara, nowa string) error {
 		return nil
 	}
 	if _, err := d.findGroup(nowa); err == nil {
-		return fmt.Errorf("group %q already exists", nowa)
+		return fmt.Errorf("%w: group %q", ErrDuplikat, nowa)
 	}
 	gi, err := d.findGroup(stara)
 	if err != nil {

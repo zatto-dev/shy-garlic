@@ -182,7 +182,7 @@ func (d *Document) MoveServiceTo(zGrupy, usługa, doGrupy string, indeks int) er
 	same := gi == ti
 	if !same {
 		if _, _, err := d.findService(doGrupy, usługa); err == nil {
-			return fmt.Errorf("service %q already exists in group %q", usługa, doGrupy)
+			return fmt.Errorf("%w: service %q in group %q", ErrDuplikat, usługa, doGrupy)
 		}
 	}
 	z, _ := d.sekwencja("groups", gi, "services")

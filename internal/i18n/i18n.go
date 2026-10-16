@@ -326,6 +326,7 @@ var teksty = map[string]map[Lang]string{
 	"blad_opis_znaki":         {EN: "The description must be a single line without control characters.", PL: "Opis musi być jedną linią, bez znaków sterujących."},
 	"blad_tagi":               {EN: "Tags: at most 12, each up to 32 characters, without control characters.", PL: "Tagi: najwyżej 12, każdy do 32 znaków, bez znaków sterujących."},
 	"blad_pole_dziedziczone":  {EN: "This value is inherited from a shared block (<<: *defaults), so it cannot be changed here. Edit it in the file.", PL: "Ta wartość jest dziedziczona ze wspólnego bloku (<<: *defaults), więc nie da się jej zmienić tutaj. Zmień ją w pliku."},
+	"blad_duplikat_nazwy":     {EN: "That name is already taken here. Pick a different one.", PL: "Ta nazwa jest tu już zajęta. Wybierz inną."},
 	"blad_tytul_znaki":  {EN: "The title must be a single line without control characters.", PL: "Tytuł musi być jedną linią, bez znaków sterujących."},
 	"blad_adres_uslugi": {EN: "Invalid address: use http://, https:// or tcp://host:port.", PL: "Zły adres: użyj http://, https:// albo tcp://host:port."},
 	"baner_blad_poprzednia": {EN: "The config file has an error. The panel keeps running on the last working configuration until it is fixed.", PL: "Plik konfiguracji ma błąd. Panel działa dalej na ostatniej działającej konfiguracji, dopóki go nie poprawisz."},
