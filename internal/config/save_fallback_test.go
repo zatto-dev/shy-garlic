@@ -167,3 +167,47 @@ func TestSaveKatalogBezZapisuEACCES(t *testing.T) {
 		t.Error("treść nie trafiła do pliku")
 	}
 }
+
+// Zapis w miejscu, który pada w połowie (ENOSPC/EIO), nie może zostawić
+// użytkownikowi okrojonego pliku.
+func TestZapisWMiejscuPrzywracaOryginałPoBłędzieZapisu(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	oryginał := wczytajBasic(t)
+	os.WriteFile(p, oryginał, 0o640)
+	d := otwórzDoZapisu(t, p)
+	podmieńRename(t, func(string, string) error { return syscall.EBUSY }) // wymuś fallback
+
+	stary := piszDoPliku
+	piszDoPliku = func(f *os.File, b []byte) (int, error) {
+		n, _ := f.Write(b[:len(b)/2])
+		return n, syscall.ENOSPC
+	}
+	t.Cleanup(func() { piszDoPliku = stary })
+
+	err := d.Save()
+	if !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("err = %v, chcę ENOSPC", err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != string(oryginał) {
+		t.Fatalf("plik nie wrócił do oryginału (%d B zamiast %d B)", len(got), len(oryginał))
+	}
+}
+
+func TestZapisWMiejscuPrzyBłędzieFsyncPrzywracaOryginał(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	oryginał := wczytajBasic(t)
+	os.WriteFile(p, oryginał, 0o640)
+	d := otwórzDoZapisu(t, p)
+	podmieńRename(t, func(string, string) error { return syscall.EBUSY })
+
+	stary := synchronizujPlik
+	synchronizujPlik = func(*os.File) error { return syscall.EIO }
+	t.Cleanup(func() { synchronizujPlik = stary })
+
+	if err := d.Save(); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("err = %v, chcę EIO", err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != string(oryginał) {
+		t.Fatal("plik nie wrócił do oryginału")
+	}
+}

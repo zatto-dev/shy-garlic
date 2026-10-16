@@ -157,20 +157,48 @@ func zapiszAtomowo(cel string, treść []byte, tryb os.FileMode) error {
 	return nil
 }
 
+// piszDoPliku to f.Write — zmienna tylko po to, żeby test mógł zasymulować
+// ENOSPC / EIO w połowie zapisu.
+var piszDoPliku = func(f *os.File, treść []byte) (int, error) { return f.Write(treść) }
+
+// synchronizujPlik to f.Sync, z tego samego powodu.
+var synchronizujPlik = func(f *os.File) error { return f.Sync() }
+
+// zapiszWMiejscu: obcięcie, zapis, fsync. Błąd po obcięciu zostawiłby plik
+// użytkownika okrojony, więc oryginał czytamy z góry i przy porażce próbujemy
+// go odtworzyć.
 func zapiszWMiejscu(cel string, treść []byte) error {
+	oryginał, err := os.ReadFile(cel)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(cel, os.O_WRONLY|os.O_TRUNC, 0)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(treść); err != nil {
-		f.Close()
-		return err
+	if _, err := piszDoPliku(f, treść); err != nil {
+		return przywróćPlik(f, oryginał, err)
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
+	if err := synchronizujPlik(f); err != nil {
+		return przywróćPlik(f, oryginał, err)
 	}
 	return f.Close()
+}
+
+// przywróćPlik odtwarza oryginał po nieudanym zapisie w miejscu i zamyka plik.
+// Zwraca błąd zapisu, uzupełniony informacją, czy plik wrócił do stanu sprzed
+// zmiany. Zapis odtwarzający idzie bezpośrednio (nie przez piszDoPliku).
+func przywróćPlik(f *os.File, oryginał []byte, przyczyna error) error {
+	defer f.Close()
+	if err := f.Truncate(0); err == nil {
+		if _, err := f.WriteAt(oryginał, 0); err == nil {
+			if err := f.Sync(); err == nil {
+				return fmt.Errorf("write in place failed (%w); the original file was restored", przyczyna)
+			}
+		}
+	}
+	return fmt.Errorf("write in place failed (%w) and the file could not be restored; "+
+		"the last good version is in the panel history", przyczyna)
 }
 
 // Path zwraca ścieżkę pliku, jeśli dokument pochodzi z Open.
