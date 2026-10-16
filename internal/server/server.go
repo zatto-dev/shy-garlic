@@ -73,6 +73,14 @@ type Server struct {
 	cfg   *config.Config
 	stamp string // rozmiar+mtime pliku, do wykrycia edycji z zewnątrz
 
+	// Stan pliku: błąd (nie da się wczytać → panel działa na poprzedniej
+	// konfiguracji) i ostrzeżenia (wczytał się, ale coś w nim podejrzane).
+	// Chronione przez mu.
+	błądPliku   *config.BłądPliku
+	ostrzeżenia []config.Ostrzeżenie
+	źródłoCfg   string // "" | "poprzednia" | "historia" | "pusta" — skąd config przy błędzie
+	ostatniBłąd string // do logowania każdego błędu raz, nie co tick watch()
+
 	// drugi nadajnik SSE: zmiany wyglądu. Osobny od health.Monitor, bo tamten
 	// strumień jest nietypowany (data: bez event:) i rysuj() by się na tym
 	// przewrócił.
@@ -156,6 +164,77 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 	return s, nil
 }
 
+// ── baner stanu pliku ────────────────────────────────────────────────────────
+
+// banerAPI — to, co karta pokazuje nad listą usług: błąd pliku (z numerem
+// linii) i/lub ostrzeżenia. Teksty gotowe, w języku żądania.
+type banerAPI struct {
+	Stan        string   `json:"state"` // ok | error | warnings
+	Tytuł       string   `json:"title"`
+	Błąd        string   `json:"error"`
+	Ostrzeżenia []string `json:"warnings"`
+}
+
+func (s *Server) banerInstancji(l i18n.Lang) banerAPI {
+	s.mu.RLock()
+	błąd := s.błądPliku
+	ostrz := append([]config.Ostrzeżenie(nil), s.ostrzeżenia...)
+	skąd := s.źródłoCfg
+	s.mu.RUnlock()
+
+	b := banerAPI{Stan: "ok", Ostrzeżenia: []string{}}
+	if błąd != nil {
+		// ostrzeżenia dotyczą POPRZEDNIEJ wersji pliku (numery linii się
+		// rozjechały) — przy błędzie nie pokazujemy ich obok nowego
+		ostrz = nil
+	}
+	for _, o := range ostrz {
+		b.Ostrzeżenia = append(b.Ostrzeżenia, opisOstrzeżenia(l, o))
+	}
+	if len(b.Ostrzeżenia) > 0 {
+		b.Stan = "warnings"
+		b.Tytuł = i18n.T(l, "baner_ostrz_tytul")
+	}
+	if błąd != nil {
+		b.Stan = "error"
+		klucz := "baner_blad_poprzednia"
+		switch skąd {
+		case "historia":
+			klucz = "baner_blad_historia"
+		case "pusta":
+			klucz = "baner_blad_pusta"
+		}
+		b.Tytuł = i18n.T(l, klucz)
+		switch {
+		case błąd.Linia > 0 && błąd.Kolumna > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), błąd.Linia, błąd.Kolumna, błąd.Komunikat)
+		case błąd.Linia > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), błąd.Linia, błąd.Komunikat)
+		default:
+			b.Błąd = błąd.Komunikat
+		}
+	}
+	return b
+}
+
+func opisOstrzeżenia(l i18n.Lang, o config.Ostrzeżenie) string {
+	if o.Rodzaj == config.RodzajAdres {
+		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Usługa, o.Grupa, o.Adres)
+	}
+	gdzie := o.Ścieżka
+	if gdzie == "" {
+		gdzie = i18n.T(l, "baner_poziom_glowny")
+	}
+	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Klucz, gdzie)
+	if o.Sugestia != "" {
+		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Sugestia)
+	}
+	if o.Linia > 0 {
+		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Linia) + ": " + t
+	}
+	return t
+}
+
 // ── rozgłaszanie zmiany wyglądu ──────────────────────────────────────────────
 
 func (s *Server) subskrybujWygląd() (<-chan struct{}, func()) {
@@ -194,7 +273,7 @@ func configBytes(path string) ([]byte, error) { return os.ReadFile(path) }
 // Start wczytuje config, uruchamia sprawdzanie i pilnuje pliku.
 func (s *Server) Start(ctx context.Context) error {
 	s.ctx = ctx
-	if err := s.reload(ctx); err != nil {
+	if err := s.wczytajPoStarcie(ctx); err != nil {
 		return err
 	}
 	go s.watch(ctx)
@@ -320,6 +399,43 @@ func (s *Server) Close() {
 	s.tła.Zamknij()
 }
 
+// wczytajPoStarcie wczytuje config przy starcie, ale nie umiera na złym pliku.
+//
+// ! Wcześniej błąd w YAML-u kończył proces, a w Dockerze z restart: always to
+// pętla restartów bez żadnej strony, na której dałoby się przeczytać dlaczego.
+// Teraz panel wstaje, a baner pokazuje błąd z numerem linii. Zastępczy config to
+// najnowsza wersja z historii w SQLite, która się parsuje; bez niej — pusty.
+// Pliku na dysku nie ruszamy: to właśnie jego człowiek poprawia.
+func (s *Server) wczytajPoStarcie(ctx context.Context) error {
+	if err := s.reload(ctx); err == nil {
+		return nil
+	}
+	cfg, skąd := s.ostatniaDobraZHistorii(ctx)
+	s.mu.Lock()
+	s.cfg = cfg
+	s.źródłoCfg = skąd
+	s.mu.Unlock()
+	s.zastosuj(ctx, cfg)
+	slog.Warn("start mimo błędu w configu", "zastępczy", skąd)
+	return nil
+}
+
+func (s *Server) ostatniaDobraZHistorii(ctx context.Context) (*config.Config, string) {
+	if wersje, err := s.st.Wersje(ctx, 20); err == nil {
+		for _, w := range wersje {
+			pełna, err := s.st.Wersja(ctx, w.ID)
+			if err != nil {
+				continue
+			}
+			if cfg, err := config.Load([]byte(pełna.Treść)); err == nil {
+				return cfg, "historia"
+			}
+		}
+	}
+	puste, _ := config.Load([]byte("groups: []\n"))
+	return puste, "pusta"
+}
+
 func (s *Server) reload(ctx context.Context) error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
@@ -328,13 +444,53 @@ func (s *Server) reload(ctx context.Context) error {
 	stamp := s.stampOf()
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+		return s.configZepsuty(stamp, config.BłądPliku{Komunikat: "read config: " + err.Error()}, err)
 	}
 	cfg, err := config.Load(raw)
 	if err != nil {
-		return err
+		return s.configZepsuty(stamp, config.RozbierzBłąd(err), err)
 	}
 
+	ostrzeżenia := append(config.Ostrzeżenia(raw), config.OstrzeżeniaAdresów(cfg)...)
+	for _, o := range ostrzeżenia {
+		slog.Warn("config: podejrzane miejsce", "rodzaj", o.Rodzaj, "linia", o.Linia,
+			"klucz", o.Klucz, "ścieżka", o.Ścieżka, "usługa", o.Usługa)
+	}
+
+	s.mu.Lock()
+	s.cfg = cfg
+	s.stamp = stamp
+	s.błądPliku = nil
+	s.ostrzeżenia = ostrzeżenia
+	s.źródłoCfg = ""
+	s.ostatniBłąd = ""
+	s.mu.Unlock()
+
+	s.zastosuj(ctx, cfg)
+	return nil
+}
+
+// configZepsuty zapamiętuje błąd pliku. Panel zostaje przy poprzedniej
+// konfiguracji, a stempel jest ustawiany MIMO błędu — dzięki temu watch() nie
+// próbuje w kółko co 2 s tego samego pliku, tylko czeka na kolejną zmianę.
+func (s *Server) configZepsuty(stamp string, b config.BłądPliku, err error) error {
+	opis := fmt.Sprintf("%d:%d:%s", b.Linia, b.Kolumna, b.Komunikat)
+	s.mu.Lock()
+	s.stamp = stamp
+	nowy := opis != s.ostatniBłąd
+	s.ostatniBłąd = opis
+	s.błądPliku = &b
+	s.mu.Unlock()
+	if nowy { // każdy odrębny błąd raz
+		slog.Error("config niepoprawny — panel zostaje przy poprzedniej konfiguracji",
+			"linia", b.Linia, "kolumna", b.Kolumna, "err", b.Komunikat)
+	}
+	s.rozgłośWygląd()
+	return err
+}
+
+// zastosuj uruchamia monitor, powiadamiacz i karty na podanym configu.
+func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 	// ! Próg musi wjechać tutaj, nie tylko przy zapisie z panelu. Bez tego
 	// ustawienie notify.threshold w pliku i restart cicho przywracały wartość
 	// domyślną — a w tym projekcie plik jest źródłem prawdy.
@@ -359,11 +515,6 @@ func (s *Server) reload(ctx context.Context) error {
 		}
 	}
 
-	s.mu.Lock()
-	s.cfg = cfg
-	s.stamp = stamp
-	s.mu.Unlock()
-
 	s.mon.SetTargets(ctx, targets)
 	żywe := make(map[string]bool, len(targets))
 	for _, t := range targets {
@@ -372,7 +523,6 @@ func (s *Server) reload(ctx context.Context) error {
 	s.powiad.Zapomnij(żywe)
 	s.rozgłośWygląd()
 	slog.Info("config wczytany", "usług", len(targets), "grup", len(cfg.Groups))
-	return nil
 }
 
 // watch reaguje na ręczną edycję pliku — plik jest źródłem prawdy, więc panel
@@ -404,9 +554,8 @@ func (s *Server) sprawdźZmianęPliku(ctx context.Context) {
 	s.mu.RUnlock()
 	if nowy := s.stampOf(); nowy != "" && nowy != stary {
 		slog.Info("config zmieniony na dysku, przeładowuję")
-		if err := s.reload(ctx); err != nil {
-			slog.Error("przeładowanie nieudane", "err", err)
-		}
+		// błąd loguje i pokazuje reload() — raz na odrębny błąd
+		_ = s.reload(ctx)
 	}
 }
 
@@ -573,6 +722,7 @@ type widokStrony struct {
 	DrugiJezykKrotko      string
 	SzukajIkonPlaceholder string
 
+	Baner      banerAPI
 	Wyglad     wyglądWidok
 	WygladJSON template.JS
 	// MoznaPisac — dziś każdy zalogowany może zapisywać. Pole istnieje po to,
@@ -680,6 +830,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	dane := widokStrony{Title: cfg.Title, Wersja: Version, LiczbaIkon: s.ikony.Liczba(), Lang: string(lang)}
 	dane.T, dane.TJSON, dane.DrugiJezyk, dane.DrugiJezykNazwa, dane.DrugiJezykKrotko = wypełnijJęzyk(lang)
 	dane.Wyglad = s.wyglądInstancji()
+	dane.Baner = s.banerInstancji(lang)
 	dane.MoznaPisac = true
 	dane.TłaLimit = LimitTłaMB
 	// ! do szablonu idzie JSON ze STRUKTURY po walidacji, nigdy surowe wejście
@@ -794,6 +945,20 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
+	// baner pliku jedzie tym samym wybudzeniem — błąd pojawia się i znika na
+	// otwartych kartach bez odświeżania
+	lang := i18n.Wybierz(r)
+	wyślijBaner := func() bool {
+		b, err := json.Marshal(s.banerInstancji(lang))
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: konfig\ndata: %s\n\n", b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
 	if !wyślij() {
 		return
 	}
@@ -809,7 +974,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-wyglądy:
-			if !wyślijWygląd() || !wyślijUkład() {
+			if !wyślijWygląd() || !wyślijUkład() || !wyślijBaner() {
 				return
 			}
 		case <-keepalive.C:

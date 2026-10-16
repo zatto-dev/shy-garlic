@@ -40,6 +40,24 @@ var zamieńPlik = os.Rename
 // utwórzTymczasowy to os.CreateTemp, z tego samego powodu (EACCES na katalogu).
 var utwórzTymczasowy = os.CreateTemp
 
+// OpenSurowy wczytuje plik BEZ parsowania YAML-a. Służy wyłącznie do naprawy:
+// Open odmawia zepsutego pliku, a edytor surowego YAML (ReplaceAll) musi umieć
+// go zastąpić poprawną treścią. Każda operacja strukturalna (AddService itd.)
+// na takim dokumencie jest niedozwolona do pierwszego udanego ReplaceAll.
+func OpenSurowy(path string) (*Document, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	d := &Document{src: raw, path: path, hash: sha256.Sum256(raw), mode: fi.Mode().Perm()}
+	_ = d.reparse() // poprawny plik dostaje AST; zepsuty zostaje bez
+	return d, nil
+}
+
 // Save zapisuje zmiany atomowo: nowy plik powstaje obok, jest zsynchronizowany
 // na dysk i dopiero wtedy podmieniany. Przerwany zapis zostawia stary plik cały.
 //

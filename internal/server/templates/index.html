@@ -197,6 +197,12 @@
   <input id="plik-tapety" type="file" accept="image/*" hidden>
 </header>
 
+<div class="baner-config" id="baner-config" data-stan="{{.Baner.Stan}}" role="alert"{{if eq .Baner.Stan "ok"}} hidden{{end}}>
+  <strong id="baner-tytul">{{.Baner.Tytuł}}</strong>
+  <p id="baner-blad"{{if not .Baner.Błąd}} hidden{{end}}>{{.Baner.Błąd}}</p>
+  <ul id="baner-lista"{{if not .Baner.Ostrzeżenia}} hidden{{end}}>{{range .Baner.Ostrzeżenia}}<li>{{.}}</li>{{end}}</ul>
+</div>
+
 <div class="sr-only" id="podsumowanie" role="status" aria-live="polite"></div>
 <div class="sr-only" id="ogloszenia" role="status" aria-live="polite"></div>
 

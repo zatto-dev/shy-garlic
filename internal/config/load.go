@@ -14,7 +14,11 @@ import (
 func Load(src []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(src, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		b := rozbierzSurowy(err)
+		if b.Linia == 0 {
+			b.Linia = lokalizuj(src, b.Komunikat)
+		}
+		return nil, &BłądWczytania{BłądPliku: b, err: fmt.Errorf("parse config: %w", err)}
 	}
 	blurPodany, dimPodany := podaneSuwaki(src)
 	applyWygląd(&cfg.Appearance, blurPodany, dimPodany)

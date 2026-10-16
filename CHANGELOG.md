@@ -28,6 +28,55 @@ the entries below say when it does.
   the card back. Other open tabs reload when the order changes.
   New endpoints: `POST /api/services/move`, `POST /api/groups/move`,
   `PUT /api/title`. Like any edit they appear in the version history.
+- **A broken config no longer takes the panel down.** If the file has a YAML
+  error at start the panel now comes up anyway (no more restart loop in Docker)
+  and shows a banner with the message, line and column. It runs on the newest
+  version from the history that still parses, or empty if there is none; the
+  file on disk is never touched. A file broken while the panel is running keeps
+  the previous configuration, the error is logged once instead of every two
+  seconds, and the banner disappears as soon as the file is fixed (live, over
+  the event stream). The raw YAML editor and "restore version" work on a broken
+  file, so it can be repaired from the UI.
+- **Typos in the config are visible.** Unknown keys (`chek:` instead of `check:`)
+  used to be ignored without a word. They are now listed in the banner with the
+  line number and a "did you mean" hint, and the file still loads. `defaults:`
+  and `x-*` top-level keys (anchor holders), anchors and `<<:` merge keys are
+  understood. Service addresses that cannot be used are listed too.
+- `./x race` runs the tests with the race detector.
+
+### Fixed
+
+- **Health history survives renames and moves.** Renaming a service, dragging it
+  to another group or renaming a group used to orphan its history — the card
+  came back with an empty 24-hour bar, and a running outage alerted again. The
+  history rows, the monitor's last result and the notifier state now move to the
+  new key together with the edit (in one transaction; a failed migration is
+  logged and never rolls back the saved YAML).
+- **A failed "down" alert is retried.** The notification state was marked as
+  reported before sending, so one failed webhook call lost the alert for good.
+  It is now marked after a successful send; each send is tried three times with
+  a short back-off and otherwise retried on the next check. Also removes a
+  latent deadlock on the `unknown` state.
+- **Security hardening.** Service addresses must be `http://`, `https://` or
+  `tcp://` (rejected with a message otherwise); only http(s) addresses become
+  links, so a `javascript:` URL in the file can no longer run on click. The
+  `next=` redirect after login and language switch rejects `/\evil.com`,
+  encoded backslashes, control characters and foreign hosts (the language
+  switch also stops following a foreign `Referer`). JSON request bodies are
+  capped at 1 MiB (2 MiB for the raw YAML editor), forms at 64 KiB. Changing a
+  password signs out every other session of that user. Session tokens are
+  stored as SHA-256 hashes; existing sessions are migrated, nobody is signed
+  out. Editing a `tcp://` service no longer writes `#ZgotmplZ` back to the file.
+- **Races.** The file watcher could reload the config in the middle of a save
+  from the panel, and concurrent reloads raced on the health monitor's
+  start/stop state (orphaned check loops). Reloads are serialised now.
+- **Saving works in more setups.** A config mounted as a single file
+  (bind mount, `EBUSY`), in a directory the panel cannot write to (`EACCES`) or
+  on another filesystem (`EXDEV`) used to make every edit fail; the panel falls
+  back to writing in place after re-checking that the file did not change. A
+  symlinked config stays a symlink.
+- `examples/homelab.yaml`: the OPNsense service merged the shared defaults one
+  level too deep, so they were silently not applied.
 
 ## [0.12.0] — 2026-10-15
 

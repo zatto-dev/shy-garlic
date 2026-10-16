@@ -10,7 +10,7 @@ title: Homelab
 
 # Shared check settings. Change them once, they apply everywhere.
 defaults: &defaults
-  check:
+  check: &check
     interval: 30s
     timeout: 6s
     # ! 401 and 403 mean "the service is alive, it just wants a login" — not
@@ -59,7 +59,7 @@ groups:
         url: https://192.168.1.1
         icon: opnsense
         check:
-          <<: *defaults
+          <<: *check    # the shared settings, plus this service's own
           insecure: true
 
       - name: TrueNAS

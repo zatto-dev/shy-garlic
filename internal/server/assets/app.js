@@ -557,7 +557,32 @@
     zrodlo.addEventListener("uklad", (e) => {
       try { naUkladzie(JSON.parse(e.data)); } catch (_) {}
     });
+    // błąd/ostrzeżenia pliku: pojawiają się i znikają bez odświeżania
+    zrodlo.addEventListener("konfig", (e) => {
+      try { pokazBaner(JSON.parse(e.data)); } catch (_) {}
+    });
     zrodlo.onerror = () => zerwane(true);
+  }
+
+  // Baner stanu pliku. Teksty przychodzą gotowe z serwera (w języku karty);
+  // wszystko idzie przez textContent, nic przez innerHTML.
+  function pokazBaner(b) {
+    const el = $("#baner-config");
+    if (!el) return;
+    el.dataset.stan = b.state;
+    el.hidden = b.state === "ok";
+    $("#baner-tytul").textContent = b.title || "";
+    const blad = $("#baner-blad");
+    blad.textContent = b.error || "";
+    blad.hidden = !b.error;
+    const lista = $("#baner-lista");
+    lista.textContent = "";
+    for (const t of b.warnings || []) {
+      const li = document.createElement("li");
+      li.textContent = t;
+      lista.appendChild(li);
+    }
+    lista.hidden = !(b.warnings && b.warnings.length);
   }
 
   function zerwane(tak) {

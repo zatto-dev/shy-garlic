@@ -75,6 +75,15 @@ func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, f
 // zmiany i zwraca pary stary → nowy; nil = nic nie przenosimy.
 func (s *Server) zEdycjąZKluczami(w http.ResponseWriter, r *http.Request, opis string,
 	migr func(stara *config.Config) map[string]string, fn func(*config.Document) error) bool {
+	return s.zEdycjąOtwarciem(w, r, opis, migr, config.Open, fn)
+}
+
+// zEdycjąOtwarciem — jak zEdycjąZKluczami, ale z wyborem sposobu otwarcia pliku.
+// Edytor surowego YAML i przywracanie wersji używają config.OpenSurowy, żeby dało
+// się nimi naprawić plik, którego config.Open nie przyjmie.
+func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis string,
+	migr func(stara *config.Config) map[string]string,
+	otwórz func(string) (*config.Document, error), fn func(*config.Document) error) bool {
 	s.edycja.Lock()
 	defer s.edycja.Unlock()
 
@@ -83,7 +92,7 @@ func (s *Server) zEdycjąZKluczami(w http.ResponseWriter, r *http.Request, opis 
 		jsonBłąd(w, http.StatusInternalServerError, "nie mogę przeczytać configu: "+err.Error())
 		return false
 	}
-	d, err := config.Open(s.path)
+	d, err := otwórz(s.path)
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, "nie mogę otworzyć configu: "+err.Error())
 		return false
@@ -492,7 +501,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "niepoprawny YAML: "+err.Error())
 		return
 	}
-	if s.zEdycją(w, r, i18n.T(i18n.Wybierz(r), "opis_reczna_edycja"),
+	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.Wybierz(r), "opis_reczna_edycja"), nil, config.OpenSurowy,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(ż.YAML)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -710,7 +719,8 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_przywrocono"), v.ID, v.Opis)
-	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.ReplaceAll([]byte(v.Treść)) }) {
+	if s.zEdycjąOtwarciem(w, r, opis, nil, config.OpenSurowy,
+		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Treść)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }

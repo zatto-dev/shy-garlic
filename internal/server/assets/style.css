@@ -2006,3 +2006,16 @@ body[data-widok] .duch.karta { backdrop-filter: none; -webkit-backdrop-filter: n
 @media (prefers-reduced-motion: no-preference) {
   .duch { scale: 1.02; }
 }
+
+/* ── baner stanu pliku (błąd YAML / nieznane klucze) ────────────────────── */
+.baner-config {
+  margin: 12px clamp(12px, 3vw, 28px); padding: 10px 14px;
+  border: 1px solid var(--edge2); border-radius: var(--r-duza);
+  background: var(--panel-krycie); color: var(--ink); font-size: 14px; line-height: 1.45;
+  box-shadow: var(--shadow);
+}
+.baner-config[data-stan="error"]    { border-color: var(--down-obwodka); border-left: 4px solid var(--down); }
+.baner-config[data-stan="warnings"] { border-left: 4px solid var(--degraded); }
+.baner-config strong { display: block; font-weight: 600; }
+.baner-config p { margin: 4px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--down-ink); overflow-wrap: anywhere; }
+.baner-config ul { margin: 6px 0 0; padding-left: 20px; color: var(--ink2); overflow-wrap: anywhere; }
