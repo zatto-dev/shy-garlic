@@ -1,6 +1,6 @@
 # Plain-kubectl install, no Helm needed:
 #
-#   kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.1"
+#   kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.2"
 #
 # Same resources as the Helm chart with default values. Make your own overlay
 # to change the image tag, storage class, size, or to add an Ingress.
@@ -25,4 +25,4 @@ configMapGenerator:
 # Keep in step with the release you install (?ref=vX).
 images:
   - name: ghcr.io/zatto-dev/shy-garlic
-    newTag: "0.13.1"
+    newTag: "0.13.2"
