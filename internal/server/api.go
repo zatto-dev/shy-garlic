@@ -269,6 +269,91 @@ func (s *Server) handleServiceDelete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleServiceMove ustawia usługę na konkretnej pozycji — w tej samej grupie
+// albo w innej. index liczy się w liście docelowej po przesunięciu.
+func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Grupa   string `json:"group"`
+		Nazwa   string `json:"name"`
+		DoGrupy string `json:"toGroup"`
+		Pozycja *int   `json:"index"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	if ż.DoGrupy == "" {
+		ż.DoGrupy = ż.Grupa
+	}
+	if !poprawnaNazwaWpisu(ż.Grupa) || !poprawnaNazwaWpisu(ż.Nazwa) ||
+		!poprawnaNazwaWpisu(ż.DoGrupy) || ż.Pozycja == nil {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_uslugi"), ż.Nazwa, ż.DoGrupy, *ż.Pozycja+1)
+	if ż.DoGrupy != ż.Grupa {
+		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.DoGrupy)
+	}
+	if s.zEdycją(w, r, opis, func(d *config.Document) error {
+		return d.MoveServiceTo(ż.Grupa, ż.Nazwa, ż.DoGrupy, *ż.Pozycja)
+	}) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
+	}
+}
+
+// handleGroupMove ustawia całą grupę na pozycji index.
+func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Nazwa   string `json:"name"`
+		Pozycja *int   `json:"index"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	if !poprawnaNazwaWpisu(ż.Nazwa) || ż.Pozycja == nil {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_grupy"), ż.Nazwa, *ż.Pozycja+1)
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.MoveGroup(ż.Nazwa, *ż.Pozycja) }) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
+	}
+}
+
+// ── tytuł panelu ─────────────────────────────────────────────────────────────
+
+// handleTitlePut zapisuje top-level `title` jednym spliceem. Walidacja leży
+// po stronie serwera niezależnie od pola w przeglądarce.
+func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Tytuł string `json:"title"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	tytuł, err := config.NormalizujTytuł(ż.Tytuł)
+	if err != nil {
+		klucz := "blad_tytul_znaki"
+		switch {
+		case errors.Is(err, config.ErrTytułPusty):
+			klucz = "blad_tytul_pusty"
+		case errors.Is(err, config.ErrTytułDługi):
+			klucz = "blad_tytul_dlugi"
+		}
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, klucz))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_tytul"), tytuł)
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.UstawTytuł(tytuł) }) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true, "title": tytuł})
+	}
+}
+
 // ── grupy ────────────────────────────────────────────────────────────────────
 
 func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {

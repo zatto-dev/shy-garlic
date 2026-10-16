@@ -380,6 +380,9 @@ func (s *Server) Handler() http.Handler {
 	chronione.HandleFunc("POST /api/services", s.handleServiceCreate)
 	chronione.HandleFunc("PATCH /api/services", s.handleServiceUpdate)
 	chronione.HandleFunc("DELETE /api/services", s.handleServiceDelete)
+	chronione.HandleFunc("POST /api/services/move", s.handleServiceMove)
+	chronione.HandleFunc("POST /api/groups/move", s.handleGroupMove)
+	chronione.HandleFunc("PUT /api/title", s.handleTitlePut)
 	chronione.HandleFunc("POST /api/groups", s.handleGroupCreate)
 	chronione.HandleFunc("PATCH /api/groups", s.handleGroupUpdate)
 	chronione.HandleFunc("DELETE /api/groups", s.handleGroupDelete)
@@ -713,6 +716,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
+	// układ i tytuł jadą tym samym wybudzeniem co wygląd: zmiana z innej karty
+	// albo z pliku ma dotrzeć do wszystkich otwartych kart
+	wyślijUkład := func() bool {
+		b, err := json.Marshal(s.układInstancji())
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: uklad\ndata: %s\n\n", b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
 	if !wyślij() {
 		return
 	}
@@ -728,7 +744,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-wyglądy:
-			if !wyślijWygląd() {
+			if !wyślijWygląd() || !wyślijUkład() {
 				return
 			}
 		case <-keepalive.C:
@@ -738,6 +754,39 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// układAPI — tytuł i kolejność grup/usług (same nazwy). Karta porównuje to z
+// własnym DOM-em i przeładowuje się tylko wtedy, gdy się rozjechały.
+type układAPI struct {
+	Tytuł string       `json:"title"`
+	Grupy []układGrupy `json:"groups"`
+}
+
+type układGrupy struct {
+	Nazwa  string   `json:"name"`
+	Usługi []string `json:"services"`
+}
+
+func (s *Server) układInstancji() układAPI {
+	s.mu.RLock()
+	cfg := s.cfg
+	s.mu.RUnlock()
+	u := układAPI{Tytuł: "Shy Garlic", Grupy: []układGrupy{}}
+	if cfg == nil {
+		return u
+	}
+	if cfg.Title != "" {
+		u.Tytuł = cfg.Title
+	}
+	for _, g := range cfg.Groups {
+		ug := układGrupy{Nazwa: g.Name, Usługi: []string{}}
+		for _, svc := range g.Services {
+			ug.Usługi = append(ug.Usługi, svc.Name)
+		}
+		u.Grupy = append(u.Grupy, ug)
+	}
+	return u
 }
 
 func hostZ(raw string) string {

@@ -738,3 +738,49 @@ func TestUstawieniaMająZakładki(t *testing.T) {
 		}
 	}
 }
+
+// Edycja tytułu i zmiana kolejności (SHYG-39/40): uchwyty, pole tytułu i
+// region aria-live muszą być w HTML-u — app.js szuka ich po tych selektorach.
+func TestStronaMaUchwytyITytułDoEdycji(t *testing.T) {
+	s := serwerTestowy(t)
+	var buf bytes.Buffer
+	if err := s.tmpl.ExecuteTemplate(&buf, "index.html", pełnyWidokStrony()); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, chcę := range []string{
+		`id="tytul-panelu"`, `id="tytul-edytuj"`, `id="blad-tytulu"`, `id="ogloszenia"`,
+		`data-akcja="uchwyt" data-typ="usluga"`, `data-akcja="uchwyt" data-typ="grupa"`,
+		`aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"`,
+	} {
+		if !strings.Contains(html, chcę) {
+			t.Errorf("w HTML-u brak %s", chcę)
+		}
+	}
+	// jeden uchwyt na kartę i jeden na grupę
+	if n := strings.Count(html, `data-typ="usluga"`); n != 1 {
+		t.Errorf("uchwytów usług = %d, chcę 1 (jedna karta)", n)
+	}
+	if n := strings.Count(html, `data-typ="grupa"`); n != 1 {
+		t.Errorf("uchwytów grup = %d, chcę 1", n)
+	}
+}
+
+// Każdy tekst z nowych funkcji ma PL i EN — brak jednego dałby klucz zamiast
+// napisu w interfejsie.
+func TestTekstyKolejnościITytułuMająObaJęzyki(t *testing.T) {
+	klucze := []string{
+		"zmien_tytul", "tytul_pole_aria", "uchwyt_usluga", "uchwyt_grupa", "pozycja_usluga",
+		"pozycja_grupa", "przenosz_filtr", "kolejnosc_ok", "blad_tytul_pusty",
+		"blad_tytul_dlugi", "blad_tytul_znaki", "blad_przenoszenie", "opis_tytul",
+		"opis_kolejnosc_uslugi", "opis_kolejnosc_grupy",
+	}
+	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
+		m := i18n.Mapa(l)
+		for _, k := range klucze {
+			if v := m[k]; v == "" || v == k {
+				t.Errorf("%s: brak tekstu %q", l, k)
+			}
+		}
+	}
+}

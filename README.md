@@ -83,7 +83,11 @@ One line changed, three added, no collateral damage.
 An editor over somebody else's file only works if they trust it. So the panel
 never writes anything you have not seen first: every action — adding a service,
 renaming a group, editing raw YAML, changing the instance appearance — shows the
-exact diff and waits for your confirmation.
+exact diff and waits for your confirmation. The two quick gestures are the
+exception: renaming the dashboard title inline and dragging things into a new
+order apply at once, because a confirmation dialog on every drop would make them
+unusable. They still go through the same engine, land in the version history,
+and are one click from being undone.
 
 Behind that there are two more safety nets:
 
@@ -392,6 +396,11 @@ speaks English and Polish, switched in the header.
 | `1` `2` `3` | grid, bento, list view        |
 | `Esc`     | close, then clear the filter    |
 
+In edit mode, drag the grip on a card or a group header to reorder (mouse or
+touch; `Esc` cancels). From the keyboard, focus the grip and press
+`Alt`+`↑`/`↓` — the new position is announced to screen readers. The pencil next
+to the title edits it in place: `Enter` or leaving the field saves, `Esc` cancels.
+
 ## Configuration
 
 ```yaml
@@ -511,6 +520,9 @@ endpoints you would.
 | `POST`   | `/api/services`                  | add a service                                              |
 | `PATCH`  | `/api/services`                  | change a service                                           |
 | `DELETE` | `/api/services?group=…&name=…`   | delete a service                                           |
+| `POST`   | `/api/services/move`             | move a service to a position, in or across groups          |
+| `POST`   | `/api/groups/move`               | move a group to a position                                 |
+| `PUT`    | `/api/title`                     | change the dashboard title                                 |
 | `POST`   | `/api/services/bulk`             | add many services as one change                            |
 | `POST`   | `/api/groups`                    | add a group                                                |
 | `PATCH`  | `/api/groups`                    | rename a group                                             |

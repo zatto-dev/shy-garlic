@@ -10,6 +10,25 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Added
+
+- **Edit the dashboard title in place.** In edit mode a pencil next to the title
+  turns it into a text field: `Enter` or leaving the field saves, `Esc` cancels.
+  Empty titles, titles over 80 characters and control characters are rejected
+  with a message next to the field. Only the `title` line of the file changes —
+  its quoting style and trailing comment stay; when the key is missing it is
+  added above `groups:`. Other open tabs pick up the new title live.
+- **Reorder by drag and drop.** In edit mode every card and group header has a
+  grip: drag a service within its group, into another group at a chosen
+  position, or drag a whole group. Works with mouse and touch in grid, bento and
+  list views, scrolls the page near the edges, `Esc` cancels. Keyboard:
+  `Alt`+arrow keys on the grip, with the new position announced to screen
+  readers. The moved block carries the comment above it and any fields the panel
+  does not know about; the rest of the file is not touched. A failed save puts
+  the card back. Other open tabs reload when the order changes.
+  New endpoints: `POST /api/services/move`, `POST /api/groups/move`,
+  `PUT /api/title`. Like any edit they appear in the version history.
+
 ## [0.12.0] — 2026-10-15
 
 ### Added

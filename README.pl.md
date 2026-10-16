@@ -85,7 +85,10 @@ Jedna linia zmieniona, trzy dodane, zero szkód ubocznych.
 Edytor cudzego pliku działa tylko wtedy, gdy ktoś mu ufa. Dlatego panel nigdy nie
 zapisuje niczego, czego wcześniej nie zobaczysz: każda akcja — dodanie usługi,
 zmiana nazwy grupy, edycja surowego YAML-a, zmiana wyglądu instancji — pokazuje
-dokładny diff i czeka na potwierdzenie.
+dokładny diff i czeka na potwierdzenie. Wyjątek to dwa szybkie gesty: zmiana
+tytułu w miejscu i przeciąganie w nową kolejność działają od razu, bo okno
+potwierdzenia po każdym upuszczeniu czyniłoby je bezużytecznymi. Idą tym samym
+silnikiem, trafiają do historii wersji i są o jedno kliknięcie od cofnięcia.
 
 Pod spodem są jeszcze dwa zabezpieczenia:
 
@@ -393,6 +396,11 @@ diff. Interfejs mówi po angielsku i po polsku, przełączasz w nagłówku.
 | `1` `2` `3` | widok grid, bento, lista        |
 | `Esc`       | zamknij, potem wyczyść filtr    |
 
+W trybie edycji przeciągnij uchwyt na karcie albo nagłówku grupy, żeby zmienić
+kolejność (mysz lub dotyk; `Esc` anuluje). Z klawiatury: fokus na uchwycie i
+`Alt`+`↑`/`↓` — nową pozycję odczyta czytnik ekranu. Ołówek przy tytule edytuje
+go w miejscu: `Enter` albo wyjście z pola zapisuje, `Esc` anuluje.
+
 ## Konfiguracja
 
 ```yaml
@@ -510,6 +518,9 @@ Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
 | `POST`   | `/api/services`                  | dodaj usługę                                            |
 | `PATCH`  | `/api/services`                  | zmień usługę                                            |
 | `DELETE` | `/api/services?group=…&name=…`   | usuń usługę                                             |
+| `POST`   | `/api/services/move`             | przenieś usługę na pozycję, w grupie lub między grupami |
+| `POST`   | `/api/groups/move`               | przenieś grupę na pozycję                               |
+| `PUT`    | `/api/title`                     | zmień tytuł panelu                                      |
 | `POST`   | `/api/services/bulk`             | dodaj wiele usług jako jedną zmianę                     |
 | `POST`   | `/api/groups`                    | dodaj grupę                                             |
 | `PATCH`  | `/api/groups`                    | zmień nazwę grupy                                       |

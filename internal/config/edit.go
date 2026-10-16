@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/ast"
 )
@@ -421,108 +423,22 @@ func (d *Document) RenameGroup(stara, nowa string) error {
 	return d.replaceRange(start, end, []byte(quoteLike(d.src[start:end], nowa)))
 }
 
-// MoveService przenosi usługę do innej grupy razem z jej blokiem tekstu —
+// MoveService przenosi usługę na koniec innej grupy razem z jej blokiem tekstu —
 // komentarze i pola, których panel nie zna, jadą z nią. Wcięcie jest
-// przeliczane pod grupę docelową.
+// przeliczane pod grupę docelową. Konkretną pozycję daje MoveServiceTo.
 func (d *Document) MoveService(zGrupy, usługa, doGrupy string) error {
 	if zGrupy == doGrupy {
 		return nil
 	}
-	if _, err := d.findGroup(doGrupy); err != nil {
-		return err
-	}
-	if _, _, err := d.findService(doGrupy, usługa); err == nil {
-		return fmt.Errorf("service %q already exists in group %q", usługa, doGrupy)
-	}
-
-	blok, err := d.blokUsługi(zGrupy, usługa)
+	ti, err := d.findGroup(doGrupy)
 	if err != nil {
 		return err
 	}
-	if err := d.RemoveService(zGrupy, usługa); err != nil {
-		return err
+	n := 0
+	if seq, ok := d.sekwencja("groups", ti, "services"); ok {
+		n = len(seq.Values)
 	}
-	return d.wstawBlok(doGrupy, blok)
-}
-
-// blokUsługi zwraca surowe linie wpisu (z komentarzem nad nim), zdjęte z wcięcia.
-func (d *Document) blokUsługi(grupa, usługa string) ([]string, error) {
-	gi, si, err := d.findService(grupa, usługa)
-	if err != nil {
-		return nil, err
-	}
-	svcs, err := d.node("groups", gi, "services")
-	if err != nil {
-		return nil, err
-	}
-	seq, ok := unwrap(svcs).(*ast.SequenceNode)
-	if !ok {
-		return nil, fmt.Errorf("%w: services nie jest listą", ErrPathNotFound)
-	}
-	off, err := d.offsetOf(seq.Values[si])
-	if err != nil {
-		return nil, err
-	}
-	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
-	end := d.blockEnd(off, dashIndent)
-	for start > 0 {
-		pk := start - 1
-		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") {
-			start = ps
-			continue
-		}
-		break
-	}
-
-	var linie []string
-	for _, l := range strings.Split(strings.TrimRight(string(d.src[start:end]), "\n"), "\n") {
-		if len(l) >= dashIndent {
-			l = l[dashIndent:]
-		} else {
-			l = strings.TrimLeft(l, " ")
-		}
-		linie = append(linie, l)
-	}
-	return linie, nil
-}
-
-// wstawBlok dokłada gotowe linie wpisu na koniec grupy, z jej wcięciem.
-func (d *Document) wstawBlok(grupa string, linie []string) error {
-	gi, err := d.findGroup(grupa)
-	if err != nil {
-		return err
-	}
-	svcs, err := d.node("groups", gi, "services")
-	if err != nil {
-		return d.wstawBlokDoPustej(gi, linie)
-	}
-	seq, ok := unwrap(svcs).(*ast.SequenceNode)
-	if !ok || len(seq.Values) == 0 {
-		return d.wstawBlokDoPustej(gi, linie)
-	}
-
-	off, err := d.offsetOf(seq.Values[len(seq.Values)-1])
-	if err != nil {
-		return err
-	}
-	dashIndent := d.dashIndentOf(off)
-	wstaw := d.blockEnd(off, dashIndent)
-
-	ind := strings.Repeat(" ", dashIndent)
-	var b strings.Builder
-	if d.poprzedzaPustaLinia(off) {
-		b.WriteString("\n")
-	}
-	for _, l := range linie {
-		if strings.TrimSpace(l) == "" {
-			b.WriteString("\n")
-			continue
-		}
-		b.WriteString(ind + l + "\n")
-	}
-	return d.replaceRange(wstaw, wstaw, []byte(b.String()))
+	return d.MoveServiceTo(zGrupy, usługa, doGrupy, n)
 }
 
 func (d *Document) wstawBlokDoPustej(gi int, linie []string) error {
@@ -839,4 +755,45 @@ func (d *Document) UsuńWygląd() error {
 		end = koniecLinii + 1
 	}
 	return d.replaceRange(start, end, nil)
+}
+
+// MaksTytułu — limit długości tytułu panelu (w znakach, nie bajtach).
+const MaksTytułu = 80
+
+var (
+	ErrTytułPusty = errors.New("title is empty")
+	ErrTytułDługi = errors.New("title is too long")
+	ErrTytułZnaki = errors.New("title contains control characters")
+)
+
+// NormalizujTytuł przycina i sprawdza tytuł. Zwraca to, co wolno zapisać do
+// pliku — jedna linia, bez znaków sterujących.
+func NormalizujTytuł(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", ErrTytułPusty
+	}
+	if utf8.RuneCountInString(v) > MaksTytułu {
+		return "", ErrTytułDługi
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+			return "", ErrTytułZnaki
+		}
+	}
+	return v, nil
+}
+
+// UstawTytuł zapisuje top-level `title`. Gdy klucza nie ma, powstaje przed
+// `groups:`, jak blok wyglądu. Styl cytowania z pliku wygrywa (SetPath).
+func (d *Document) UstawTytuł(tytuł string) error {
+	tytuł, err := NormalizujTytuł(tytuł)
+	if err != nil {
+		return err
+	}
+	err = d.SetPath(tytuł, "title")
+	if !errors.Is(err, ErrPathNotFound) {
+		return err
+	}
+	return d.wstawBlokNajwyższegoPoziomu("title: " + quoteLike(nil, tytuł) + "\n")
 }

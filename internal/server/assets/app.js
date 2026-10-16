@@ -554,6 +554,9 @@
         zastosujWyglad(true);
       } catch (_) {}
     });
+    zrodlo.addEventListener("uklad", (e) => {
+      try { naUkladzie(JSON.parse(e.data)); } catch (_) {}
+    });
     zrodlo.onerror = () => zerwane(true);
   }
 
@@ -625,12 +628,17 @@
   // ── tryb edycji ─────────────────────────────────────────────────────────
   let dockerJest = false;
   const przyciskEdycji = $("#tryb-edycji");
+  // stan edycji tytułu żyje tu, bo przelaczEdycje(true) woła się przy starcie,
+  // zanim dojdzie wykonanie do reszty kodu tytułu
+  let edytujeTytul = false;
+  let anulujTytul = null;
 
   function przelaczEdycje(wymus) {
     const wl = wymus !== undefined ? wymus : !document.body.classList.contains("edycja");
     document.body.classList.toggle("edycja", wl);
     przyciskEdycji.setAttribute("aria-pressed", String(wl));
     $("#dodaj-grupe").hidden = !wl;
+    if (!wl && anulujTytul) anulujTytul();
     pamiec.pisz(KLUCZ_EDYCJI, wl ? "1" : "0");
   }
   przyciskEdycji.addEventListener("click", () => przelaczEdycje());
@@ -1712,6 +1720,414 @@
         lista.append(li);
       }
     } catch (err) { pokazBlad(err.message); }
+  }
+
+  // ── tytuł panelu: edycja w miejscu ──────────────────────────────────────
+  //
+  // Zapis idzie wprost przez api(), bez okna z diffem — to jedno pole, a wpis
+  // w historii pozwala je cofnąć. Enter i blur zapisują, Esc wraca do starego.
+  const tytulEl = $("#tytul-panelu");
+  const tytulPrzycisk = $("#tytul-edytuj");
+  const bladTytulu = $("#blad-tytulu");
+  function ustawTytul(tekst) {
+    tytulEl.textContent = tekst;
+    document.title = tekst;
+  }
+
+  function otworzTytul() {
+    if (edytujeTytul) return;
+    edytujeTytul = true;
+    const stary = tytulEl.textContent;
+    const pole = document.createElement("input");
+    pole.type = "text";
+    pole.className = "tytul-pole";
+    pole.value = stary;
+    pole.autocomplete = "off";
+    pole.spellcheck = false;
+    pole.setAttribute("aria-label", tr("tytul_pole_aria"));
+    tytulEl.textContent = "";
+    tytulEl.append(pole);
+    tytulPrzycisk.hidden = true;
+    pole.focus();
+    pole.select();
+
+    let zakonczone = false;
+    let zapisuje = false;
+
+    const zakoncz = (tekst) => {
+      zakonczone = true;
+      edytujeTytul = false;
+      anulujTytul = null;
+      bladTytulu.hidden = true;
+      tytulPrzycisk.hidden = false;
+      pole.remove();
+      tytulEl.textContent = tekst;
+    };
+    const anuluj = () => { if (!zakonczone) zakoncz(stary); };
+    anulujTytul = anuluj;
+
+    const zapisz = async () => {
+      if (zakonczone || zapisuje) return;
+      const nowy = pole.value.trim();
+      if (nowy === stary) return zakoncz(stary);
+      zapisuje = true;
+      try {
+        const d = await api("PUT", "/api/title", { title: pole.value });
+        document.title = d.title;
+        zakoncz(d.title);
+        powiadom(tr("zapisano"));
+      } catch (err) {
+        // błąd zostaje przy polu; pole zostaje otwarte, żeby dało się poprawić
+        pole.setAttribute("aria-invalid", "true");
+        bladTytulu.textContent = err.message;
+        bladTytulu.hidden = false;
+      } finally {
+        zapisuje = false;
+      }
+    };
+
+    pole.addEventListener("input", () => {
+      pole.removeAttribute("aria-invalid");
+      bladTytulu.hidden = true;
+    });
+    pole.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); zapisz(); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); anuluj(); }
+    });
+    pole.addEventListener("blur", () => zapisz());
+  }
+  tytulPrzycisk.addEventListener("click", otworzTytul);
+
+  // ── zmiana kolejności: przeciąganie i klawiatura ────────────────────────
+  //
+  // Pointer Events, nie HTML5 draggable: działa jednakowo myszą i palcem, a
+  // dokumentowe dragover od wgrywania tapet (wyżej) zostaje nietknięte.
+  //
+  // Oryginał nie znika z DOM-u — przesuwa się po nim i sam jest znacznikiem
+  // miejsca upuszczenia (klasa .przeciagana), a pod kursorem jedzie jego
+  // kopia (.duch). Dzięki temu pozycję po upuszczeniu czyta się wprost z DOM-u,
+  // a cofnięcie to jedno insertBefore.
+  const PROG_RUCHU = 6;     // px; poniżej tego puszczenie przycisku to zwykłe kliknięcie
+  const STREFA_SCROLLA = 80; // px od krawędzi okna
+  const ogloszenia = $("#ogloszenia");
+  const fmt = (tekst, ...arg) => { let i = 0; return String(tekst).replace(/%[ds]/g, () => arg[i++]); };
+
+  let przeciaganie = null; // stan trwającego przeciągania
+  let zapisujeRuch = false;
+
+  function ogloś(tekst) {
+    ogloszenia.textContent = "";
+    // dwa takty, żeby czytnik powtórzył identyczny komunikat przy kolejnym ruchu
+    setTimeout(() => { ogloszenia.textContent = tekst; }, 30);
+  }
+
+  const kartyGrupy = (ul) => $$(":scope > .karta", ul);
+  const indeksKarty = (karta) => kartyGrupy(karta.parentElement).indexOf(karta);
+  const indeksGrupy = (grupa) => $$("#tresc > .grupa").indexOf(grupa);
+
+  function filtrAktywny() { return !!filtr.value.trim() || tylkoProblemy; }
+
+  // stan DOM-u, do którego wracamy przy błędzie albo Esc
+  function zapamietajMiejsce(el) {
+    const karta = el.classList.contains("karta");
+    return { rodzic: el.parentElement, nastepny: el.nextElementSibling,
+             karta, grupa: el.dataset.grupa, key: el.dataset.key };
+  }
+  function przywrocMiejsce(el, m) {
+    m.rodzic.insertBefore(el, m.nastepny);
+    if (m.karta) { el.dataset.grupa = m.grupa; el.dataset.key = m.key; }
+    odswiezIndeks();
+  }
+
+  // Karta przeniesiona do innej grupy zmienia klucz (grupa/nazwa); health po
+  // stronie serwera też się przepina przy przeładowaniu configu.
+  function nadajGrupe(karta, nazwaGrupy) {
+    karta.dataset.grupa = nazwaGrupy;
+    karta.dataset.key = nazwaGrupy + "/" + karta.dataset.nazwa;
+    odswiezIndeks();
+  }
+
+  async function zapiszKarte(karta, z, doGrupy, indeks) {
+    zapisujeRuch = true;
+    try {
+      await api("POST", "/api/services/move",
+        { group: z.grupa, name: karta.dataset.nazwa, toGroup: doGrupy, index: indeks });
+      powiadom(tr("kolejnosc_ok"));
+      return true;
+    } catch (err) {
+      przywrocMiejsce(karta, z);
+      powiadomBlad(err);
+      return false;
+    } finally {
+      zapisujeRuch = false;
+    }
+  }
+
+  async function zapiszGrupe(sekcja, z, indeks) {
+    zapisujeRuch = true;
+    try {
+      await api("POST", "/api/groups/move", { name: sekcja.dataset.grupa, index: indeks });
+      powiadom(tr("kolejnosc_ok"));
+      return true;
+    } catch (err) {
+      przywrocMiejsce(sekcja, z);
+      powiadomBlad(err);
+      return false;
+    } finally {
+      zapisujeRuch = false;
+    }
+  }
+
+  // wspólne zakończenie ruchu kartą — dla myszy, palca i klawiatury
+  async function zakonczRuchKarty(karta, z) {
+    const doGrupy = karta.closest(".grupa").dataset.grupa;
+    const indeks = indeksKarty(karta);
+    const zmieniona = doGrupy !== z.grupa;
+    const samoMiejsce = !zmieniona && karta.nextElementSibling === z.nastepny;
+    if (samoMiejsce) return false;
+    if (zmieniona) nadajGrupe(karta, doGrupy);
+    const ok = await zapiszKarte(karta, z, doGrupy, indeks);
+    if (ok) {
+      const n = kartyGrupy(karta.parentElement).length;
+      ogloś(fmt(tr("pozycja_usluga"), karta.dataset.nazwa, indeks + 1, n, doGrupy));
+    }
+    return ok;
+  }
+
+  async function zakonczRuchGrupy(sekcja, z) {
+    if (sekcja.nextElementSibling === z.nastepny) return false;
+    const indeks = indeksGrupy(sekcja);
+    const ok = await zapiszGrupe(sekcja, z, indeks);
+    if (ok) ogloś(fmt(tr("pozycja_grupa"), sekcja.dataset.grupa, indeks + 1, $$("#tresc > .grupa").length));
+    return ok;
+  }
+
+  // ── wyznaczanie miejsca upuszczenia ─────────────────────────────────────
+  function srodek(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+
+  // Najbliższa grupa pod kursorem w pionie; poza wszystkimi — ta najbliższa.
+  function grupaPodKursorem(y) {
+    let najlepsza = null, odl = Infinity;
+    for (const g of $$("#tresc > .grupa:not([hidden])")) {
+      const r = g.getBoundingClientRect();
+      const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      if (d < odl) { odl = d; najlepsza = g; }
+    }
+    return najlepsza;
+  }
+
+  function polozKarte(karta, x, y) {
+    const sekcja = grupaPodKursorem(y);
+    if (!sekcja) return;
+    const ul = $(":scope > .siatka", sekcja);
+    const inne = kartyGrupy(ul).filter((k) => k !== karta && !k.hidden);
+    let przed = null; // element, przed którym ląduje karta; null = na koniec
+    if (inne.length) {
+      const rr = inne.map((k) => k.getBoundingClientRect());
+      // lista (jedna kolumna) vs siatka: w liście wszystkie karty mają ten sam lewy brzeg
+      const pionowo = rr.every((r) => Math.abs(r.left - rr[0].left) < 2);
+      let n = 0, odl = Infinity;
+      rr.forEach((r, i) => {
+        const s = srodek(r);
+        const d = (s.x - x) ** 2 + (s.y - y) ** 2;
+        if (d < odl) { odl = d; n = i; }
+      });
+      const r = rr[n], s = srodek(r);
+      const wczesniej = pionowo ? y < s.y
+        : y < r.top ? true : y > r.bottom ? false : x < s.x;
+      const nast = wczesniej ? inne[n] : inne[n + 1];
+      przed = nast || null;
+    }
+    const cel = przed || $(":scope > .kafel-dodaj", ul);
+    if (karta.parentElement === ul && karta.nextElementSibling === cel) return;
+    ul.insertBefore(karta, cel);
+  }
+
+  function polozGrupe(sekcja, y) {
+    const inne = $$("#tresc > .grupa:not([hidden])").filter((g) => g !== sekcja);
+    let przed = $("#pusto");
+    for (const g of inne) {
+      const r = g.getBoundingClientRect();
+      if (y < r.top + r.height / 2) { przed = g; break; }
+    }
+    if (sekcja.nextElementSibling === przed) return;
+    $("#tresc").insertBefore(sekcja, przed);
+  }
+
+  // ── przebieg przeciągania ───────────────────────────────────────────────
+  function startPrzeciagania(p) {
+    const el = p.el;
+    const r = el.getBoundingClientRect();
+    const duch = p.typ === "grupa" ? document.createElement("section") : el.cloneNode(true);
+    if (p.typ === "grupa") {
+      duch.className = "grupa duch";
+      duch.append($(":scope > h2", el).cloneNode(true));
+    } else {
+      duch.classList.add("duch");
+    }
+    duch.removeAttribute("data-key");
+    duch.setAttribute("aria-hidden", "true");
+    duch.style.width = r.width + "px";
+    if (p.typ !== "grupa") duch.style.height = r.height + "px";
+    document.body.append(duch);
+
+    p.duch = duch;
+    p.dx = p.x0 - r.left;
+    p.dy = p.y0 - r.top;
+    p.aktywne = true;
+    document.body.classList.add("przeciaganie");
+    el.classList.add("przeciagana");
+    ruchDucha(p);
+    petlaScrolla();
+  }
+
+  function ruchDucha(p) {
+    // w widoku listy uchwyt siedzi przy prawej krawędzi wiersza — bez
+    // przycięcia duch wyjeżdżałby za ekran, gdy kursor jedzie w lewo
+    const szer = p.duch.offsetWidth;
+    const lewo = Math.max(0, Math.min(p.x - p.dx, window.innerWidth - szer));
+    p.duch.style.transform = `translate3d(${lewo}px, ${p.y - p.dy}px, 0)`;
+  }
+
+  function polozWgKursora(p) {
+    if (p.typ === "grupa") polozGrupe(p.el, p.y);
+    else polozKarte(p.el, p.x, p.y);
+  }
+
+  function sprzatnijPrzeciaganie() {
+    const p = przeciaganie;
+    if (!p) return;
+    przeciaganie = null;
+    document.removeEventListener("pointermove", naRuchu, true);
+    document.removeEventListener("pointerup", naPuszczeniu, true);
+    document.removeEventListener("pointercancel", naPrzerwaniu, true);
+    document.removeEventListener("keydown", naKlawiszuPodczas, true);
+    window.removeEventListener("blur", naPrzerwaniu);
+    if (p.duch) p.duch.remove();
+    document.body.classList.remove("przeciaganie");
+    p.el.classList.remove("przeciagana");
+  }
+
+  function naRuchu(e) {
+    const p = przeciaganie;
+    if (!p || e.pointerId !== p.id) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (!p.aktywne) {
+      if (Math.hypot(p.x - p.x0, p.y - p.y0) < PROG_RUCHU) return;
+      startPrzeciagania(p);
+    }
+    e.preventDefault();
+    ruchDucha(p);
+    polozWgKursora(p);
+  }
+
+  async function naPuszczeniu(e) {
+    const p = przeciaganie;
+    if (!p || e.pointerId !== p.id) return;
+    const { el, typ, miejsce, aktywne, uchwyt } = p;
+    sprzatnijPrzeciaganie();
+    if (!aktywne) return; // nie przekroczono progu — zwykłe kliknięcie
+    if (typ === "grupa") await zakonczRuchGrupy(el, miejsce);
+    else await zakonczRuchKarty(el, miejsce);
+    uchwyt.focus({ preventScroll: true });
+  }
+
+  function naPrzerwaniu() {
+    const p = przeciaganie;
+    if (!p) return;
+    const { el, miejsce, aktywne } = p;
+    sprzatnijPrzeciaganie();
+    if (aktywne) przywrocMiejsce(el, miejsce);
+  }
+
+  function naKlawiszuPodczas(e) {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    naPrzerwaniu();
+  }
+
+  // Autoscroll przy krawędzi okna. Pętla rAF działa tylko w trakcie przeciągania.
+  function petlaScrolla() {
+    const p = przeciaganie;
+    if (!p || !p.aktywne) return;
+    const h = window.innerHeight;
+    let krok = 0;
+    if (p.y < STREFA_SCROLLA) krok = -Math.ceil((STREFA_SCROLLA - p.y) / 4);
+    else if (p.y > h - STREFA_SCROLLA) krok = Math.ceil((p.y - (h - STREFA_SCROLLA)) / 4);
+    if (krok) {
+      const przed = window.scrollY;
+      window.scrollBy(0, Math.max(-30, Math.min(30, krok)));
+      // treść pojechała pod nieruchomym kursorem — miejsce upuszczenia się zmieniło
+      if (window.scrollY !== przed) polozWgKursora(p);
+    }
+    requestAnimationFrame(petlaScrolla);
+  }
+
+  document.addEventListener("pointerdown", (e) => {
+    const uchwyt = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
+    if (!uchwyt || przeciaganie || zapisujeRuch) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (!document.body.classList.contains("edycja")) return;
+    if (filtrAktywny()) { powiadom(tr("przenosz_filtr"), "ostrzezenie"); return; }
+    const typ = uchwyt.dataset.typ;
+    const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
+    if (!el) return;
+    przeciaganie = {
+      typ, el, uchwyt, id: e.pointerId, aktywne: false,
+      x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+      miejsce: zapamietajMiejsce(el),
+    };
+    document.addEventListener("pointermove", naRuchu, true);
+    document.addEventListener("pointerup", naPuszczeniu, true);
+    document.addEventListener("pointercancel", naPrzerwaniu, true);
+    document.addEventListener("keydown", naKlawiszuPodczas, true);
+    window.addEventListener("blur", naPrzerwaniu);
+  });
+
+  // Klawiatura: Alt + strzałki na uchwycie. Góra/lewo = wcześniej, dół/prawo = później.
+  document.addEventListener("keydown", async (e) => {
+    const uchwyt = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
+    if (!uchwyt || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const krok = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
+    if (!krok) return;
+    e.preventDefault(); // Alt+← to też „wstecz" w przeglądarce
+    if (przeciaganie || zapisujeRuch) return;
+    if (filtrAktywny()) { powiadom(tr("przenosz_filtr"), "ostrzezenie"); return; }
+
+    const typ = uchwyt.dataset.typ;
+    const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
+    const rodzenstwo = typ === "grupa" ? $$("#tresc > .grupa") : kartyGrupy(el.parentElement);
+    const i = rodzenstwo.indexOf(el);
+    const j = i + krok;
+    if (j < 0 || j >= rodzenstwo.length) return;
+
+    const miejsce = zapamietajMiejsce(el);
+    if (krok < 0) el.parentElement.insertBefore(el, rodzenstwo[j]);
+    else el.parentElement.insertBefore(el, rodzenstwo[j].nextElementSibling);
+    if (typ === "grupa") await zakonczRuchGrupy(el, miejsce);
+    else await zakonczRuchKarty(el, miejsce);
+    uchwyt.focus({ preventScroll: false }); // insertBefore zgubił fokus
+  });
+
+  // Klawisz Enter/Spacja na uchwycie nie robi nic — to nie jest przycisk akcji.
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest('[data-akcja="uchwyt"]')) e.preventDefault();
+  }, true);
+
+  // ── układ i tytuł z innych kart ─────────────────────────────────────────
+  function ukladDom() {
+    return $$("#tresc > .grupa").map((g) => ({
+      name: g.dataset.grupa,
+      services: kartyGrupy($(":scope > .siatka", g)).map((k) => k.dataset.nazwa),
+    }));
+  }
+
+  function naUkladzie(u) {
+    if (!edytujeTytul && u.title) ustawTytul(u.title);
+    if (przeciaganie || zapisujeRuch || edytujeTytul || $("dialog[open]")) return;
+    // ta karta po własnej zmianie ma już ten sam układ i nie przeładowuje się
+    if (JSON.stringify(ukladDom()) !== JSON.stringify(u.groups)) location.reload();
   }
 
   // ── start ───────────────────────────────────────────────────────────────
