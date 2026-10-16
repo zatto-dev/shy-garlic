@@ -23,74 +23,74 @@ import (
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
 
-var atrybutPresetu = regexp.MustCompile(`data-preset="([^"]*)"`)
+var presetAttr = regexp.MustCompile(`data-preset="([^"]*)"`)
 
-// sprawdźWyjścieSzablonu pilnuje trzech rzeczy naraz: że do atrybutu nie
-// wyciekła wartość spoza allowlisty, że w szablonie nie ma stylów inline
-// (CSP ma style-src 'self', więc byłyby martwe) i że nie ma znacznika <style>.
-func sprawdźWyjścieSzablonu(t *testing.T, html string) {
+// checkTemplateOutput guards three things at once: that no value from outside the allowlist
+// leaked into an attribute, that the template has no inline styles
+// (CSP has style-src 'self', so they would be dead) and that there is no <style> tag.
+func checkTemplateOutput(t *testing.T, html string) {
 	t.Helper()
-	for _, m := range atrybutPresetu.FindAllStringSubmatch(html, -1) {
+	for _, m := range presetAttr.FindAllStringSubmatch(html, -1) {
 		if !config.Allowed(m[1], config.BackgroundPresets) {
-			t.Errorf("data-preset=%q — wartość spoza allowlisty w atrybucie", m[1])
+			t.Errorf("data-preset=%q — a value outside the allowlist in the attribute", m[1])
 		}
 	}
 	if strings.Contains(html, "style=") {
-		t.Error("w wyjściu jest atrybut style= — CSP style-src 'self' go zablokuje")
+		t.Error("the output has a style= attribute — CSP style-src 'self' will block it")
 	}
 	if strings.Contains(html, "<style") {
-		t.Error("w wyjściu jest znacznik <style> — to samo, CSP go zablokuje")
+		t.Error("the output has a <style> tag — the same, CSP will block it")
 	}
 }
 
-func pełnyWidokStrony() widokStrony {
-	d := widokStrony{
-		Title: "Homelab", Wersja: "test", Użytkownik: "admin", LiczbaIkon: 3363,
+func fullPageView() pageView {
+	d := pageView{
+		Title: "Homelab", Wersja: "test", Użytkownik: "admin", IconCount: 3363,
 		Stan: template.JS("{}"), Lang: "pl",
-		Wyglad:     wyglądWidok{Preset: "aurora", Blur: 10, Ton: "dark", Widok: "grid"},
+		Wyglad:     appearanceView{Preset: "aurora", Blur: 10, Ton: "dark", Widok: "grid"},
 		WygladJSON: template.JS(`{"preset":"aurora","image":"","blur":10,"tone":"dark","view":"grid"}`),
-		MoznaPisac: true, TłaLimit: LimitTłaMB,
-		Groups: []widokGrupy{{Name: "Media", Services: []widokUsługi{{
+		CanWrite:   true, BackgroundLimit: BackgroundLimitMB,
+		Groups: []groupView{{Name: "Media", Services: []serviceView{{
 			Key: "Media/Jellyfin", Group: "Media", Name: "Jellyfin",
 			URL: "http://jellyfin", Host: "jellyfin", IconName: "jellyfin",
 			Icon: iconRef{Src: "/icon/jellyfin", Litera: "J"}, Rozmiar: "md",
 		}}}},
 	}
-	d.T, d.TJSON, d.DrugiJezyk, d.DrugiJezykNazwa, d.DrugiJezykKrotko = wypełnijJęzyk(i18n.PL)
+	d.T, d.TJSON, d.DrugiJezyk, d.DrugiJezykNazwa, d.DrugiJezykKrotko = fillLang(i18n.PL)
 	d.SzukajIkonPlaceholder = "Szukaj ikony"
 	return d
 }
 
-// TestSzablonyWykonujaSie łapie literówkę w {{.Pole}}, której ParseFS nie widzi
-// — błąd wychodzi dopiero przy wykonaniu, czyli u użytkownika.
-func TestSzablonyWykonujaSie(t *testing.T) {
-	s := serwerTestowy(t)
+// TestTemplatesExecute catches a typo in {{.Field}} that ParseFS does not see
+// — the error only comes out at execution, i.e. at the user's.
+func TestTemplatesExecute(t *testing.T) {
+	s := testServer(t)
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, "index.html", pełnyWidokStrony()); err != nil {
+	if err := s.tmpl.ExecuteTemplate(&buf, "index.html", fullPageView()); err != nil {
 		t.Fatalf("index.html: %v", err)
 	}
-	sprawdźWyjścieSzablonu(t, buf.String())
+	checkTemplateOutput(t, buf.String())
 
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		for _, setup := range []bool{false, true} {
 			buf.Reset()
-			dane := s.zJęzykiem(l, widokLogowania{Setup: setup, Wersja: "test", Tytuł: "Logowanie"})
-			if err := s.tmpl.ExecuteTemplate(&buf, "login.html", dane); err != nil {
+			data := s.withLang(l, loginView{Setup: setup, Wersja: "test", Tytuł: "Logowanie"})
+			if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 				t.Fatalf("login.html (%s, setup=%v): %v", l, setup, err)
 			}
-			sprawdźWyjścieSzablonu(t, buf.String())
+			checkTemplateOutput(t, buf.String())
 		}
 	}
 }
 
-func TestHandleIndexRenderujeBezPaniki(t *testing.T) {
-	warianty := []struct {
-		nazwa string
-		ustaw func(*config.Config)
+func TestHandleIndexRendersWithoutPanic(t *testing.T) {
+	variants := []struct {
+		name string
+		set  func(*config.Config)
 	}{
-		{"z pliku", func(*config.Config) {}},
-		{"pusty wygląd", func(c *config.Config) { c.Appearance = config.Appearance{} }},
-		{"wygląd pełen śmieci", func(c *config.Config) {
+		{"from file", func(*config.Config) {}},
+		{"empty appearance", func(c *config.Config) { c.Appearance = config.Appearance{} }},
+		{"appearance full of junk", func(c *config.Config) {
 			c.Appearance = config.Appearance{
 				Background: config.Background{
 					Preset: `<script>alert(1)</script>`,
@@ -102,67 +102,67 @@ func TestHandleIndexRenderujeBezPaniki(t *testing.T) {
 			}
 		}},
 	}
-	for _, w := range warianty {
-		s := serwerTestowy(t)
+	for _, w := range variants {
+		s := testServer(t)
 		s.mu.Lock()
-		w.ustaw(s.cfg)
+		w.set(s.cfg)
 		s.mu.Unlock()
 
 		rec := httptest.NewRecorder()
 		s.handleIndex(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: kod = %d", w.nazwa, rec.Code)
+			t.Fatalf("%s: code = %d", w.name, rec.Code)
 		}
 		body := rec.Body.String()
-		sprawdźWyjścieSzablonu(t, body)
+		checkTemplateOutput(t, body)
 		if strings.Contains(body, "onload=") || strings.Contains(body, "<script>alert") {
-			t.Errorf("%s: śmieci z configu wyszły niezescape'owane", w.nazwa)
+			t.Errorf("%s: junk from the config came out unescaped", w.name)
 		}
 	}
 }
 
-func TestLoginNieWypuszczaTapety(t *testing.T) {
-	s := serwerTestowy(t)
+func TestLoginDoesNotLeakWallpaper(t *testing.T) {
+	s := testServer(t)
 	s.mu.Lock()
 	s.cfg.Appearance.Background.Preset = "photo"
 	s.cfg.Appearance.Background.Image = "prywatne-zdjecie.jpg"
 	s.mu.Unlock()
 
-	w := s.wyglądBramy()
-	if w.Preset == config.PresetPhoto || w.Obraz != "" {
-		t.Fatalf("brama dostała tapetę: %+v", w)
+	w := s.gateAppearance()
+	if w.Preset == config.PresetPhoto || w.Image != "" {
+		t.Fatalf("the gate got a wallpaper: %+v", w)
 	}
 
 	var buf bytes.Buffer
-	dane := s.zJęzykiem(i18n.PL, widokLogowania{Wersja: "test", Tytuł: "Logowanie"})
-	if err := s.tmpl.ExecuteTemplate(&buf, "login.html", dane); err != nil {
+	data := s.withLang(i18n.PL, loginView{Wersja: "test", Tytuł: "Logowanie"})
+	if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), "/bg/") || strings.Contains(buf.String(), "prywatne-zdjecie") {
-		t.Fatal("nazwa tapety wyciekła na stronę logowania")
+		t.Fatal("the wallpaper name leaked onto the login page")
 	}
-	sprawdźWyjścieSzablonu(t, buf.String())
+	checkTemplateOutput(t, buf.String())
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Podgląd offline
+// Offline preview
 //
-// Panel siedzi za logowaniem, więc zrzuty ekranu robi się z plików, nie z
-// przeglądarki wpuszczonej na serwer. Ten test renderuje prawdziwe szablony
-// prawdziwym handlerem na examples/homelab.yaml i zapisuje gotowe strony do
-// bin/podglad/ razem z assetami i ikonami. Ścieżki /assets/… i /icon/… robią
-// się względne, żeby wszystko działało spod file:// bez ani jednego żądania.
+// The panel sits behind a login, so screenshots are taken from files, not from a
+// browser let onto the server. This test renders the real templates with the
+// real handler on examples/homelab.yaml and writes ready pages to
+// bin/podglad/ together with assets and icons. The /assets/… and /icon/… paths
+// become relative so everything works from file:// without a single request.
 //
-// ! Zapis jest pod flagą — samo `./x test` (czyli `go test ./...`) flagi nie
-// podaje, więc nic nie powstaje. Odpalenie podglądu: `./x podglad`.
+// ! Writing is behind a flag — plain `./x test` (i.e. `go test ./...`) does not
+// pass the flag, so nothing is produced. To run the preview: `./x podglad`.
 // ══════════════════════════════════════════════════════════════════════════════
 
-var flagaPodglądu = flag.Bool("podglad", false,
-	"zapisz wyrenderowane strony do bin/podglad/ (podgląd bez serwera i bez logowania)")
+var previewFlag = flag.Bool("podglad", false,
+	"write the rendered pages to bin/podglad/ (preview without a server and without login)")
 
-// korzeńRepo szuka katalogu z go.mod — test chodzi w internal/server, a pliki
-// mają wylądować w bin/podglad/ w korzeniu.
-func korzeńRepo(t *testing.T) string {
+// repoRoot looks for the directory with go.mod — the test runs in internal/server, and the files
+// must land in bin/podglad/ in the root.
+func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
@@ -172,39 +172,39 @@ func korzeńRepo(t *testing.T) string {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
-		rodzic := filepath.Dir(dir)
-		if rodzic == dir {
-			t.Fatal("nie znalazłem korzenia repo (go.mod)")
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not find the repo root (go.mod)")
 		}
-		dir = rodzic
+		dir = parent
 	}
 }
 
-// serwerNaConfigu stawia panel na podanym pliku YAML.
+// serverOnConfig sets the panel up on the given YAML file.
 //
-// ! Celowo nie woła reload() — SetTargets ruszyłby monitor, a examples/homelab.yaml
-// ma prawdziwe adresy z domowej sieci. Podgląd ma renderować, nie skanować.
-func serwerNaConfigu(t *testing.T, źródło, cacheIkon string) *Server {
+// ! It deliberately does not call reload() — SetTargets would start the monitor, and examples/homelab.yaml
+// has real addresses from a home network. The preview is meant to render, not to scan.
+func serverOnConfig(t *testing.T, source, iconCache string) *Server {
 	t.Helper()
-	surowy, err := os.ReadFile(źródło)
+	raw, err := os.ReadFile(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	katalog := t.TempDir()
-	ścieżka := filepath.Join(katalog, "shygarlic.yaml")
-	if err := os.WriteFile(ścieżka, surowy, 0o644); err != nil {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shygarlic.yaml")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(filepath.Join(katalog, "shygarlic.db"))
+	st, err := store.Open(filepath.Join(dir, "shygarlic.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(ścieżka, st, Opcje{CacheDir: cacheIkon, BackgroundDir: filepath.Join(katalog, "bg")})
+	s, err := New(path, st, Options{CacheDir: iconCache, BackgroundDir: filepath.Join(dir, "bg")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.ctx = context.Background()
-	cfg, err := config.Load(surowy)
+	cfg, err := config.Load(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,34 +219,34 @@ func serwerNaConfigu(t *testing.T, źródło, cacheIkon string) *Server {
 	return s
 }
 
-// stanDemo — wyniki zdrowia wstawiane do podglądu. Monitor w teście nie chodzi
-// (patrz serwerNaConfigu), a strona z samymi "—" nie pokazuje ani kolorów
-// statusów, ani liczników w pasku. Wartości są zmyślone i tylko do podglądu.
-func stanDemo(cfg *config.Config) map[string]health.Result {
-	type wpis struct {
-		stan health.State
-		ms   int64
-		kod  int
-		błąd string
+// demoState — health results fed into the preview. The monitor does not run in the test
+// (see serverOnConfig), and a page with nothing but "—" shows neither the status
+// colors nor the counters in the bar. The values are made up and only for the preview.
+func demoState(cfg *config.Config) map[string]health.Result {
+	type entry struct {
+		state health.State
+		ms    int64
+		code  int
+		err   string
 	}
-	wyjątki := map[string]wpis{
-		"Media/Immich":              {health.StateDegraded, 812, 502, ""},
-		"Tools/Paperless-ngx":       {health.StateDown, 0, 0, "connection refused"},
-		"Monitoring/Grafana":        {health.StateUnknown, 0, 0, ""},
+	exceptions := map[string]entry{
+		"Media/Immich":                  {health.StateDegraded, 812, 502, ""},
+		"Tools/Paperless-ngx":           {health.StateDown, 0, 0, "connection refused"},
+		"Monitoring/Grafana":            {health.StateUnknown, 0, 0, ""},
 		"Infrastructure/Home Assistant": {health.StateUp, 118, 200, ""},
 	}
-	domyślne := []int64{34, 47, 61, 72, 96, 128, 153}
+	defaults := []int64{34, 47, 61, 72, 96, 128, 153}
 	out := map[string]health.Result{}
 	i := 0
 	for _, g := range cfg.Groups {
 		for _, svc := range g.Services {
 			k := key(g.Name, svc.Name)
-			kiedy := time.Now().Add(-time.Duration(7+3*i) * time.Second)
-			if w, ok := wyjątki[k]; ok {
-				out[k] = health.Result{State: w.stan, MS: w.ms, Code: w.kod, Err: w.błąd, At: kiedy}
+			when := time.Now().Add(-time.Duration(7+3*i) * time.Second)
+			if w, ok := exceptions[k]; ok {
+				out[k] = health.Result{State: w.state, MS: w.ms, Code: w.code, Err: w.err, At: when}
 			} else {
-				out[k] = health.Result{State: health.StateUp, MS: domyślne[i%len(domyślne)],
-					Code: 200, At: kiedy}
+				out[k] = health.Result{State: health.StateUp, MS: defaults[i%len(defaults)],
+					Code: 200, At: when}
 			}
 			i++
 		}
@@ -254,88 +254,88 @@ func stanDemo(cfg *config.Config) map[string]health.Result {
 	return out
 }
 
-// ikonyNaDysk ściąga ikony użyte w configu do <katalog>/icon/ i zwraca mapę
-// nazwa → ścieżka względna. Bez tego karty w podglądzie byłyby puste: /icon/…
-// obsługuje serwer, którego pod file:// nie ma.
-func ikonyNaDysk(t *testing.T, s *Server, cfg *config.Config, katalog string) map[string]string {
+// iconsOnDisk pulls the icons used in the config into <dir>/icon/ and returns a map
+// name → relative path. Without it the cards in the preview would be empty: /icon/…
+// is served by the server, which does not exist under file://.
+func iconsOnDisk(t *testing.T, s *Server, cfg *config.Config, dir string) map[string]string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(katalog, "icon"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "icon"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	s.ikony.Odśwież(context.Background())
+	s.icons.Refresh(context.Background())
 	out := map[string]string{}
-	pobierz := func(n string) {
+	fetch := func(n string) {
 		n = strings.TrimSuffix(strings.TrimSuffix(n, ".svg"), ".png")
 		if n == "" || strings.Contains(n, "://") {
 			return
 		}
-		if _, mam := out[n]; mam {
+		if _, have := out[n]; have {
 			return
 		}
-		dane, typ, err := s.ikony.Czytaj(context.Background(), n)
+		data, kind, err := s.icons.Read(context.Background(), n)
 		if err != nil {
-			t.Logf("ikona %q niedostępna (%v) — karta pokaże literę", n, err)
+			t.Logf("icon %q unavailable (%v) — the card will show a letter", n, err)
 			return
 		}
 		ext := "svg"
-		if typ == "image/png" {
+		if kind == "image/png" {
 			ext = "png"
 		}
-		plik := filepath.Join("icon", n+"."+ext)
-		if err := os.WriteFile(filepath.Join(katalog, plik), dane, 0o644); err != nil {
+		file := filepath.Join("icon", n+"."+ext)
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out[n] = plik
+		out[n] = file
 	}
 	for _, g := range cfg.Groups {
 		for _, svc := range g.Services {
 			n := strings.TrimSuffix(strings.TrimSuffix(svc.Icon, ".svg"), ".png")
-			pobierz(n)
-			// ikona z osobnymi wariantami jasny/ciemny renderuje się jako DWA
-			// <img>, więc podgląd offline musi mieć na dysku oba pliki, nie
-			// tylko nazwę bazową z configu.
-			if ciemny, jasny := s.ikony.Warianty(n); ciemny != "" {
-				pobierz(ciemny)
-				pobierz(jasny)
+			fetch(n)
+			// an icon with separate light/dark variants renders as TWO
+			// <img>, so the offline preview must have both files on disk, not
+			// only the base name from the config.
+			if dark, light := s.icons.Variants(n); dark != "" {
+				fetch(dark)
+				fetch(light)
 			}
 		}
 	}
 	return out
 }
 
-// assetyNaDysk wysypuje embed.FS do <katalog>/assets/. style.css dostaje
-// ścieżki względne, żeby @font-face trafił w pliki, a nie w korzeń dysku.
-func assetyNaDysk(t *testing.T, katalog string) {
+// assetsOnDisk dumps the embed.FS to <dir>/assets/. style.css gets relative
+// paths so that @font-face hits the files and not the disk root.
+func assetsOnDisk(t *testing.T, dir string) {
 	t.Helper()
 	err := fs.WalkDir(files, "assets", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		cel := filepath.Join(katalog, filepath.FromSlash(p))
+		target := filepath.Join(dir, filepath.FromSlash(p))
 		if d.IsDir() {
-			return os.MkdirAll(cel, 0o755)
+			return os.MkdirAll(target, 0o755)
 		}
-		dane, err := files.ReadFile(p)
+		data, err := files.ReadFile(p)
 		if err != nil {
 			return err
 		}
 		if strings.HasSuffix(p, ".css") {
-			dane = []byte(strings.ReplaceAll(string(dane), `url("/assets/`, `url("`))
+			data = []byte(strings.ReplaceAll(string(data), `url("/assets/`, `url("`))
 		}
-		return os.WriteFile(cel, dane, 0o644)
+		return os.WriteFile(target, data, 0o644)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-// zaślepkaPodglądu — jedyna rzecz w podglądzie, której nie ma na produkcji.
-// Pod file:// nie ma ani SSE, ani /api/*, więc bez tego stopka od razu zapala
-// „brak połączenia", a wykresy na kartach zostają puste — czyli zrzut ekranu
-// pokazywałby awarię, a nie wygląd. Dane historii są syntetyczne i wyliczane
-// z wstrzykniętego stanu demo.
-const zaślepkaPodglądu = `<script>
-/* PODGLĄD OFFLINE — nie trafia na produkcję (test render_test.go) */
+// previewStub — the only thing in the preview that does not exist in production.
+// Under file:// there is neither SSE nor /api/*, so without it the footer would immediately light up
+// "no connection" and the charts on the cards would stay empty — the screenshot
+// would show an outage, not the appearance. The history data is synthetic and computed
+// from the injected demo state.
+const previewStub = `<script>
+/* OFFLINE PREVIEW — does not reach production (test render_test.go) */
 (() => {
   class StrumienPodgladu { close() {} addEventListener() {} }
   window.EventSource = StrumienPodgladu;
@@ -415,37 +415,37 @@ const zaślepkaPodglądu = `<script>
 })();
 </` + `script>`
 
-var wzorzecIkony = regexp.MustCompile(`src="/icon/([A-Za-z0-9._-]+)"`)
-var wzorzecPickera = regexp.MustCompile(`(<div class="picker-tla" id="picker-tla"[^>]*?) hidden>`)
+var iconPattern = regexp.MustCompile(`src="/icon/([A-Za-z0-9._-]+)"`)
+var pickerPattern = regexp.MustCompile(`(<div class="picker-tla" id="picker-tla"[^>]*?) hidden>`)
 
-// kolejnyKlik klika element, który pojawia się dopiero po wcześniejszym
-// kliknięciu — zakładkę w oknie, którego przed chwilą nie było w drzewie,
-// albo przełącznik wewnątrz tej zakładki. Opóźnienie rozstrzyga kolejność.
-func kolejnyKlik(selektor string, opóźnienieMs int) string {
+// nextClick clicks an element that appears only after an earlier
+// click — a tab in a window that a moment ago was not in the tree,
+// or a switch inside that tab. The delay decides the order.
+func nextClick(selector string, delayMs int) string {
 	return `<script>
 addEventListener("load", () => setTimeout(() => {
-  const el = document.querySelector(` + "`" + selektor + "`" + `);
+  const el = document.querySelector(` + "`" + selector + "`" + `);
   if (el) el.click();
-}, ` + strconv.Itoa(opóźnienieMs) + `));
+}, ` + strconv.Itoa(delayMs) + `));
 </` + `script>`
 }
 
-// klikPodglądu — skrypt, który po załadowaniu klika wskazany element. Tak
-// otwierają się okna rysowane przez JS (np. szczegóły usługi), których
-// inaczej w statycznym podglądzie nie da się zobaczyć.
-func klikPodglądu(selektor, ikona string) string {
+// previewClick — a script that clicks the given element after loading. This is how
+// windows drawn by JS (e.g. service details) open, which otherwise
+// cannot be seen in a static preview.
+func previewClick(selector, icon string) string {
 	return `<script>
 addEventListener("load", () => setTimeout(() => {
-  const el = document.querySelector(` + "`" + selektor + "`" + `);
+  const el = document.querySelector(` + "`" + selector + "`" + `);
   if (el) el.click();
   setTimeout(() => {
-    // pod file:// /icon/<nazwa> nie istnieje, więc app.js zdążył podmienić
-    // ikonę na kafelek z literą — wstawiamy plik, który leży obok podglądu
+    // under file:// /icon/<name> does not exist, so app.js already replaced
+    // the icon with a letter tile — we insert the file that lies next to the preview
     const box = document.querySelector("#detale-ikona");
     if (box) {
       box.textContent = "";
       const img = document.createElement("img");
-      img.src = "` + ikona + `";
+      img.src = "` + icon + `";
       img.width = 28; img.height = 28;
       box.append(img);
     }
@@ -454,89 +454,89 @@ addEventListener("load", () => setTimeout(() => {
 </` + `script>`
 }
 
-// doPodglądu przerabia stronę z serwera na plik do otwarcia spod file://.
-func doPodglądu(t *testing.T, html string, ikony map[string]string, stan string, otwórzPicker bool) string {
+// toPreview turns a page from the server into a file to open from file://.
+func toPreview(t *testing.T, html string, icons map[string]string, state string, openPicker bool) string {
 	t.Helper()
 	html = strings.ReplaceAll(html, `"/assets/`, `"assets/`)
-	html = wzorzecIkony.ReplaceAllStringFunc(html, func(m string) string {
-		n := wzorzecIkony.FindStringSubmatch(m)[1]
-		if p, ok := ikony[n]; ok {
+	html = iconPattern.ReplaceAllStringFunc(html, func(m string) string {
+		n := iconPattern.FindStringSubmatch(m)[1]
+		if p, ok := icons[n]; ok {
 			return `src="` + filepath.ToSlash(p) + `"`
 		}
 		return m
 	})
-	if stan != "" {
-		const pusty = "window.STAN_POCZATKOWY = {};"
-		if !strings.Contains(html, pusty) {
-			t.Fatal("nie znalazłem window.STAN_POCZATKOWY = {}; — podmiana stanu demo nie zadziała")
+	if state != "" {
+		const empty = "window.STAN_POCZATKOWY = {};"
+		if !strings.Contains(html, empty) {
+			t.Fatal("could not find window.STAN_POCZATKOWY = {}; — swapping in the demo state will not work")
 		}
-		html = strings.Replace(html, pusty, "window.STAN_POCZATKOWY = "+stan+";", 1)
+		html = strings.Replace(html, empty, "window.STAN_POCZATKOWY = "+state+";", 1)
 	}
-	if stan != "" {
-		const wpięcie = `<script src="assets/app.js" defer></script>`
-		if !strings.Contains(html, wpięcie) {
-			t.Fatal("nie znalazłem wpięcia app.js — zaślepka podglądu nie zadziała")
+	if state != "" {
+		const hook = `<script src="assets/app.js" defer></script>`
+		if !strings.Contains(html, hook) {
+			t.Fatal("could not find the app.js hook — the preview stub will not work")
 		}
-		html = strings.Replace(html, wpięcie, zaślepkaPodglądu+"\n"+wpięcie, 1)
+		html = strings.Replace(html, hook, previewStub+"\n"+hook, 1)
 	}
-	if otwórzPicker {
-		przed := html
-		html = wzorzecPickera.ReplaceAllString(html, "$1>")
-		if html == przed {
-			t.Fatal("nie udało się otworzyć pickera tła w podglądzie")
+	if openPicker {
+		before := html
+		html = pickerPattern.ReplaceAllString(html, "$1>")
+		if html == before {
+			t.Fatal("could not open the background picker in the preview")
 		}
 	}
 	return html
 }
 
-// TestPodgladStron zapisuje bin/podglad/*.html — zestaw do zrzutów ekranu.
-func TestPodgladStron(t *testing.T) {
-	if !*flagaPodglądu {
-		t.Skip("bez -podglad nic nie zapisuję")
+// TestPreviewPages writes bin/podglad/*.html — a set for screenshots.
+func TestPreviewPages(t *testing.T) {
+	if !*previewFlag {
+		t.Skip("without -podglad I write nothing")
 	}
-	// footer pokazuje Version; w teście to "dev", a zrzuty mają pokazywać
-	// to, co stoi na garlic.zatto.pl
-	stara := Version
+	// the footer shows Version; in the test it is "dev", and the screenshots should show
+	// what stands on garlic.zatto.pl
+	old := Version
 	Version = "0.11.0"
-	t.Cleanup(func() { Version = stara })
+	t.Cleanup(func() { Version = old })
 
-	korzeń := korzeńRepo(t)
-	wyjście := filepath.Join(korzeń, "bin", "podglad")
-	if err := os.RemoveAll(wyjście); err != nil {
+	root := repoRoot(t)
+	output := filepath.Join(root, "bin", "podglad")
+	if err := os.RemoveAll(output); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(wyjście, 0o755); err != nil {
+	if err := os.MkdirAll(output, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	s := serwerNaConfigu(t, filepath.Join(korzeń, "examples", "homelab.yaml"),
-		filepath.Join(korzeń, "bin", "cache-ikon"))
+	s := serverOnConfig(t, filepath.Join(root, "examples", "homelab.yaml"),
+		filepath.Join(root, "bin", "cache-ikon"))
 	s.mu.RLock()
 	cfg := s.cfg
 	s.mu.RUnlock()
 
-	assetyNaDysk(t, wyjście)
-	ikony := ikonyNaDysk(t, s, cfg, wyjście)
+	assetsOnDisk(t, output)
+	icons := iconsOnDisk(t, s, cfg, output)
 
-	b, err := json.Marshal(stanDemo(cfg))
+	b, err := json.Marshal(demoState(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stan := string(b)
+	state := string(b)
 
-	// ! ton i preset idą przez config, a nie przez podmianę atrybutu w pliku:
-	// app.js na starcie i tak ustawia data-ton z window.WYGLAD, więc ręcznie
-	// zmieniony atrybut zostałby nadpisany przy pierwszym malowaniu.
-	// ! bento ma sens dopiero, gdy karty mają różne rozmiary. examples/homelab.yaml
-	// nie ustawia `size`, więc wariant bento dostaje je na czas renderu —
-	// inaczej zrzut pokazywałby siatkę udającą bento.
-	ustawRozmiary := func(włącz bool) {
+	// ! tone and preset go through the config, not through swapping an attribute in the file:
+	// app.js sets data-ton from window.WYGLAD at start anyway, so a
+	// hand-changed attribute would be overwritten at the first paint.
+	// ! bento only makes sense when the cards have different sizes. examples/homelab.yaml
+	// does not set `size`, so the bento variant gets them for the time of rendering —
+	// otherwise the screenshot would show a grid pretending to be bento.
+	setSizes := func(enabled bool) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		for gi := range s.cfg.Groups {
 			for si := range s.cfg.Groups[gi].Services {
 				r := ""
-				if włącz {
+				if enabled {
 					switch {
 					case si == 0:
 						r = "lg"
@@ -551,171 +551,171 @@ func TestPodgladStron(t *testing.T) {
 		}
 	}
 
-	warianty := []struct {
-		nazwa    string
-		preset   string
-		ton      string
-		widok    string
-		picker   bool
-		rozmiary bool
-		klik     string
-		klik2    string
-		klik3    string
+	variants := []struct {
+		name   string
+		preset string
+		tone   string
+		view   string
+		picker bool
+		sizes  bool
+		click  string
+		click2 string
+		click3 string
 	}{
-		{nazwa: "index-grid-ciemny", preset: "aurora", ton: "dark", widok: "grid"},
-		{nazwa: "index-grid-jasny", preset: "dawn", ton: "light", widok: "grid"},
-		{nazwa: "index-bento-ciemny", preset: "nebula", ton: "dark", widok: "bento", rozmiary: true},
-		{nazwa: "index-lista-ciemny", preset: "graphite", ton: "dark", widok: "list"},
-		{nazwa: "index-lista-jasny", preset: "fog", ton: "light", widok: "list"},
-		{nazwa: "index-picker-ciemny", preset: "aurora", ton: "dark", widok: "grid", picker: true},
-		{nazwa: "index-picker-jasny", preset: "dawn", ton: "light", widok: "grid", picker: true},
-		{nazwa: "index-ustawienia-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#ustawienia"},
-		{nazwa: "index-ustawienia-jasny", preset: "dawn", ton: "light", widok: "grid",
-			klik: "#ustawienia"},
-		{nazwa: "index-edycja-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#tryb-edycji"},
-		{nazwa: "index-powiadomienia-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#ustawienia", klik2: `[aria-controls="panel-powiadomienia"]`},
-		{nazwa: "index-instancja-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#ustawienia", klik2: `[aria-controls="panel-instancja"]`},
-		{nazwa: "index-plik-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#ustawienia", klik2: `[aria-controls="panel-plik"]`},
-		{nazwa: "index-plik-jasny", preset: "dawn", ton: "light", widok: "grid",
-			klik: "#ustawienia", klik2: `[aria-controls="panel-plik"]`},
-		{nazwa: "index-plik-pelny-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: "#ustawienia", klik2: `[aria-controls="panel-plik"]`, klik3: "#yaml-pelny-ekran"},
-		{nazwa: "index-detale-ciemny", preset: "aurora", ton: "dark", widok: "grid",
-			klik: ".karta .szczegoly"},
-		{nazwa: "index-detale-jasny", preset: "dawn", ton: "light", widok: "grid",
-			klik: ".karta .szczegoly"},
+		{name: "index-grid-ciemny", preset: "aurora", tone: "dark", view: "grid"},
+		{name: "index-grid-jasny", preset: "dawn", tone: "light", view: "grid"},
+		{name: "index-bento-ciemny", preset: "nebula", tone: "dark", view: "bento", sizes: true},
+		{name: "index-lista-ciemny", preset: "graphite", tone: "dark", view: "list"},
+		{name: "index-lista-jasny", preset: "fog", tone: "light", view: "list"},
+		{name: "index-picker-ciemny", preset: "aurora", tone: "dark", view: "grid", picker: true},
+		{name: "index-picker-jasny", preset: "dawn", tone: "light", view: "grid", picker: true},
+		{name: "index-ustawienia-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#ustawienia"},
+		{name: "index-ustawienia-jasny", preset: "dawn", tone: "light", view: "grid",
+			click: "#ustawienia"},
+		{name: "index-edycja-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#tryb-edycji"},
+		{name: "index-powiadomienia-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#ustawienia", click2: `[aria-controls="panel-powiadomienia"]`},
+		{name: "index-instancja-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#ustawienia", click2: `[aria-controls="panel-instancja"]`},
+		{name: "index-plik-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`},
+		{name: "index-plik-jasny", preset: "dawn", tone: "light", view: "grid",
+			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`},
+		{name: "index-plik-pelny-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`, click3: "#yaml-pelny-ekran"},
+		{name: "index-detale-ciemny", preset: "aurora", tone: "dark", view: "grid",
+			click: ".karta .szczegoly"},
+		{name: "index-detale-jasny", preset: "dawn", tone: "light", view: "grid",
+			click: ".karta .szczegoly"},
 	}
-	for _, w := range warianty {
+	for _, w := range variants {
 		s.mu.Lock()
 		s.cfg.Appearance = config.Appearance{
-			Background: config.Background{Preset: w.preset, Blur: 10, Dim: config.DefaultDim, Tone: w.ton},
-			View:       w.widok,
+			Background: config.Background{Preset: w.preset, Blur: 10, Dim: config.DefaultDim, Tone: w.tone},
+			View:       w.view,
 		}
 		s.mu.Unlock()
-		ustawRozmiary(w.rozmiary)
+		setSizes(w.sizes)
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = r.WithContext(context.WithValue(r.Context(), kluczUżytkownika,
+		r = r.WithContext(context.WithValue(r.Context(), userKey,
 			&store.User{ID: 1, Login: "admin"}))
 		rec := httptest.NewRecorder()
 		s.handleIndex(rec, r)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: kod = %d", w.nazwa, rec.Code)
+			t.Fatalf("%s: code = %d", w.name, rec.Code)
 		}
-		html := doPodglądu(t, rec.Body.String(), ikony, stan, w.picker)
-		if w.klik != "" {
+		html := toPreview(t, rec.Body.String(), icons, state, w.picker)
+		if w.click != "" {
 			html = strings.Replace(html, "</body>",
-				klikPodglądu(w.klik, ikony["proxmox"])+"\n</body>", 1)
+				previewClick(w.click, icons["proxmox"])+"\n</body>", 1)
 		}
-		if w.klik2 != "" {
-			html = strings.Replace(html, "</body>", kolejnyKlik(w.klik2, 400)+"\n</body>", 1)
+		if w.click2 != "" {
+			html = strings.Replace(html, "</body>", nextClick(w.click2, 400)+"\n</body>", 1)
 		}
-		if w.klik3 != "" {
-			html = strings.Replace(html, "</body>", kolejnyKlik(w.klik3, 700)+"\n</body>", 1)
+		if w.click3 != "" {
+			html = strings.Replace(html, "</body>", nextClick(w.click3, 700)+"\n</body>", 1)
 		}
-		if err := os.WriteFile(filepath.Join(wyjście, w.nazwa+".html"), []byte(html), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(output, w.name+".html"), []byte(html), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// brama: preset bierze z configu, ale nigdy tapety — dlatego osobno
-	// ustawiamy jasny i ciemny, tak jak zobaczy je niezalogowany
-	bramy := []struct {
-		nazwa  string
+	// gate: the preset comes from the config, but never the wallpaper — that is why we set
+	// light and dark separately, the way a logged-out user will see them
+	gate := []struct {
+		name   string
 		preset string
-		ton    string
+		tone   string
 		setup  bool
 	}{
 		{"login-ciemny", "aurora", "dark", false},
 		{"login-jasny", "dawn", "light", false},
 		{"login-setup-ciemny", "aurora", "dark", true},
 	}
-	for _, w := range bramy {
+	for _, w := range gate {
 		s.mu.Lock()
 		s.cfg.Appearance.Background.Preset = w.preset
-		s.cfg.Appearance.Background.Tone = w.ton
+		s.cfg.Appearance.Background.Tone = w.tone
 		s.mu.Unlock()
 
 		var buf bytes.Buffer
-		// EN jak w domyślnym żądaniu bez Accept-Language — reszta zrzutów też
-		// jest po angielsku, a oba README dzielą te same obrazki
-		dane := s.zJęzykiem(i18n.EN, widokLogowania{Setup: w.setup, Wersja: "0.9.0",
+		// EN as in a default request without Accept-Language — the other screenshots
+		// are also in English, and both READMEs share the same pictures
+		data := s.withLang(i18n.EN, loginView{Setup: w.setup, Wersja: "0.9.0",
 			Tytuł: "Sign in"})
-		if err := s.tmpl.ExecuteTemplate(&buf, "login.html", dane); err != nil {
+		if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 			t.Fatal(err)
 		}
-		html := doPodglądu(t, buf.String(), ikony, "", false)
-		if err := os.WriteFile(filepath.Join(wyjście, w.nazwa+".html"), []byte(html), 0o644); err != nil {
+		html := toPreview(t, buf.String(), icons, "", false)
+		if err := os.WriteFile(filepath.Join(output, w.name+".html"), []byte(html), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	t.Logf("podgląd zapisany w %s (ikon: %d)", wyjście, len(ikony))
+	t.Logf("preview written to %s (icons: %d)", output, len(icons))
 }
 
-// zakazaneIdiomy — klasy skasowane razem z wprowadzeniem bazy .btn. Idiomy
-// przycisku wracają same, jeśli ich nie pilnować: test trzyma listę, żeby
-// nawrót był czerwonym testem, a nie uwagą w review pół roku później.
-var zakazaneIdiomy = []string{
+// forbiddenIdioms — classes removed together with the introduction of the .btn base. The button
+// idioms come back on their own if nobody guards them: the test holds the list so
+// that a regression is a red test, not a review remark half a year later.
+var forbiddenIdioms = []string{
 	`class="przycisk`, `class="ikonka`, `class="grupa-akcja`,
 	`class="menu-pozycja`, `class="picker-podmien`, `class="picker-domyslne`,
 	`class="picker-zapisz`, `class="wybrany`,
 }
 
-// bezBazy — komponenty, które są <button>ami, ale nie są przyciskami w sensie
-// wizualnym: .chip to plakietka z licznikiem, .szczegoly to pasek wykresu
-// zajmujący całą szerokość karty w płaskim DOM-ie siatki. Obu nadanie .btn
-// popsułoby układ, a nie ujednoliciło wygląd.
-var bezBazy = []string{`class="chip`, `class="szczegoly`}
+// noBase — components that are <button>s but are not buttons in the visual
+// sense: .chip is a badge with a counter, .szczegoly is the chart bar
+// taking the whole card width in the grid's flat DOM. Giving either .btn
+// would break the layout, not unify the appearance.
+var noDB = []string{`class="chip`, `class="szczegoly`}
 
-func TestSzablonyBezSkasowanychIdiomów(t *testing.T) {
-	for _, nazwa := range []string{"index.html", "login.html"} {
-		treść, err := files.ReadFile("templates/" + nazwa)
+func TestTemplatesWithoutRemovedIdioms(t *testing.T) {
+	for _, name := range []string{"index.html", "login.html"} {
+		content, err := files.ReadFile("templates/" + name)
 		if err != nil {
-			t.Fatalf("czytam %s: %v", nazwa, err)
+			t.Fatalf("czytam %s: %v", name, err)
 		}
-		for _, z := range zakazaneIdiomy {
-			if bytes.Contains(treść, []byte(z)) {
-				t.Errorf("%s: wrócił skasowany idiom %q", nazwa, z)
+		for _, z := range forbiddenIdioms {
+			if bytes.Contains(content, []byte(z)) {
+				t.Errorf("%s: a removed idiom came back %q", name, z)
 			}
 		}
 	}
 }
 
-// Każdy <button> w szablonie ma nieść .btn. Bezklasowy przycisk to dokładnie
-// ten błąd, który siedział w login.html i w akcjach karty.
-func TestKażdyPrzyciskMaBazę(t *testing.T) {
+// Every <button> in the template must carry .btn. A class-less button is exactly
+// the bug that sat in login.html and in the card actions.
+func TestEveryButtonHasBase(t *testing.T) {
 	re := regexp.MustCompile(`(?s)<button\b[^>]*>`)
-	for _, nazwa := range []string{"index.html", "login.html"} {
-		treść, err := files.ReadFile("templates/" + nazwa)
+	for _, name := range []string{"index.html", "login.html"} {
+		content, err := files.ReadFile("templates/" + name)
 		if err != nil {
-			t.Fatalf("czytam %s: %v", nazwa, err)
+			t.Fatalf("czytam %s: %v", name, err)
 		}
-	tagi:
-		for _, tag := range re.FindAllString(string(treść), -1) {
+	tags:
+		for _, tag := range re.FindAllString(string(content), -1) {
 			if strings.Contains(tag, `"btn`) || strings.Contains(tag, ` btn`) {
 				continue
 			}
-			for _, w := range bezBazy {
+			for _, w := range noDB {
 				if strings.Contains(tag, w) {
-					continue tagi
+					continue tags
 				}
 			}
-			t.Errorf("%s: przycisk bez klasy .btn: %s", nazwa, strings.Join(strings.Fields(tag), " "))
+			t.Errorf("%s: button without the .btn class: %s", name, strings.Join(strings.Fields(tag), " "))
 		}
 	}
 }
 
-// Okno ustawień ma sześć zakładek, nie siedem: „Usługi" z planu byłaby pusta,
-// bo usługi edytuje się na miejscu w panelu. Drugi edytor tego samego to
-// dokładnie ten problem, który ta przebudowa likwiduje.
-func TestUstawieniaMająZakładki(t *testing.T) {
-	treść, err := files.ReadFile("templates/index.html")
+// The settings window has six tabs, not seven: "Services" from the plan would be empty,
+// because services are edited in place in the panel. A second editor of the same thing is
+// exactly the problem this rebuild removes.
+func TestSettingsHaveTabs(t *testing.T) {
+	content, err := files.ReadFile("templates/index.html")
 	if err != nil {
 		t.Fatalf("czytam index.html: %v", err)
 	}
@@ -723,53 +723,53 @@ func TestUstawieniaMająZakładki(t *testing.T) {
 		"panel-wyglad", "panel-powiadomienia", "panel-konta",
 		"panel-historia", "panel-plik", "panel-instancja",
 	} {
-		if !bytes.Contains(treść, []byte(`id="`+id+`"`)) {
-			t.Errorf("brak panelu %q", id)
+		if !bytes.Contains(content, []byte(`id="`+id+`"`)) {
+			t.Errorf("missing panel %q", id)
 		}
 	}
-	if !bytes.Contains(treść, []byte(`role="tablist"`)) {
-		t.Error("zakładki mają być tablistem — inaczej czytnik ekranu widzi rząd przycisków bez związku")
+	if !bytes.Contains(content, []byte(`role="tablist"`)) {
+		t.Error("the tabs must be a tablist — otherwise a screen reader sees a row of unrelated buttons")
 	}
-	// Każdy tab musi wskazywać panel, który istnieje.
+	// Every tab must point to a panel that exists.
 	re := regexp.MustCompile(`role="tab"[^>]*aria-controls="([^"]+)"`)
-	for _, m := range re.FindAllStringSubmatch(string(treść), -1) {
-		if !bytes.Contains(treść, []byte(`id="`+m[1]+`"`)) {
-			t.Errorf("zakładka wskazuje na nieistniejący panel %q", m[1])
+	for _, m := range re.FindAllStringSubmatch(string(content), -1) {
+		if !bytes.Contains(content, []byte(`id="`+m[1]+`"`)) {
+			t.Errorf("a tab points to a non-existent panel %q", m[1])
 		}
 	}
 }
 
-// Edycja tytułu i zmiana kolejności (SHYG-39/40): uchwyty, pole tytułu i
-// region aria-live muszą być w HTML-u — app.js szuka ich po tych selektorach.
-func TestStronaMaUchwytyITytułDoEdycji(t *testing.T) {
-	s := serwerTestowy(t)
+// Title editing and reordering (SHYG-39/40): handles, the title field and
+// the aria-live region must be in the HTML — app.js looks for them by these selectors.
+func TestPageHasHandlesAndTitleForEditing(t *testing.T) {
+	s := testServer(t)
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, "index.html", pełnyWidokStrony()); err != nil {
+	if err := s.tmpl.ExecuteTemplate(&buf, "index.html", fullPageView()); err != nil {
 		t.Fatal(err)
 	}
 	html := buf.String()
-	for _, chcę := range []string{
+	for _, want := range []string{
 		`id="tytul-panelu"`, `id="tytul-edytuj"`, `id="blad-tytulu"`, `id="ogloszenia"`,
 		`data-akcja="uchwyt" data-typ="usluga"`, `data-akcja="uchwyt" data-typ="grupa"`,
 		`aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"`,
 	} {
-		if !strings.Contains(html, chcę) {
-			t.Errorf("w HTML-u brak %s", chcę)
+		if !strings.Contains(html, want) {
+			t.Errorf("HTML lacks %s", want)
 		}
 	}
-	// jeden uchwyt na kartę i jeden na grupę
+	// one handle per card and one per group
 	if n := strings.Count(html, `data-typ="usluga"`); n != 1 {
-		t.Errorf("uchwytów usług = %d, chcę 1 (jedna karta)", n)
+		t.Errorf("service handles = %d, want 1 (one card)", n)
 	}
 	if n := strings.Count(html, `data-typ="grupa"`); n != 1 {
-		t.Errorf("uchwytów grup = %d, chcę 1", n)
+		t.Errorf("group handles = %d, want 1", n)
 	}
 }
 
-// Każdy tekst z nowych funkcji ma PL i EN — brak jednego dałby klucz zamiast
-// napisu w interfejsie.
-func TestTekstyKolejnościITytułuMająObaJęzyki(t *testing.T) {
-	klucze := []string{
+// Every text of the new features has PL and EN — a missing one would give a key instead of
+// a label in the interface.
+func TestOrderAndTitleTextsHaveBothLanguages(t *testing.T) {
+	keys := []string{
 		"zmien_tytul", "tytul_pole_aria", "uchwyt_usluga", "uchwyt_grupa", "pozycja_usluga",
 		"pozycja_grupa", "przenosz_filtr", "kolejnosc_ok", "blad_tytul_pusty",
 		"blad_tytul_dlugi", "blad_tytul_znaki", "blad_przenoszenie", "opis_tytul",
@@ -777,9 +777,9 @@ func TestTekstyKolejnościITytułuMająObaJęzyki(t *testing.T) {
 	}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)
-		for _, k := range klucze {
+		for _, k := range keys {
 			if v := m[k]; v == "" || v == k {
-				t.Errorf("%s: brak tekstu %q", l, k)
+				t.Errorf("%s: missing text %q", l, k)
 			}
 		}
 	}

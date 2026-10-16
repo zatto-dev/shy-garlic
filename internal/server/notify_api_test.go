@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-// plikConfigu czyta plik z dysku, a nie stan w pamięci — chodzi o sprawdzenie,
-// że zapis naprawdę wyszedł poza proces.
-func (s *Server) plikConfigu(t *testing.T) []byte {
+// configFile reads the file from disk, not the in-memory state — the point is to check
+// that the write really left the process.
+func (s *Server) configFile(t *testing.T) []byte {
 	t.Helper()
 	b, err := os.ReadFile(s.path)
 	if err != nil {
@@ -20,296 +20,296 @@ func (s *Server) plikConfigu(t *testing.T) []byte {
 	return b
 }
 
-func TestNotifyGetŹródłoBaza(t *testing.T) {
-	s := serwerTestowy(t)
+func TestNotifyGetSourceDB(t *testing.T) {
+	s := testServer(t)
 	if err := s.st.SetSetting(s.ctx, "notify.webhook", "https://example.test/hooks/abc123"); err != nil {
-		t.Fatalf("zapis: %v", err)
+		t.Fatalf("save: %v", err)
 	}
-	s.powiad.SetWebhook("https://example.test/hooks/abc123")
+	s.notifier.SetWebhook("https://example.test/hooks/abc123")
 
 	rr := httptest.NewRecorder()
 	s.handleNotifyGet(rr, httptest.NewRequest("GET", "/api/notify", nil))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("chcę 200, mam %d", rr.Code)
+		t.Fatalf("want 200, have %d", rr.Code)
 	}
-	var odp struct {
-		Włączony bool   `json:"wlaczony"`
-		Webhook  string `json:"webhook"`
-		Źródło   string `json:"zrodlo"`
+	var reply struct {
+		Enabled bool   `json:"wlaczony"`
+		Webhook string `json:"webhook"`
+		Source  string `json:"zrodlo"`
 	}
-	if err := json.NewDecoder(rr.Body).Decode(&odp); err != nil {
-		t.Fatalf("dekoduję odpowiedź: %v", err)
+	if err := json.NewDecoder(rr.Body).Decode(&reply); err != nil {
+		t.Fatalf("decoding the response: %v", err)
 	}
-	if !odp.Włączony || odp.Źródło != "baza" {
-		t.Fatalf("chcę włączony/baza, mam %v/%q", odp.Włączony, odp.Źródło)
+	if !reply.Enabled || reply.Source != "baza" {
+		t.Fatalf("want enabled/db, have %v/%q", reply.Enabled, reply.Source)
 	}
-	if strings.Contains(odp.Webhook, "abc123") {
-		t.Fatalf("sekret ma być zamaskowany, poszedł w całości: %q", odp.Webhook)
+	if strings.Contains(reply.Webhook, "abc123") {
+		t.Fatalf("the secret must be masked, it went out whole: %q", reply.Webhook)
 	}
-	if !strings.Contains(odp.Webhook, "example.test") {
-		t.Fatalf("host ma zostać, żeby dało się rozpoznać adres: %q", odp.Webhook)
+	if !strings.Contains(reply.Webhook, "example.test") {
+		t.Fatalf("the host must stay so the address can be recognized: %q", reply.Webhook)
 	}
 }
 
-func TestNotifyGetBezWebhooka(t *testing.T) {
-	s := serwerTestowy(t)
+func TestNotifyGetWithoutWebhook(t *testing.T) {
+	s := testServer(t)
 	rr := httptest.NewRecorder()
 	s.handleNotifyGet(rr, httptest.NewRequest("GET", "/api/notify", nil))
-	var odp struct {
-		Włączony bool   `json:"wlaczony"`
-		Źródło   string `json:"zrodlo"`
+	var reply struct {
+		Enabled bool   `json:"wlaczony"`
+		Source  string `json:"zrodlo"`
 	}
-	json.NewDecoder(rr.Body).Decode(&odp)
-	if odp.Włączony || odp.Źródło != "brak" {
-		t.Fatalf("chcę wyłączony/brak, mam %v/%q", odp.Włączony, odp.Źródło)
+	json.NewDecoder(rr.Body).Decode(&reply)
+	if reply.Enabled || reply.Source != "brak" {
+		t.Fatalf("want disabled/none, have %v/%q", reply.Enabled, reply.Source)
 	}
 }
 
-// Webhook ze środowiska jest własnością deployu. Panel nie ma prawa go
-// nadpisać — inaczej restart kontenera po cichu cofnąłby zmianę z UI.
-func TestNotifyPutOdrzucaGdyŹródłoŚrodowisko(t *testing.T) {
-	s := serwerTestowy(t)
-	s.webhookZeŚrodowiska = true
+// A webhook from the environment belongs to the deploy. The panel must not
+// overwrite it — otherwise a container restart would silently undo a change from the UI.
+func TestNotifyPutRejectsWhenSourceIsEnv(t *testing.T) {
+	s := testServer(t)
+	s.webhookFromEnv = true
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/api/notify",
 		strings.NewReader(`{"webhook":"https://inny.test/hook"}`))
 	s.handleNotifyPut(rr, req)
 	if rr.Code != http.StatusConflict {
-		t.Fatalf("chcę 409, mam %d", rr.Code)
+		t.Fatalf("want 409, have %d", rr.Code)
 	}
 	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "" {
-		t.Fatalf("odrzucone żądanie nie ma nic zapisywać, w bazie leży %q", v)
+		t.Fatalf("a rejected request must not save anything, the DB holds %q", v)
 	}
 }
 
-func TestNotifyPutZapisujeDoBazyIWłącza(t *testing.T) {
-	s := serwerTestowy(t)
+func TestNotifyPutSavesToDBAndEnables(t *testing.T) {
+	s := testServer(t)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/api/notify",
 		strings.NewReader(`{"webhook":"https://example.test/hooks/xyz"}`))
 	s.handleNotifyPut(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
+		t.Fatalf("want 200, have %d — body: %s", rr.Code, rr.Body.String())
 	}
 	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "https://example.test/hooks/xyz" {
-		t.Fatalf("adres ma wylądować w bazie, mam %q", v)
+		t.Fatalf("the address must land in the DB, have %q", v)
 	}
-	if !s.powiad.Enabled() {
-		t.Fatal("po zapisie powiadomienia mają być włączone bez restartu")
+	if !s.notifier.Enabled() {
+		t.Fatal("after the save notifications must be enabled without a restart")
 	}
 }
 
-// Sekret jedzie w ścieżce adresu. Po http poszedłby otwartym tekstem, więc
-// panel nie może na to pozwolić.
-func TestNotifyPutOdrzucaHTTP(t *testing.T) {
-	s := serwerTestowy(t)
+// The secret travels in the address path. Over http it would go in clear text, so
+// the panel must not allow that.
+func TestNotifyPutRejectsHTTP(t *testing.T) {
+	s := testServer(t)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/api/notify",
 		strings.NewReader(`{"webhook":"http://example.test/hook"}`))
 	s.handleNotifyPut(rr, req)
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("chcę 400 dla http, mam %d", rr.Code)
+		t.Fatalf("want 400 for http, have %d", rr.Code)
 	}
 }
 
-func TestNotifyPutCzyściWebhook(t *testing.T) {
-	s := serwerTestowy(t)
+func TestNotifyPutClearsWebhook(t *testing.T) {
+	s := testServer(t)
 	_ = s.st.SetSetting(s.ctx, "notify.webhook", "https://example.test/hook")
-	s.powiad.SetWebhook("https://example.test/hook")
+	s.notifier.SetWebhook("https://example.test/hook")
 
 	rr := httptest.NewRecorder()
 	s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify",
 		strings.NewReader(`{"webhook":""}`)))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
+		t.Fatalf("want 200, have %d — body: %s", rr.Code, rr.Body.String())
 	}
-	if s.powiad.Enabled() {
-		t.Fatal("po wyczyszczeniu powiadomienia mają być wyłączone")
+	if s.notifier.Enabled() {
+		t.Fatal("after clearing, notifications must be disabled")
 	}
 	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "" {
-		t.Fatalf("wiersz ma zniknąć z bazy, leży %q", v)
+		t.Fatalf("the row must disappear from the DB, it holds %q", v)
 	}
 }
 
-func TestNotifyPutZapisujePróg(t *testing.T) {
-	s := serwerTestowy(t)
+func TestNotifyPutSavesThreshold(t *testing.T) {
+	s := testServer(t)
 	rr := httptest.NewRecorder()
 	s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify",
 		strings.NewReader(`{"prog":4}`)))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
+		t.Fatalf("want 200, have %d — body: %s", rr.Code, rr.Body.String())
 	}
-	if s.powiad.Threshold() != 4 {
-		t.Fatalf("próg ma zadziałać bez restartu, mam %d", s.powiad.Threshold())
+	if s.notifier.Threshold() != 4 {
+		t.Fatalf("the threshold must take effect without a restart, have %d", s.notifier.Threshold())
 	}
-	if !strings.Contains(string(s.plikConfigu(t)), "threshold: 4") {
-		t.Fatalf("próg ma wylądować w YAML-u:\n%s", s.plikConfigu(t))
+	if !strings.Contains(string(s.configFile(t)), "threshold: 4") {
+		t.Fatalf("the threshold must land in the YAML:\n%s", s.configFile(t))
 	}
 }
 
-func TestNotifyPutOdrzucaZłyPróg(t *testing.T) {
-	s := serwerTestowy(t)
-	for _, ciało := range []string{`{"prog":0}`, `{"prog":11}`} {
+func TestNotifyPutRejectsBadThreshold(t *testing.T) {
+	s := testServer(t)
+	for _, body := range []string{`{"prog":0}`, `{"prog":11}`} {
 		rr := httptest.NewRecorder()
-		s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify", strings.NewReader(ciało)))
+		s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify", strings.NewReader(body)))
 		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("%s: chcę 400, mam %d", ciało, rr.Code)
+			t.Fatalf("%s: want 400, have %d", body, rr.Code)
 		}
 	}
 }
 
-func TestInstanceZwracaŹródłaBezSekretów(t *testing.T) {
-	s := serwerTestowy(t)
-	s.instancja = []OpisOpcji{
-		{Klucz: "addr", Wartość: ":8080", Źródło: "domyslna"},
-		{Klucz: "trusted-proxy", Wartość: "10.0.0.0/8", Źródło: "flaga"},
+func TestInstanceReturnsSourcesWithoutSecrets(t *testing.T) {
+	s := testServer(t)
+	s.instance = []OptionInfo{
+		{Key: "addr", Value: ":8080", Source: "domyslna"},
+		{Key: "trusted-proxy", Value: "10.0.0.0/8", Source: "flaga"},
 	}
 	rr := httptest.NewRecorder()
 	s.handleInstance(rr, httptest.NewRequest("GET", "/api/instance", nil))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("chcę 200, mam %d", rr.Code)
+		t.Fatalf("want 200, have %d", rr.Code)
 	}
-	ciało := rr.Body.String()
-	for _, chcę := range []string{"addr", ":8080", "domyslna", "trusted-proxy", "flaga"} {
-		if !strings.Contains(ciało, chcę) {
-			t.Fatalf("brakuje %q w %s", chcę, ciało)
+	body := rr.Body.String()
+	for _, want := range []string{"addr", ":8080", "domyslna", "trusted-proxy", "flaga"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("brakuje %q w %s", want, body)
 		}
 	}
-	// Webhook jest sekretem i nie ma prawa tu być, nawet zamaskowany —
-	// od niego jest /api/notify.
-	if strings.Contains(ciało, "webhook") {
-		t.Fatal("webhook nie należy do listy instancji")
+	// The webhook is a secret and must not be here, even masked —
+	// that is what /api/notify is for.
+	if strings.Contains(body, "webhook") {
+		t.Fatal("the webhook does not belong in the instance list")
 	}
 }
 
-func TestDiscoverWyłączonyZwraca403(t *testing.T) {
-	s := serwerTestowy(t)
-	nie := false
+func TestDiscoverDisabledReturns403(t *testing.T) {
+	s := testServer(t)
+	off := false
 	s.mu.Lock()
-	s.cfg.Discovery.Docker = &nie
+	s.cfg.Discovery.Docker = &off
 	s.mu.Unlock()
 
 	rr := httptest.NewRecorder()
 	s.handleDiscover(rr, httptest.NewRequest("GET", "/api/discover", nil))
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("chcę 403 przy wyłączonym podpowiadaniu, mam %d — ciało: %s", rr.Code, rr.Body.String())
+		t.Fatalf("want 403 with suggestions disabled, have %d — body: %s", rr.Code, rr.Body.String())
 	}
 }
 
-// Brak klucza to nie to samo co false — ma się zachować jak dotąd, czyli
-// odmówić z powodu braku gniazda (404), a nie z powodu wyłączenia (403).
-func TestDiscoverBezKluczaNieJestWyłączony(t *testing.T) {
-	s := serwerTestowy(t)
+// A missing key is not the same as false — it should behave as before, i.e.
+// refuse because of the missing socket (404), not because of being disabled (403).
+func TestDiscoverWithoutKeyIsNotDisabled(t *testing.T) {
+	s := testServer(t)
 	rr := httptest.NewRecorder()
 	s.handleDiscover(rr, httptest.NewRequest("GET", "/api/discover", nil))
 	if rr.Code == http.StatusForbidden {
-		t.Fatal("bez klucza podpowiadanie ma zostać włączone")
+		t.Fatal("without the key suggestions must stay enabled")
 	}
 }
 
-// Panel chowa pozycję menu na podstawie /api/info.docker — wyłączenie w pliku
-// musi się tam odbić, inaczej user klikałby w coś, co odpowiada 403.
-func TestInfoOdbijaWyłączonyDocker(t *testing.T) {
-	s := serwerTestowy(t)
-	nie := false
+// The panel hides a menu item based on /api/info.docker — disabling it in the file
+// must show up there, otherwise the user would click something that answers 403.
+func TestInfoRejectsDisabledDocker(t *testing.T) {
+	s := testServer(t)
+	off := false
 	s.mu.Lock()
-	s.cfg.Discovery.Docker = &nie
+	s.cfg.Discovery.Docker = &off
 	s.mu.Unlock()
 
 	rr := httptest.NewRecorder()
 	s.handleInfo(rr, httptest.NewRequest("GET", "/api/info", nil))
-	var odp struct {
+	var reply struct {
 		Docker    bool `json:"docker"`
 		DockerNew int  `json:"dockerNew"`
 	}
-	json.NewDecoder(rr.Body).Decode(&odp)
-	if odp.Docker {
-		t.Fatal("wyłączony docker ma iść do UI jako false")
+	json.NewDecoder(rr.Body).Decode(&reply)
+	if reply.Docker {
+		t.Fatal("disabled docker must go to the UI as false")
 	}
-	if odp.DockerNew != 0 {
-		t.Fatalf("plakietka ma być pusta przy schowanej pozycji, mam %d", odp.DockerNew)
+	if reply.DockerNew != 0 {
+		t.Fatalf("the badge must be empty for a hidden entry, have %d", reply.DockerNew)
 	}
 }
 
-// Wyłączenie w pliku i brak gniazda muszą dojechać do UI osobno — inaczej
-// panel nie wie, czy pozycję schować, czy tylko wygasić.
-func TestInfoRozróżniaPowodyBrakuDockera(t *testing.T) {
-	s := serwerTestowy(t)
-	nie := false
+// Disabled in the file and a missing socket must reach the UI separately — otherwise
+// the panel does not know whether to hide the item or only to fade it.
+func TestInfoDistinguishesMissingDockerReasons(t *testing.T) {
+	s := testServer(t)
+	off := false
 	s.mu.Lock()
-	s.cfg.Discovery.Docker = &nie
+	s.cfg.Discovery.Docker = &off
 	s.mu.Unlock()
 
 	rr := httptest.NewRecorder()
 	s.handleInfo(rr, httptest.NewRequest("GET", "/api/info", nil))
-	var odp struct {
-		Docker    bool `json:"docker"`
-		Wyłączony bool `json:"dockerWylaczony"`
+	var reply struct {
+		Docker   bool `json:"docker"`
+		Disabled bool `json:"dockerWylaczony"`
 	}
-	json.NewDecoder(rr.Body).Decode(&odp)
-	if !odp.Wyłączony {
-		t.Fatal("wyłączenie w pliku ma być odróżnialne od braku gniazda")
+	json.NewDecoder(rr.Body).Decode(&reply)
+	if !reply.Disabled {
+		t.Fatal("disabling in the file must be distinguishable from a missing socket")
 	}
 
-	// bez klucza: nie jest wyłączone, choćby gniazda nie było
-	s2 := serwerTestowy(t)
+	// without the key: not disabled, even if there is no socket
+	s2 := testServer(t)
 	rr2 := httptest.NewRecorder()
 	s2.handleInfo(rr2, httptest.NewRequest("GET", "/api/info", nil))
-	var odp2 struct {
-		Wyłączony bool `json:"dockerWylaczony"`
+	var reply2 struct {
+		Disabled bool `json:"dockerWylaczony"`
 	}
-	json.NewDecoder(rr2.Body).Decode(&odp2)
-	if odp2.Wyłączony {
-		t.Fatal("brak klucza to nie jest wyłączenie")
+	json.NewDecoder(rr2.Body).Decode(&reply2)
+	if reply2.Disabled {
+		t.Fatal("a missing key is not a disable")
 	}
 }
 
-// notify.threshold z pliku musi zadziałać przy starcie, nie dopiero po zapisie
-// z panelu. Bez tego ustawienie progu w pliku i restart cicho przywracały
-// domyślną dwójkę — a plik jest w tym projekcie źródłem prawdy.
-func TestPrógZPlikuDziałaPoStarcie(t *testing.T) {
-	s := serwerTestowy(t)
-	if !s.zapiszDoConfigu(t, "notify:\n  threshold: 5\n") {
+// notify.threshold from the file must take effect at start-up, not only after a save
+// from the panel. Without that, setting the threshold in the file and restarting quietly restored
+// the default two — and the file is the source of truth in this project.
+func TestThresholdFromFileWorksAfterStart(t *testing.T) {
+	s := testServer(t)
+	if !s.saveToConfig(t, "notify:\n  threshold: 5\n") {
 		return
 	}
 	if err := s.reload(s.ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := s.powiad.Threshold(); got != 5 {
-		t.Fatalf("próg z pliku ma obowiązywać po starcie, mam %d", got)
+	if got := s.notifier.Threshold(); got != 5 {
+		t.Fatalf("the threshold from the file must apply after start, have %d", got)
 	}
 }
 
-// Jawnie podana flaga jest własnością deployu i bije plik — ta sama zasada,
-// co przy webhooku, żeby restart kontenera nie cofał ustawienia z zewnątrz.
-func TestFlagaProguBijePlik(t *testing.T) {
-	s := serwerTestowy(t)
-	s.prógZFlagi = true
-	s.powiad.SetThreshold(7)
-	if !s.zapiszDoConfigu(t, "notify:\n  threshold: 5\n") {
+// An explicitly given flag belongs to the deploy and beats the file — the same rule as
+// with the webhook, so a container restart does not undo a setting from outside.
+func TestThresholdFlagBeatsFile(t *testing.T) {
+	s := testServer(t)
+	s.thresholdFromFlag = true
+	s.notifier.SetThreshold(7)
+	if !s.saveToConfig(t, "notify:\n  threshold: 5\n") {
 		return
 	}
 	if err := s.reload(s.ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := s.powiad.Threshold(); got != 7 {
-		t.Fatalf("flaga ma wygrać z plikiem, mam %d", got)
+	if got := s.notifier.Threshold(); got != 7 {
+		t.Fatalf("the flag must win over the file, have %d", got)
 	}
 }
 
-// zapiszDoConfigu dopisuje blok na koniec pliku konfiguracyjnego serwera.
-func (s *Server) zapiszDoConfigu(t *testing.T, blok string) bool {
+// saveToConfig appends a block to the end of the server's config file.
+func (s *Server) saveToConfig(t *testing.T, block string) bool {
 	t.Helper()
-	stare, err := os.ReadFile(s.path)
+	old, err := os.ReadFile(s.path)
 	if err != nil {
 		t.Fatalf("czytam config: %v", err)
 	}
-	if err := os.WriteFile(s.path, append(stare, []byte("\n"+blok)...), 0o644); err != nil {
-		t.Fatalf("zapisuję config: %v", err)
+	if err := os.WriteFile(s.path, append(old, []byte("\n"+block)...), 0o644); err != nil {
+		t.Fatalf("saving config: %v", err)
 	}
 	return true
 }

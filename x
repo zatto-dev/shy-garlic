@@ -34,7 +34,7 @@ export PATH=/usr/local/go/bin:$PATH
 case "${1:-test}" in
   test)  go test ./... ;;
   # podgląd stron do zrzutów ekranu: bin/podglad/*.html (assety + ikony obok)
-  podglad) go test ./internal/server -run TestPodgladStron -podglad -count=1 -v ;;
+  podglad) go test ./internal/server -run TestPreviewPages -podglad -count=1 -v ;;
   vet)   go vet ./... ;;
   # wyścigi: -race wymaga cgo, więc potrzebny gcc na sandboxie
   race)  CGO_ENABLED=1 go test -race -count=1 ./internal/... ;;

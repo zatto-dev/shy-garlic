@@ -1,9 +1,9 @@
-// Command shyg — panel Shy Garlic.
+// Command shyg — the Shy Garlic panel.
 //
-// Użycie:
+// Usage:
 //
 //	shyg serve -config /etc/shygarlic/shygarlic.yaml -addr :8080
-//	shyg check  -config ...      (jednorazowe sprawdzenie, do skryptów)
+//	shyg check  -config ...      (one-off check, for scripts)
 package main
 
 import (
@@ -36,56 +36,56 @@ func main() {
 }
 
 func run() error {
-	polecenie := "serve"
+	command := "serve"
 	if len(os.Args) > 1 && os.Args[1][0] != '-' {
-		polecenie = os.Args[1]
+		command = os.Args[1]
 		os.Args = append(os.Args[:1], os.Args[2:]...)
 	}
 
 	fs := flag.NewFlagSet("shyg", flag.ExitOnError)
-	cfgPath := fs.String("config", envLub("SHYG_CONFIG", "shygarlic.yaml"), "ścieżka do pliku konfiguracyjnego")
-	addr := fs.String("addr", envLub("SHYG_ADDR", ":8080"), "adres nasłuchu")
-	dataPath := fs.String("data", envLub("SHYG_DATA", "shygarlic.db"), "plik SQLite z kontami i historią")
-	iconsZip := fs.String("icons", envLub("SHYG_ICONS", ""), "opcjonalny icons.zip — komplet ikon offline, bez pobierania z sieci")
-	cacheDir := fs.String("cache", envLub("SHYG_CACHE", ""), "katalog cache ikon (domyślnie obok pliku bazy)")
-	webhook := fs.String("webhook", envLub("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
+	cfgPath := fs.String("config", envOr("SHYG_CONFIG", "shygarlic.yaml"), "ścieżka do pliku konfiguracyjnego")
+	addr := fs.String("addr", envOr("SHYG_ADDR", ":8080"), "adres nasłuchu")
+	dataPath := fs.String("data", envOr("SHYG_DATA", "shygarlic.db"), "plik SQLite z kontami i historią")
+	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "opcjonalny icons.zip — komplet ikon offline, bez pobierania z sieci")
+	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "katalog cache ikon (domyślnie obok pliku bazy)")
+	webhook := fs.String("webhook", envOr("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
 		"adres webhooka powiadomień (Discord albo dowolny przyjmujący JSON)")
-	formatWebhooka := fs.String("webhook-format", envLub("SHYG_WEBHOOK_FORMAT", ""),
-		"format wiadomości webhooka: "+strings.Join(formatyTekst(), ", ")+" (domyślnie z ustawień panelu, a tam discord; flaga bije panel)")
-	prógAwarii := fs.Int("fail-threshold", 2, "ile nieudanych sprawdzeń z rzędu zanim wyślemy powiadomienie (właściwe miejsce to notify.threshold w pliku; flaga go nadpisuje)")
-	dockerSock := fs.String("docker", envLub("SHYG_DOCKER", ""),
+	webhookFormat := fs.String("webhook-format", envOr("SHYG_WEBHOOK_FORMAT", ""),
+		"format wiadomości webhooka: "+strings.Join(formatTexts(), ", ")+" (domyślnie z ustawień panelu, a tam discord; flaga bije panel)")
+	failThreshold := fs.Int("fail-threshold", 2, "ile nieudanych sprawdzeń z rzędu zanim wyślemy powiadomienie (właściwe miejsce to notify.threshold w pliku; flaga go nadpisuje)")
+	dockerSock := fs.String("docker", envOr("SHYG_DOCKER", ""),
 		"gniazdo Dockera do podpowiadania usług (domyślnie /var/run/docker.sock, jeśli jest)")
-	tłaDir := fs.String("backgrounds", envLub("SHYG_BACKGROUNDS", ""),
+	backgroundDir := fs.String("backgrounds", envOr("SHYG_BACKGROUNDS", ""),
 		"katalog wgranych tapet (domyślnie podkatalog bg/ obok pliku bazy)")
-	zaufaneProxy := fs.String("trusted-proxy", envLub("SHYG_TRUSTED_PROXY", ""),
+	trustedProxy := fs.String("trusted-proxy", envOr("SHYG_TRUSTED_PROXY", ""),
 		"CIDR-y proxy, którym wolno ustawiać X-Forwarded-For i X-Forwarded-Proto (po przecinku)")
-	metricsAllow := fs.String("metrics-allow", envLub("SHYG_METRICS_ALLOW", ""),
+	metricsAllow := fs.String("metrics-allow", envOr("SHYG_METRICS_ALLOW", ""),
 		"CIDR-y, z których /metrics odpowiada bez tokenu (po przecinku; domyślnie żadne — wymagany token)")
 	debug := fs.Bool("debug", false, "logi debug")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 
-	if *formatWebhooka != "" && !notify.ValidFormat(*formatWebhooka) {
-		return fmt.Errorf("--webhook-format %q: dozwolone %s", *formatWebhooka, strings.Join(formatyTekst(), ", "))
+	if *webhookFormat != "" && !notify.ValidFormat(*webhookFormat) {
+		return fmt.Errorf("--webhook-format %q: allowed %s", *webhookFormat, strings.Join(formatTexts(), ", "))
 	}
 
-	poziom := slog.LevelInfo
+	level := slog.LevelInfo
 	if *debug {
-		poziom = slog.LevelDebug
+		level = slog.LevelDebug
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: poziom})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
-	o := opcjeCLI{
+	o := cliOptions{
 		cfgPath: *cfgPath, addr: *addr, dataPath: *dataPath,
-		iconsZip: *iconsZip, cacheDir: *cacheDir, tłaDir: *tłaDir,
-		webhook: *webhook, formatWebhooka: *formatWebhooka, prógAwarii: *prógAwarii, dockerSock: *dockerSock,
-		zaufaneProxy: *zaufaneProxy, metricsAllow: *metricsAllow,
+		iconsZip: *iconsZip, cacheDir: *cacheDir, backgroundDir: *backgroundDir,
+		webhook: *webhook, webhookFormat: *webhookFormat, failThreshold: *failThreshold, dockerSock: *dockerSock,
+		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow,
 	}
-	o.prógZFlagi = źródło(fs, "fail-threshold", "") == "flaga"
-	o.instancja = opisInstancji(fs, o)
+	o.thresholdFromFlag = source(fs, "fail-threshold", "") == "flaga"
+	o.instance = instanceDescription(fs, o)
 
-	switch polecenie {
+	switch command {
 	case "serve":
 		return serve(o)
 	case "check":
@@ -94,70 +94,69 @@ func run() error {
 		fmt.Println("shyg", wersja)
 		return nil
 	default:
-		return fmt.Errorf("nieznane polecenie %q (serve|check|version)", polecenie)
+		return fmt.Errorf("unknown command %q (serve|check|version)", command)
 	}
 }
 
-// opcjeCLI — serve() miało osiem argumentów pozycyjnych, a dostawało dziesiąty.
-// Przy takiej liczbie sąsiadujących stringów kompilator już nie łapie zamiany
-// dwóch z nich miejscami, a to jest dokładnie ten rodzaj błędu, który potem
-// szuka się godzinę.
-type opcjeCLI struct {
-	cfgPath      string
-	addr         string
-	dataPath     string
-	iconsZip     string
-	cacheDir     string
-	tłaDir       string
-	webhook      string
-	// formatWebhooka — format wiadomości z flagi/zmiennej; pusty = z bazy
-	formatWebhooka string
-	dockerSock   string
-	zaufaneProxy string
-	metricsAllow string
-	prógAwarii   int
-	prógZFlagi   bool
-	instancja    []server.OpisOpcji
+// cliOptions — serve() had eight positional arguments and was getting a tenth.
+// With that many adjacent strings the compiler no longer catches two of them
+// being swapped, and that is exactly the kind of bug you then hunt for an hour.
+type cliOptions struct {
+	cfgPath       string
+	addr          string
+	dataPath      string
+	iconsZip      string
+	cacheDir      string
+	backgroundDir string
+	webhook       string
+	// webhookFormat — message format from a flag/variable; empty = from the DB
+	webhookFormat     string
+	dockerSock        string
+	trustedProxy      string
+	metricsAllow      string
+	failThreshold     int
+	thresholdFromFlag bool
+	instance          []server.OptionInfo
 }
 
-// źródło mówi, skąd wzięła się wartość flagi. Flaga podana w linii poleceń
-// bije zmienną środowiskową, bo tak działa envLub.
-func źródło(fs *flag.FlagSet, nazwa, envKlucz string) string {
-	ustawiona := false
+// source says where a flag's value came from. A flag given on the command line
+// beats an environment variable, because that is how envOr works.
+func source(fs *flag.FlagSet, name, envKey string) string {
+	set := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == nazwa {
-			ustawiona = true
+		if f.Name == name {
+			set = true
 		}
 	})
-	if ustawiona {
+	if set {
 		return "flaga"
 	}
-	if envKlucz != "" && os.Getenv(envKlucz) != "" {
+	if envKey != "" && os.Getenv(envKey) != "" {
 		return "srodowisko"
 	}
 	return "domyslna"
 }
 
-// opisInstancji zbiera opcje startu do pokazania w panelu.
+// instanceOptions gathers the start-up options to show in the panel.
 //
-// ! Webhooka tu nie ma świadomie. Jest sekretem, więc idzie osobną trasą
-// (/api/notify), która go maskuje.
-func opisInstancji(fs *flag.FlagSet, o opcjeCLI) []server.OpisOpcji {
-	return []server.OpisOpcji{
-		{Klucz: "addr", Wartość: o.addr, Źródło: źródło(fs, "addr", "SHYG_ADDR")},
-		{Klucz: "config", Wartość: o.cfgPath, Źródło: źródło(fs, "config", "SHYG_CONFIG")},
-		{Klucz: "data", Wartość: o.dataPath, Źródło: źródło(fs, "data", "SHYG_DATA")},
-		{Klucz: "cache", Wartość: o.cacheDir, Źródło: źródło(fs, "cache", "SHYG_CACHE")},
-		{Klucz: "backgrounds", Wartość: o.tłaDir, Źródło: źródło(fs, "backgrounds", "SHYG_BACKGROUNDS")},
-		{Klucz: "icons", Wartość: o.iconsZip, Źródło: źródło(fs, "icons", "SHYG_ICONS")},
-		{Klucz: "docker", Wartość: o.dockerSock, Źródło: źródło(fs, "docker", "SHYG_DOCKER")},
-		{Klucz: "webhook-format", Wartość: o.formatWebhooka, Źródło: źródło(fs, "webhook-format", "SHYG_WEBHOOK_FORMAT")},
-		{Klucz: "trusted-proxy", Wartość: o.zaufaneProxy, Źródło: źródło(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
-		{Klucz: "metrics-allow", Wartość: o.metricsAllow, Źródło: źródło(fs, "metrics-allow", "SHYG_METRICS_ALLOW")},
+// ! The webhook is deliberately absent. It is a secret, so it goes through a
+// separate route (/api/notify) that masks it.
+func instanceDescription(fs *flag.FlagSet, o cliOptions) []server.OptionInfo {
+	return []server.OptionInfo{
+		{Key: "addr", Value: o.addr, Source: source(fs, "addr", "SHYG_ADDR")},
+		{Key: "config", Value: o.cfgPath, Source: source(fs, "config", "SHYG_CONFIG")},
+		{Key: "data", Value: o.dataPath, Source: source(fs, "data", "SHYG_DATA")},
+		{Key: "cache", Value: o.cacheDir, Source: source(fs, "cache", "SHYG_CACHE")},
+		{Key: "backgrounds", Value: o.backgroundDir, Source: source(fs, "backgrounds", "SHYG_BACKGROUNDS")},
+		{Key: "icons", Value: o.iconsZip, Source: source(fs, "icons", "SHYG_ICONS")},
+		{Key: "docker", Value: o.dockerSock, Source: source(fs, "docker", "SHYG_DOCKER")},
+		{Key: "webhook-format", Value: o.webhookFormat, Source: source(fs, "webhook-format", "SHYG_WEBHOOK_FORMAT")},
+		{Key: "trusted-proxy", Value: o.trustedProxy, Source: source(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
+		{Key: "metrics-allow", Value: o.metricsAllow, Source: source(fs, "metrics-allow", "SHYG_METRICS_ALLOW")},
 	}
 }
 
-func formatyTekst() []string {
+func formatTexts() []string {
 	out := make([]string, len(notify.Formats))
 	for i, f := range notify.Formats {
 		out[i] = string(f)
@@ -165,51 +164,51 @@ func formatyTekst() []string {
 	return out
 }
 
-func envLub(klucz, domyślne string) string {
-	if v := os.Getenv(klucz); v != "" {
+func envOr(key, defaults string) string {
+	if v := os.Getenv(key); v != "" {
 		return v
 	}
-	return domyślne
+	return defaults
 }
 
-func serve(o opcjeCLI) error {
+func serve(o cliOptions) error {
 	server.Version = wersja
 
 	if o.cacheDir == "" {
 		o.cacheDir = filepath.Join(filepath.Dir(o.dataPath), "icons")
 	}
-	if o.tłaDir == "" {
-		o.tłaDir = server.DomyślnyKatalogTeł(o.dataPath)
+	if o.backgroundDir == "" {
+		o.backgroundDir = server.DefaultBackgroundDir(o.dataPath)
 	}
-	if err := sprawdźKatalogi(o); err != nil {
+	if err := checkDirs(o); err != nil {
 		return err
 	}
 
 	st, err := store.Open(o.dataPath)
 	if err != nil {
-		return fmt.Errorf("baza %s: %w", o.dataPath, err)
+		return fmt.Errorf("db %s: %w", o.dataPath, err)
 	}
 	defer st.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// wygodne przy pierwszym deployu: konto z ENV zamiast klikania w /setup
-	if err := server.BootstrapUżytkownika(ctx, st,
+	// handy on the first deploy: an account from ENV instead of clicking through /setup
+	if err := server.BootstrapUser(ctx, st,
 		os.Getenv("SHYG_ADMIN_USER"), os.Getenv("SHYG_ADMIN_PASSWORD")); err != nil {
-		slog.Warn("bootstrap konta", "err", err)
+		slog.Warn("account bootstrap", "err", err)
 	}
 
-	s, err := server.New(o.cfgPath, st, server.Opcje{
-		IconsZip: o.iconsZip, CacheDir: o.cacheDir, BackgroundDir: o.tłaDir,
-		Webhook: o.webhook, PrógAwarii: o.prógAwarii, DockerSock: o.dockerSock,
-		TrustedProxy: rozdziel(o.zaufaneProxy),
-		MetricsAllow: rozdziel(o.metricsAllow),
+	s, err := server.New(o.cfgPath, st, server.Options{
+		IconsZip: o.iconsZip, CacheDir: o.cacheDir, BackgroundDir: o.backgroundDir,
+		Webhook: o.webhook, FailThreshold: o.failThreshold, DockerSock: o.dockerSock,
+		TrustedProxy: split(o.trustedProxy),
+		MetricsAllow: split(o.metricsAllow),
 
-		WebhookZeŚrodowiska: o.webhook != "",
-		WebhookFormat:       o.formatWebhooka, WebhookFormatZeŚrodowiska: o.formatWebhooka != "",
-		PrógZFlagi:          o.prógZFlagi,
-		Instancja:           o.instancja,
+		WebhookFromEnv: o.webhook != "",
+		WebhookFormat:  o.webhookFormat, WebhookFormatFromEnv: o.webhookFormat != "",
+		ThresholdFromFlag: o.thresholdFromFlag,
+		Instance:          o.instance,
 	})
 	if err != nil {
 		return err
@@ -224,65 +223,65 @@ func serve(o opcjeCLI) error {
 		Addr:              o.addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
-		// bez WriteTimeout — SSE trzyma połączenie otwarte
+		// no WriteTimeout — SSE keeps the connection open
 		IdleTimeout: 120 * time.Second,
 	}
 
 	go func() {
 		<-ctx.Done()
-		zamykanie, anuluj := context.WithTimeout(context.Background(), 5*time.Second)
-		defer anuluj()
-		_ = srv.Shutdown(zamykanie)
+		closing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(closing)
 	}()
 
-	slog.Info("shyg startuje", "addr", o.addr, "config", o.cfgPath, "baza", o.dataPath,
-		"tapety", o.tłaDir, "wersja", wersja)
+	slog.Info("shyg starting", "addr", o.addr, "config", o.cfgPath, "db", o.dataPath,
+		"backgrounds", o.backgroundDir, "version", wersja)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	slog.Info("shyg zatrzymany")
+	slog.Info("shyg stopped")
 	return nil
 }
 
-func rozdziel(v string) []string {
+func split(v string) []string {
 	if strings.TrimSpace(v) == "" {
 		return nil
 	}
 	return strings.Split(v, ",")
 }
 
-// sprawdźKatalogi pilnuje, żeby tapety nie lądowały tam, gdzie baza albo config.
+// checkDirs makes sure wallpapers do not land where the DB or the config live.
 //
-// ! To nie jest higiena, tylko bezpieczeństwo: plik wgrany do katalogu bazy pod
-// nazwą `shygarlic.db` nadpisałby ją, LiczbaUżytkowników() zwróciłoby 0, a
-// wtedy każde żądanie leci na /setup, które zakłada konto administratora BEZ
-// uwierzytelnienia. Wgranie obrazka byłoby przejęciem panelu.
-func sprawdźKatalogi(o opcjeCLI) error {
-	tła, err := filepath.Abs(o.tłaDir)
+// ! This is not hygiene but security: a file uploaded into the DB directory under
+// the name `shygarlic.db` would overwrite it, UserCount() would return 0, and
+// then every request goes to /setup, which creates an administrator account
+// WITHOUT authentication. Uploading an image would be a panel takeover.
+func checkDirs(o cliOptions) error {
+	backgrounds, err := filepath.Abs(o.backgroundDir)
 	if err != nil {
 		return err
 	}
-	for _, z := range []struct{ nazwa, ścieżka string }{
-		{"katalogiem bazy", filepath.Dir(o.dataPath)},
-		{"katalogiem configu", filepath.Dir(o.cfgPath)},
-		{"cache ikon", o.cacheDir},
+	for _, z := range []struct{ name, path string }{
+		{"the DB directory", filepath.Dir(o.dataPath)},
+		{"the config directory", filepath.Dir(o.cfgPath)},
+		{"the icon cache", o.cacheDir},
 	} {
-		inny, err := filepath.Abs(z.ścieżka)
+		other, err := filepath.Abs(z.path)
 		if err != nil {
 			return err
 		}
-		if tła == inny {
-			return fmt.Errorf("katalog tapet (%s) nie może być tym samym co %s (%s) — "+
-				"wgrany plik mógłby nadpisać bazę albo config", tła, z.nazwa, inny)
+		if backgrounds == other {
+			return fmt.Errorf("backgrounds directory (%s) cannot be the same as %s (%s) — "+
+				"an uploaded file could overwrite the DB or the config", backgrounds, z.name, other)
 		}
 	}
-	if baza, err := filepath.Abs(o.dataPath); err == nil && baza == tła {
-		return fmt.Errorf("katalog tapet nie może być plikiem bazy (%s)", baza)
+	if db, err := filepath.Abs(o.dataPath); err == nil && db == backgrounds {
+		return fmt.Errorf("backgrounds directory cannot be the DB file (%s)", db)
 	}
 	return nil
 }
 
-// check wypisuje, co panel widzi w configu — do debugowania bez przeglądarki.
+// check prints what the panel sees in the config — for debugging without a browser.
 func check(cfgPath string) error {
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {

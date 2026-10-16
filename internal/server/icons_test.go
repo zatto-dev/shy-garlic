@@ -11,124 +11,123 @@ import (
 	"testing"
 )
 
-// przekierowujCDN podmienia hosta w każdym żądaniu na lokalny httptest.Server —
-// pozwala testować pobierz()/Czytaj(), które budują URL wprost ze stałej
-// cdnIkony, bez wychodzenia w sieć.
-type przekierowujCDN struct {
-	cel *url.URL
+// cdnRedirector swaps the host in every request for a local httptest.Server —
+// it lets us test fetch()/Read(), which build the URL straight from the constant
+// cdnIcons, without going out to the network.
+type cdnRedirector struct {
+	target *url.URL
 }
 
-func (p przekierowujCDN) RoundTrip(req *http.Request) (*http.Response, error) {
+func (p cdnRedirector) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.URL.Scheme = p.cel.Scheme
-	req.URL.Host = p.cel.Host
-	req.Host = p.cel.Host
+	req.URL.Scheme = p.target.Scheme
+	req.URL.Host = p.target.Host
+	req.Host = p.target.Host
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func nowyKatalogZMockiemCDN(t *testing.T, obsługa http.HandlerFunc) (*Katalog, string) {
+func newCatalogWithMockCDN(t *testing.T, handler http.HandlerFunc) (*Catalog, string) {
 	t.Helper()
-	mock := httptest.NewServer(obsługa)
+	mock := httptest.NewServer(handler)
 	t.Cleanup(mock.Close)
-	celURL, err := url.Parse(mock.URL)
+	targetURL, err := url.Parse(mock.URL)
 	if err != nil {
-		t.Fatalf("zły URL mocka: %v", err)
+		t.Fatalf("bad mock URL: %v", err)
 	}
 	dir := t.TempDir()
-	k := NowyKatalog("", dir)
-	k.client = &http.Client{Transport: przekierowujCDN{cel: celURL}}
+	k := NewCatalog("", dir)
+	k.client = &http.Client{Transport: cdnRedirector{target: targetURL}}
 	return k, dir
 }
 
-// ── usterka nr 1: puste ciało z CDN zatruwało cache na zawsze ──────────────
+// ── defect no. 1: an empty body from the CDN poisoned the cache forever ──────
 
-func TestPobierzOdrzucaPustaOdpowiedź(t *testing.T) {
-	var wywołań int
-	k, dir := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		wywołań++
+func TestFetchRejectsEmptyResponse(t *testing.T) {
+	var calls int
+	k, dir := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.WriteHeader(http.StatusOK)
-		// świadomie NIC nie piszemy do ciała — to jest dokładnie ten
-		// przypadek jsDelivr "200 OK, zero bajtów", który wcześniej trwale
-		// zatruwał cache na dysku.
+		// we deliberately write NOTHING to the body — this is exactly the jsDelivr
+		// "200 OK, zero bytes" case that used to permanently poison the on-disk cache.
 	})
-	k.rozsz = map[string]string{"pusta-ikona": "svg"}
-	k.nazwy = []string{"pusta-ikona"}
+	k.ext = map[string]string{"pusta-ikona": "svg"}
+	k.names = []string{"pusta-ikona"}
 
-	dane, _, err := k.Czytaj(context.Background(), "pusta-ikona")
+	data, _, err := k.Read(context.Background(), "pusta-ikona")
 	if err == nil {
-		t.Fatalf("Czytaj miało zwrócić błąd dla pustej odpowiedzi CDN, dostałem dane len=%d", len(dane))
+		t.Fatalf("Read should have returned an error for an empty CDN response, got data len=%d", len(data))
 	}
-	if wywołań != 1 {
-		t.Fatalf("oczekiwałem 1 próby pobrania, było %d", wywołań)
+	if calls != 1 {
+		t.Fatalf("expected 1 fetch attempt, got %d", calls)
 	}
 
-	// ! sedno usterki: bez naprawy ten plik istniał na dysku z 0 bajtów i
-	// każde kolejne żądanie serwowało tę samą pustkę w nieskończoność.
+	// ! the heart of the defect: without the fix this file existed on disk with 0 bytes and
+	// every following request served the same emptiness forever.
 	if _, err := os.Stat(filepath.Join(dir, "pusta-ikona.svg")); err == nil {
-		t.Fatal("pusta odpowiedź CDN NIE powinna zostać zapisana do cache na dysku")
+		t.Fatal("an empty CDN response must NOT be written to the on-disk cache")
 	}
 }
 
-func TestCzytajSamNieUlecząZatrutegoCache(t *testing.T) {
-	// Odtwarza produkcyjny stan: plik już leży w cache jako 0 bajtów (np. z
-	// czasu przed tą naprawą), ale CDN dziś ma prawidłową treść. Katalog ma
-	// samoistnie się z tego wyleczyć przy najbliższym żądaniu, zamiast
-	// serwować pustkę z dysku w nieskończoność.
-	realneDane := []byte(`<svg>prawdziwa zawartość</svg>`)
-	k, dir := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
+func TestReadDoesNotHealPoisonedCache(t *testing.T) {
+	// Recreates the production state: the file already lies in the cache as 0 bytes (e.g. from
+	// the time before this fix), but the CDN has valid content today. The catalog should
+	// heal itself from this on the nearest request, instead of serving emptiness
+	// from disk forever.
+	realData := []byte(`<svg>prawdziwa zawartość</svg>`)
+	k, dir := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Write(realneDane)
+		w.Write(realData)
 	})
-	k.rozsz = map[string]string{"zatruta-ikona": "svg"}
-	k.nazwy = []string{"zatruta-ikona"}
+	k.ext = map[string]string{"zatruta-ikona": "svg"}
+	k.names = []string{"zatruta-ikona"}
 
 	if err := os.WriteFile(filepath.Join(dir, "zatruta-ikona.svg"), nil, 0o644); err != nil {
-		t.Fatalf("nie mogę przygotować zatrutego pliku cache: %v", err)
+		t.Fatalf("cannot prepare the poisoned cache file: %v", err)
 	}
 
-	dane, typ, err := k.Czytaj(context.Background(), "zatruta-ikona")
+	data, kind, err := k.Read(context.Background(), "zatruta-ikona")
 	if err != nil {
-		t.Fatalf("Czytaj: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
-	if string(dane) != string(realneDane) {
-		t.Fatalf("Czytaj zwróciło %q (z zatrutego pliku 0B?), oczekiwałem %q", dane, realneDane)
+	if string(data) != string(realData) {
+		t.Fatalf("Read returned %q (from a poisoned 0B file?), expected %q", data, realData)
 	}
-	if typ != "image/svg+xml" {
-		t.Errorf("typ = %q, chcę image/svg+xml", typ)
+	if kind != "image/svg+xml" {
+		t.Errorf("kind = %q, want image/svg+xml", kind)
 	}
-	naDysku, err := os.ReadFile(filepath.Join(dir, "zatruta-ikona.svg"))
-	if err != nil || len(naDysku) == 0 {
-		t.Errorf("plik cache po samoleczeniu powinien mieć realną treść, err=%v len=%d", err, len(naDysku))
+	onDisk, err := os.ReadFile(filepath.Join(dir, "zatruta-ikona.svg"))
+	if err != nil || len(onDisk) == 0 {
+		t.Errorf("the cache file after self-healing should have real content, err=%v len=%d", err, len(onDisk))
 	}
 }
 
-func TestPobierzZapisujeDoCache(t *testing.T) {
-	// kontrolne: normalny, udany download nadal się cache'uje (nie
-	// nadgorliwie zablokowany przez strażnika pustego ciała)
-	realneDane := []byte(`<svg>ok</svg>`)
-	k, dir := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write(realneDane)
+func TestFetchSavesToCache(t *testing.T) {
+	// control: a normal, successful download is still cached (not
+	// over-eagerly blocked by the empty-body guard)
+	realData := []byte(`<svg>ok</svg>`)
+	k, dir := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(realData)
 	})
-	k.rozsz = map[string]string{"ok-ikona": "svg"}
-	k.nazwy = []string{"ok-ikona"}
+	k.ext = map[string]string{"ok-ikona": "svg"}
+	k.names = []string{"ok-ikona"}
 
-	dane, _, err := k.Czytaj(context.Background(), "ok-ikona")
+	data, _, err := k.Read(context.Background(), "ok-ikona")
 	if err != nil {
-		t.Fatalf("Czytaj: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
-	if string(dane) != string(realneDane) {
-		t.Fatalf("dane = %q, chcę %q", dane, realneDane)
+	if string(data) != string(realData) {
+		t.Fatalf("data = %q, want %q", data, realData)
 	}
-	naDysku, err := os.ReadFile(filepath.Join(dir, "ok-ikona.svg"))
-	if err != nil || string(naDysku) != string(realneDane) {
-		t.Fatalf("plik cache nie zawiera pobranej treści: err=%v dane=%q", err, naDysku)
+	onDisk, err := os.ReadFile(filepath.Join(dir, "ok-ikona.svg"))
+	if err != nil || string(onDisk) != string(realData) {
+		t.Fatalf("the cache file lacks the fetched content: err=%v data=%q", err, onDisk)
 	}
 }
 
-// ── usterka nr 2: warianty jasny/ciemny z metadata.json ────────────────────
+// ── defect no. 2: light/dark variants from metadata.json ────────────────────
 
-func metadanePrzykładowe(t *testing.T) []byte {
+func sampleMetadata(t *testing.T) []byte {
 	t.Helper()
 	m := map[string]any{
 		"dagster": map[string]any{
@@ -139,92 +138,92 @@ func metadanePrzykładowe(t *testing.T) []byte {
 		"jellyfin": map[string]any{
 			"base":    "svg",
 			"aliases": []string{},
-			// brak "colors" — ta ikona nie ma osobnych wariantów
+			// no "colors" — this icon has no separate variants
 		},
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
-		t.Fatalf("marshal metadanych: %v", err)
+		t.Fatalf("marshal metadata: %v", err)
 	}
 	return b
 }
 
-// TestOdświeżPobieraWariantyTakżePrzySpisieZCache odtwarza najczęstszy
-// przypadek produkcyjny: proces restartuje się z ciepłym cache (spis.json
-// świeższy niż tydzień), więc Odśwież bierze listę nazw z dysku bez
-// wychodzenia w sieć — ale warianty jasny/ciemny nie mają własnego pliku
-// cache i MUSZĄ się mimo to pobrać z metadata.json, inaczej po restarcie
-// panel wraca do jednej, stałej grafiki (ta sama usterka #2 od nowa).
-func TestOdświeżPobieraWariantyTakżePrzySpisieZCache(t *testing.T) {
-	var wołańMetadanych int
-	k, dir := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		wołańMetadanych++
-		w.Write(metadanePrzykładowe(t))
+// TestRefreshFetchesVariantsAlsoWithCachedIndex recreates the most common
+// production case: the process restarts with a warm cache (spis.json
+// fresher than a week), so Refresh takes the name list from disk without
+// going out to the network — but the light/dark variants have no cache file of
+// their own and MUST still be fetched from metadata.json, otherwise after a restart
+// the panel goes back to a single, fixed artwork (the same defect #2 all over again).
+func TestRefreshFetchesVariantsAlsoWithCachedIndex(t *testing.T) {
+	var metadataCalls int
+	k, dir := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
+		metadataCalls++
+		w.Write(sampleMetadata(t))
 	})
 
-	// spis.json już leży na dysku i jest świeży — Odśwież ma go użyć bez
-	// sieci dla LISTY NAZW, ale to nie zwalnia z pobrania wariantów.
-	spis, _ := json.Marshal(map[string]string{"dagster": "svg", "jellyfin": "svg"})
-	if err := os.WriteFile(filepath.Join(dir, "spis.json"), spis, 0o644); err != nil {
-		t.Fatalf("przygotowanie spis.json: %v", err)
+	// spis.json already lies on disk and is fresh — Refresh should use it without the
+	// network for the LIST OF NAMES, but that does not excuse it from fetching the variants.
+	index, _ := json.Marshal(map[string]string{"dagster": "svg", "jellyfin": "svg"})
+	if err := os.WriteFile(filepath.Join(dir, "spis.json"), index, 0o644); err != nil {
+		t.Fatalf("preparing spis.json: %v", err)
 	}
 
-	k.Odśwież(context.Background())
+	k.Refresh(context.Background())
 
-	if k.Liczba() != 2 {
-		t.Fatalf("Liczba() = %d, chcę 2 (z cache na dysku, bez sieci)", k.Liczba())
+	if k.Count() != 2 {
+		t.Fatalf("Count() = %d, want 2 (from the on-disk cache, no network)", k.Count())
 	}
-	if wołańMetadanych == 0 {
-		t.Fatal("Odśwież NIE spróbował pobrać metadata.json mimo świeżego spis.json z dysku — warianty zostaną puste po każdym restarcie")
+	if metadataCalls == 0 {
+		t.Fatal("Refresh did NOT try to fetch metadata.json despite a fresh spis.json on disk — variants would stay empty after every restart")
 	}
-	if ciemny, jasny := k.Warianty("dagster"); ciemny != "dagster-dark" || jasny != "dagster-light" {
-		t.Errorf("Warianty(dagster) po Odśwież() = (%q, %q), chcę (dagster-dark, dagster-light)", ciemny, jasny)
+	if dark, light := k.Variants("dagster"); dark != "dagster-dark" || light != "dagster-light" {
+		t.Errorf("Variants(dagster) after Refresh() = (%q, %q), want (dagster-dark, dagster-light)", dark, light)
 	}
 }
 
-func TestZMetadanychBudujeWarianty(t *testing.T) {
-	k, _ := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write(metadanePrzykładowe(t))
+func TestMetadataBuildsVariants(t *testing.T) {
+	k, _ := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(sampleMetadata(t))
 	})
 
-	if _, err := k.zMetadanych(context.Background()); err != nil {
+	if _, err := k.fromMetadata(context.Background()); err != nil {
 		t.Fatalf("zMetadanych: %v", err)
 	}
 
-	if ciemny, jasny := k.Warianty("dagster"); ciemny != "dagster-dark" || jasny != "dagster-light" {
-		t.Errorf("Warianty(dagster) = (%q, %q), chcę (dagster-dark, dagster-light)", ciemny, jasny)
+	if dark, light := k.Variants("dagster"); dark != "dagster-dark" || light != "dagster-light" {
+		t.Errorf("Variants(dagster) = (%q, %q), want (dagster-dark, dagster-light)", dark, light)
 	}
-	if ciemny, jasny := k.Warianty("jellyfin"); ciemny != "" || jasny != "" {
-		t.Errorf("Warianty(jellyfin) = (%q, %q), chcę oba puste — ta ikona nie ma wariantów", ciemny, jasny)
+	if dark, light := k.Variants("jellyfin"); dark != "" || light != "" {
+		t.Errorf("Variants(jellyfin) = (%q, %q), want both empty — this icon has no variants", dark, light)
 	}
-	if ciemny, jasny := k.Warianty("nieznana"); ciemny != "" || jasny != "" {
-		t.Errorf("Warianty(nieznana) = (%q, %q), chcę oba puste", ciemny, jasny)
+	if dark, light := k.Variants("nieznana"); dark != "" || light != "" {
+		t.Errorf("Variants(unknown) = (%q, %q), want both empty", dark, light)
 	}
 }
 
-func TestRozwiążIkonęUżywaWariantówGdySą(t *testing.T) {
-	k, _ := nowyKatalogZMockiemCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write(metadanePrzykładowe(t))
+func TestResolveIconUsesVariantsWhenPresent(t *testing.T) {
+	k, _ := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(sampleMetadata(t))
 	})
-	if _, err := k.zMetadanych(context.Background()); err != nil {
+	if _, err := k.fromMetadata(context.Background()); err != nil {
 		t.Fatalf("zMetadanych: %v", err)
 	}
-	s := &Server{ikony: k}
+	s := &Server{icons: k}
 
-	ref := s.rozwiążIkonę("dagster", "Dagster")
+	ref := s.resolveIcon("dagster", "Dagster")
 	if ref.Src != "" {
-		t.Errorf("dla ikony z wariantami Src powinien być pusty (renderujemy oba warianty), mam %q", ref.Src)
+		t.Errorf("for an icon with variants Src should be empty (we render both variants), got %q", ref.Src)
 	}
 	if ref.WariantCiemny != "/icon/dagster-dark" || ref.WariantJasny != "/icon/dagster-light" {
-		t.Errorf("warianty = (%q, %q), chcę (/icon/dagster-dark, /icon/dagster-light)", ref.WariantCiemny, ref.WariantJasny)
+		t.Errorf("variants = (%q, %q), want (/icon/dagster-dark, /icon/dagster-light)", ref.WariantCiemny, ref.WariantJasny)
 	}
 
-	refBezWariantów := s.rozwiążIkonę("jellyfin", "Jellyfin")
-	if refBezWariantów.Src != "/icon/jellyfin" {
-		t.Errorf("bez wariantów oczekuję zwykłego Src, mam %q", refBezWariantów.Src)
+	refWithoutVariants := s.resolveIcon("jellyfin", "Jellyfin")
+	if refWithoutVariants.Src != "/icon/jellyfin" {
+		t.Errorf("without variants I expect a plain Src, got %q", refWithoutVariants.Src)
 	}
-	if refBezWariantów.WariantCiemny != "" || refBezWariantów.WariantJasny != "" {
-		t.Errorf("bez wariantów pola WariantCiemny/WariantJasny mają być puste, mam (%q, %q)",
-			refBezWariantów.WariantCiemny, refBezWariantów.WariantJasny)
+	if refWithoutVariants.WariantCiemny != "" || refWithoutVariants.WariantJasny != "" {
+		t.Errorf("without variants the WariantCiemny/WariantJasny fields should be empty, got (%q, %q)",
+			refWithoutVariants.WariantCiemny, refWithoutVariants.WariantJasny)
 	}
 }
