@@ -119,38 +119,67 @@ func (p *Powiadamiacz) Obserwuj(ctx context.Context, z Zdarzenie) {
 		return
 	}
 
+	wyślij, ok := p.decyduj(z)
+	if !ok || !wyślij {
+		return
+	}
+	// ! `zgłoszony` ustawiamy dopiero po UDANEJ wysyłce. Wcześniej stan był
+	// zapisywany przed wysyłką, więc jedna nieudana próba gubiła alert „down"
+	// na zawsze: następne sprawdzenia widziały `zgłoszony == down` i milczały.
+	if err := p.wyślijZPonowieniem(ctx, z); err != nil {
+		slog.Warn("powiadomienie nieudane, spróbuję przy następnym sprawdzeniu",
+			"usługa", z.Klucz, "err", err)
+		return
+	}
 	p.mu.Lock()
+	if s, jest := p.stan[z.Klucz]; jest {
+		s.zgłoszony = z.Stan
+	}
+	p.mu.Unlock()
+}
+
+// decyduj aktualizuje liczniki i mówi, czy trzeba wysłać wiadomość. Drugi
+// wynik false = zdarzenie do zignorowania (unknown). Mutex zawsze zwalniany
+// przez defer — wcześniej gałąź `default` wracała z zajętym.
+func (p *Powiadamiacz) decyduj(z Zdarzenie) (wyślij, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	s, jest := p.stan[z.Klucz]
 	if !jest {
 		s = &stanUsługi{zgłoszony: "up"} // zakładamy dobrą wiarę na starcie
 		p.stan[z.Klucz] = s
 	}
-
-	var wyślij bool
 	switch z.Stan {
 	case "up":
 		s.pod = 0
-		if s.zgłoszony != "up" {
-			s.zgłoszony = "up"
-			wyślij = true
-		}
+		return s.zgłoszony != "up", true
 	case "down", "degraded":
 		s.pod++
-		if s.pod >= p.Próg() && s.zgłoszony != z.Stan {
-			s.zgłoszony = z.Stan
-			wyślij = true
-		}
+		return s.pod >= p.Próg() && s.zgłoszony != z.Stan, true
 	default: // unknown — nic nie wiemy, nie zawracamy głowy
-		return
+		return false, false
 	}
-	p.mu.Unlock()
+}
 
-	if !wyślij {
-		return
+// opóźnieniaPonowień — przerwy między kolejnymi próbami wysyłki (zmienna, żeby
+// test nie czekał sekundami). Pierwsza próba idzie od razu, więc prób jest
+// len(opóźnieniaPonowień)+1.
+var opóźnieniaPonowień = []time.Duration{500 * time.Millisecond, 2 * time.Second}
+
+func (p *Powiadamiacz) wyślijZPonowieniem(ctx context.Context, z Zdarzenie) error {
+	err := p.wyślij(ctx, z)
+	for _, d := range opóźnieniaPonowień {
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (anulowano: %v)", err, ctx.Err())
+		case <-time.After(d):
+		}
+		err = p.wyślij(ctx, z)
 	}
-	if err := p.wyślij(ctx, z); err != nil {
-		slog.Warn("powiadomienie nieudane", "usługa", z.Klucz, "err", err)
-	}
+	return err
 }
 
 // Zapomnij czyści stan usługi, której już nie ma w configu.
