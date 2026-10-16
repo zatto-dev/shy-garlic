@@ -50,6 +50,14 @@ func jsonBłąd(w http.ResponseWriter, kod int, msg string) {
 // gicie, jeśli plik leży w repozytorium. Konflikt z ręczną edycją pliku kończy
 // się 409, nie cichym nadpisaniem.
 func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, fn func(*config.Document) error) bool {
+	return s.zEdycjąZKluczami(w, r, opis, nil, fn)
+}
+
+// zEdycjąZKluczami jak zEdycją, ale po udanym zapisie przenosi historię i stan
+// usług, których klucz (grupa/nazwa) się zmienił. migr dostaje config sprzed
+// zmiany i zwraca pary stary → nowy; nil = nic nie przenosimy.
+func (s *Server) zEdycjąZKluczami(w http.ResponseWriter, r *http.Request, opis string,
+	migr func(stara *config.Config) map[string]string, fn func(*config.Document) error) bool {
 	s.edycja.Lock()
 	defer s.edycja.Unlock()
 
@@ -104,6 +112,15 @@ func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, f
 		slog.Error("historia configu", "err", err)
 	}
 	s.commitDoGita(r.Context(), opis, autor)
+
+	// ! po Save (YAML jest już na dysku), przed reload (który zapomina nieznane klucze)
+	if migr != nil {
+		var stara *config.Config
+		if c, err := config.Load(przed); err == nil {
+			stara = c
+		}
+		s.migrujKlucze(r.Context(), migr(stara))
+	}
 
 	if err := s.reload(s.ctx); err != nil {
 		slog.Error("przeładowanie po zapisie", "err", err)
@@ -216,7 +233,17 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
 		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.NowaGrupa)
 	}
-	ok := s.zEdycją(w, r, opis, func(d *config.Document) error {
+	// ! pary liczone TERAZ — fn niżej nadpisuje ż.Grupa nową grupą
+	nowaGrupa, nowaNazwa := ż.Grupa, ż.Nazwa
+	if ż.NowaGrupa != "" {
+		nowaGrupa = ż.NowaGrupa
+	}
+	if ż.NowaNazwa != "" {
+		nowaNazwa = ż.NowaNazwa
+	}
+	pary := map[string]string{key(ż.Grupa, ż.Nazwa): key(nowaGrupa, nowaNazwa)}
+	migr := func(*config.Config) map[string]string { return pary }
+	ok := s.zEdycjąZKluczami(w, r, opis, migr, func(d *config.Document) error {
 		// przeniesienie idzie pierwsze — dalsze zmiany szukają usługi w nowej grupie
 		grupa := ż.Grupa
 		if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
@@ -295,9 +322,11 @@ func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
 	if ż.DoGrupy != ż.Grupa {
 		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.DoGrupy)
 	}
-	if s.zEdycją(w, r, opis, func(d *config.Document) error {
-		return d.MoveServiceTo(ż.Grupa, ż.Nazwa, ż.DoGrupy, *ż.Pozycja)
-	}) {
+	pary := map[string]string{key(ż.Grupa, ż.Nazwa): key(ż.DoGrupy, ż.Nazwa)}
+	if s.zEdycjąZKluczami(w, r, opis, func(*config.Config) map[string]string { return pary },
+		func(d *config.Document) error {
+			return d.MoveServiceTo(ż.Grupa, ż.Nazwa, ż.DoGrupy, *ż.Pozycja)
+		}) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -379,8 +408,25 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name i newName")
 		return
 	}
-	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
-		func(d *config.Document) error { return d.RenameGroup(ż.Nazwa, ż.NowaNazwa) }) {
+	// każda usługa grupy zmienia klucz; pary z configu sprzed zmiany, bo nazwa
+	// grupy może zawierać „/" i prefiks byłby niejednoznaczny
+	migr := func(stara *config.Config) map[string]string {
+		pary := map[string]string{}
+		if stara == nil {
+			return pary
+		}
+		for _, g := range stara.Groups {
+			if g.Name != ż.Nazwa {
+				continue
+			}
+			for _, svc := range g.Services {
+				pary[key(g.Name, svc.Name)] = key(ż.NowaNazwa, svc.Name)
+			}
+		}
+		return pary
+	}
+	if s.zEdycjąZKluczami(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
+		migr, func(d *config.Document) error { return d.RenameGroup(ż.Nazwa, ż.NowaNazwa) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }

@@ -299,3 +299,29 @@ func TestUnknownNieBlokujeMutexu(t *testing.T) {
 		t.Fatal("mutex powiadamiacza został zajęty po stanie unknown")
 	}
 }
+
+// SHYG-41: awaria trwa mimo przeniesienia usługi — nie alarmujemy od zera.
+func TestPrzenieśZachowujeStanZgłoszenia(t *testing.T) {
+	l := nowyŁapacz()
+	defer l.srv.Close()
+	p := Nowy(l.srv.URL, 1)
+	p.Obserwuj(context.Background(), zdarzenie("down"))
+	if l.ile() != 1 {
+		t.Fatalf("setup: wysłano %d", l.ile())
+	}
+
+	p.Przenieś(map[string]string{"Media/Jellyfin": "Sieć/Jellyfin"})
+	p.Zapomnij(map[string]bool{"Sieć/Jellyfin": true}) // tak robi reload()
+
+	z := zdarzenie("down")
+	z.Klucz = "Sieć/Jellyfin"
+	p.Obserwuj(context.Background(), z)
+	if l.ile() != 1 {
+		t.Fatalf("po przeniesieniu alert poszedł drugi raz (%d)", l.ile())
+	}
+	z.Stan = "up"
+	p.Obserwuj(context.Background(), z)
+	if l.ile() != 2 {
+		t.Fatalf("powrót po przeniesieniu nie został zgłoszony (%d)", l.ile())
+	}
+}

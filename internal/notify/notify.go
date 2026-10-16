@@ -182,6 +182,24 @@ func (p *Powiadamiacz) wyślijZPonowieniem(ctx context.Context, z Zdarzenie) err
 	return err
 }
 
+// Przenieś przepina stan usługi pod nowy klucz (stary → nowy), gdy usługę
+// przemianowano albo przeniesiono do innej grupy. Bez tego Zapomnij kasowało
+// licznik i „zgłoszony", więc trwająca awaria alarmowała od nowa, a powrót
+// nigdy nie był zgłoszony.
+func (p *Powiadamiacz) Przenieś(pary map[string]string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if s, ok := p.stan[stary]; ok {
+			p.stan[nowy] = s
+			delete(p.stan, stary)
+		}
+	}
+}
+
 // Zapomnij czyści stan usługi, której już nie ma w configu.
 func (p *Powiadamiacz) Zapomnij(żywe map[string]bool) {
 	p.mu.Lock()

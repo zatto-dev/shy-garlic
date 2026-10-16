@@ -59,6 +59,12 @@ type Server struct {
 	// nie mogą nadpisać się nawzajem
 	edycja sync.Mutex
 
+	// ostatnie — znacznik ostatniego wyniku zapisanego do bazy, per klucz.
+	// Na polu serwera (nie lokalnie w zapisujHistorię), bo zmiana klucza musi
+	// go przepiąć, inaczej ten sam wynik trafiłby do historii drugi raz.
+	muOst    sync.Mutex
+	ostatnie map[string]time.Time
+
 	mu    sync.RWMutex
 	cfg   *config.Config
 	stamp string // rozmiar+mtime pliku, do wykrycia edycji z zewnątrz
@@ -128,6 +134,7 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 
 		klientProxy: klientIkonZewnętrznych(),
 		subWygląd:   map[chan struct{}]struct{}{},
+		ostatnie:    map[string]time.Time{},
 	}
 
 	// Adres z bazy podnosimy tylko wtedy, gdy środowisko nic nie narzuciło —
@@ -201,17 +208,21 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) zapisujHistorię(ctx context.Context) {
 	zmiany, odepnij := s.mon.Subscribe()
 	defer odepnij()
-	ostatnie := map[string]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-zmiany:
 			for klucz, r := range s.mon.Snapshot() {
-				if r.At.IsZero() || !r.At.After(ostatnie[klucz]) {
+				s.muOst.Lock()
+				nowy := !r.At.IsZero() && r.At.After(s.ostatnie[klucz])
+				if nowy {
+					s.ostatnie[klucz] = r.At
+				}
+				s.muOst.Unlock()
+				if !nowy {
 					continue
 				}
-				ostatnie[klucz] = r.At
 				err := s.st.ZapiszWynik(ctx, store.Wynik{
 					Klucz: klucz, Stan: string(r.State), Kod: r.Code,
 					MS: r.MS, Błąd: r.Err, Kiedy: r.At,
@@ -223,6 +234,35 @@ func (s *Server) zapisujHistorię(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// migrujKlucze przenosi wszystko, co jest zindeksowane kluczem usługi
+// (grupa/nazwa), po zmianie nazwy albo przeniesieniu do innej grupy: historię
+// w SQLite, stan monitora i stan powiadamiacza. Wołane po udanym zapisie YAML
+// i PRZED reload() — reload wyrzuca stan kluczy, których nie zna.
+//
+// ! Błąd migracji bazy jest tylko logowany: YAML już zapisany jest źródłem
+// prawdy i nie wolno go cofać dla wykresu. Najgorszy skutek to pusty pasek.
+func (s *Server) migrujKlucze(ctx context.Context, pary map[string]string) {
+	if len(pary) == 0 {
+		return
+	}
+	if err := s.st.PrzenieśKlucze(ctx, pary); err != nil {
+		slog.Error("migracja historii po zmianie klucza", "err", err, "pary", len(pary))
+	}
+	s.mon.PrzenieśKlucze(pary)
+	s.powiad.Przenieś(pary)
+	s.muOst.Lock()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if t, ok := s.ostatnie[stary]; ok {
+			s.ostatnie[nowy] = t
+			delete(s.ostatnie, stary)
+		}
+	}
+	s.muOst.Unlock()
 }
 
 // powiadom przekazuje wynik do powiadamiacza razem z opisem usługi.

@@ -268,6 +268,34 @@ func (s *Store) ZapiszWynik(ctx context.Context, w Wynik) error {
 	return err
 }
 
+// PrzenieśKlucze przepisuje historię sprawdzeń pod nowe klucze (stary → nowy)
+// w jednej transakcji: albo przenoszą się wszystkie wiersze, albo żaden.
+//
+// Klucz usługi to grupa+"/"+nazwa, więc zmiana nazwy i przeniesienie do innej
+// grupy zmieniają klucz. Bez tego karta po przeciągnięciu traciła cały 24-godzinny
+// pasek. Przyjmuje pary, a nie prefiks: nazwa grupy może zawierać „/", a pary
+// z configu są jednoznaczne. Jeśli pod nowym kluczem już coś leży, wiersze się
+// łączą — historia nie jest nigdy kasowana.
+func (s *Store) PrzenieśKlucze(ctx context.Context, pary map[string]string) error {
+	if len(pary) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE checks SET key = ? WHERE key = ?`, nowy, stary); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Historia zwraca ostatnie n wyników dla usługi, od najstarszego.
 func (s *Store) Historia(ctx context.Context, klucz string, n int) ([]Wynik, error) {
 	rows, err := s.db.QueryContext(ctx,

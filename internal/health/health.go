@@ -122,6 +122,28 @@ func (m *Monitor) SetTargets(ctx context.Context, targets []Target) {
 	}
 }
 
+// PrzenieśKlucze przepina ostatni wynik i wykres ze starych kluczy na nowe
+// (stary → nowy). Wołane przy zmianie nazwy usługi albo przeniesieniu do innej
+// grupy, PRZED SetTargets — dzięki temu SetTargets widzi nowy klucz jako
+// „znany" i nie kasuje stanu, a karta nie mruga na „unknown".
+func (m *Monitor) PrzenieśKlucze(pary map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if r, ok := m.last[stary]; ok {
+			m.last[nowy] = r
+			delete(m.last, stary)
+		}
+		if h, ok := m.hist[stary]; ok {
+			m.hist[nowy] = h
+			delete(m.hist, stary)
+		}
+	}
+}
+
 func (m *Monitor) stop() {
 	if m.cancel != nil {
 		m.cancel()

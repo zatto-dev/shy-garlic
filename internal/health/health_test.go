@@ -122,3 +122,36 @@ func TestMonitorSprawdzaSamZSiebie(t *testing.T) {
 		t.Fatalf("historia = %d wpisów, chcę >= 2", len(m.History("test")))
 	}
 }
+
+// SHYG-41: po zmianie klucza karta zachowuje stan i wykres.
+func TestPrzenieśKluczeZachowujeStanIWykres(t *testing.T) {
+	m := New()
+	defer m.Close()
+	m.record("A/x", Result{State: StateUp, MS: 7, At: time.Now()})
+	m.record("A/x", Result{State: StateDown, At: time.Now()})
+	m.record("A/inny", Result{State: StateUp, At: time.Now()})
+
+	m.PrzenieśKlucze(map[string]string{"A/x": "B/x", "Brak/brak": "C/c"})
+
+	if got := m.Snapshot()["B/x"].State; got != StateDown {
+		t.Errorf("stan pod nowym kluczem = %q, chcę down", got)
+	}
+	if _, ma := m.Snapshot()["A/x"]; ma {
+		t.Error("stary klucz został w snapshocie")
+	}
+	if n := len(m.History("B/x")); n != 2 {
+		t.Errorf("wykres pod nowym kluczem ma %d punktów, chcę 2", n)
+	}
+	if n := len(m.History("A/x")); n != 0 {
+		t.Errorf("wykres pod starym kluczem ma %d punktów", n)
+	}
+	if m.Snapshot()["A/inny"].State != StateUp {
+		t.Error("cudzy stan ruszony")
+	}
+
+	// SetTargets na nowym kluczu nie kasuje stanu (nie wraca „unknown")
+	m.SetTargets(context.Background(), []Target{{Key: "B/x", URL: "http://127.0.0.1:1", Interval: time.Hour}})
+	if got := m.Snapshot()["B/x"].State; got == StateUnknown || got == "" {
+		t.Errorf("SetTargets zgubił stan: %q", got)
+	}
+}
