@@ -146,7 +146,7 @@ func TestSanityzujNazwęTła(t *testing.T) {
 		if !ok {
 			continue // odmowa jest w porządku
 		}
-		if !config.NazwaTła.MatchString(nazwa) {
+		if !config.BackgroundName.MatchString(nazwa) {
 			t.Errorf("%q dało %q — poza alfabetem", ładunek, nazwa)
 		}
 		if strings.ContainsAny(nazwa, `/\`) || strings.Contains(nazwa, "..") {
@@ -189,7 +189,7 @@ func TestUploadTłaNieWychodziPozaKatalog(t *testing.T) {
 		t.Fatalf("katalog obok teł został ruszony: %+v", wpisy)
 	}
 	for _, e := range mustReadDir(t, katalogTeł(s)) {
-		if !config.NazwaTła.MatchString(e.Name()) {
+		if !config.BackgroundName.MatchString(e.Name()) {
 			t.Errorf("w katalogu teł powstał plik %q spoza alfabetu", e.Name())
 		}
 	}
@@ -513,7 +513,7 @@ func TestWyglądGetIInfoNieWypuszczająŚmieci(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &wy); err != nil {
 		t.Fatal(err)
 	}
-	if !config.Dozwolone(wy.Preset, config.PresetyTła) || !config.Dozwolone(wy.Widok, config.Widoki) {
+	if !config.Allowed(wy.Preset, config.BackgroundPresets) || !config.Allowed(wy.Widok, config.Views) {
 		t.Fatalf("z API wyszła wartość spoza allowlisty: %+v", wy)
 	}
 	if wy.Obraz != "" {

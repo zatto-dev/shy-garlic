@@ -95,8 +95,8 @@ type Server struct {
 	// Stan pliku: błąd (nie da się wczytać → panel działa na poprzedniej
 	// konfiguracji) i ostrzeżenia (wczytał się, ale coś w nim podejrzane).
 	// Chronione przez mu.
-	błądPliku   *config.BłądPliku
-	ostrzeżenia []config.Ostrzeżenie
+	błądPliku   *config.FileError
+	ostrzeżenia []config.Warning
 	źródłoCfg   string // "" | "poprzednia" | "historia" | "pusta" — skąd config przy błędzie
 	ostatniBłąd string // do logowania każdego błędu raz, nie co tick watch()
 
@@ -221,7 +221,7 @@ type banerAPI struct {
 func (s *Server) banerInstancji(l i18n.Lang) banerAPI {
 	s.mu.RLock()
 	błąd := s.błądPliku
-	ostrz := append([]config.Ostrzeżenie(nil), s.ostrzeżenia...)
+	ostrz := append([]config.Warning(nil), s.ostrzeżenia...)
 	skąd := s.źródłoCfg
 	s.mu.RUnlock()
 
@@ -249,31 +249,31 @@ func (s *Server) banerInstancji(l i18n.Lang) banerAPI {
 		}
 		b.Tytuł = i18n.T(l, klucz)
 		switch {
-		case błąd.Linia > 0 && błąd.Kolumna > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), błąd.Linia, błąd.Kolumna, błąd.Komunikat)
-		case błąd.Linia > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), błąd.Linia, błąd.Komunikat)
+		case błąd.Line > 0 && błąd.Column > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), błąd.Line, błąd.Column, błąd.Message)
+		case błąd.Line > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), błąd.Line, błąd.Message)
 		default:
-			b.Błąd = błąd.Komunikat
+			b.Błąd = błąd.Message
 		}
 	}
 	return b
 }
 
-func opisOstrzeżenia(l i18n.Lang, o config.Ostrzeżenie) string {
-	if o.Rodzaj == config.RodzajAdres {
-		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Usługa, o.Grupa, o.Adres)
+func opisOstrzeżenia(l i18n.Lang, o config.Warning) string {
+	if o.Kind == config.KindAddress {
+		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Service, o.Group, o.Address)
 	}
-	gdzie := o.Ścieżka
+	gdzie := o.Path
 	if gdzie == "" {
 		gdzie = i18n.T(l, "baner_poziom_glowny")
 	}
-	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Klucz, gdzie)
-	if o.Sugestia != "" {
-		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Sugestia)
+	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Key, gdzie)
+	if o.Suggestion != "" {
+		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Suggestion)
 	}
-	if o.Linia > 0 {
-		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Linia) + ": " + t
+	if o.Line > 0 {
+		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Line) + ": " + t
 	}
 	return t
 }
@@ -487,17 +487,17 @@ func (s *Server) reload(ctx context.Context) error {
 	stamp := s.stampOf()
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return s.configZepsuty(stamp, config.BłądPliku{Komunikat: "read config: " + err.Error()}, err)
+		return s.configZepsuty(stamp, config.FileError{Message: "read config: " + err.Error()}, err)
 	}
 	cfg, err := config.Load(raw)
 	if err != nil {
-		return s.configZepsuty(stamp, config.RozbierzBłąd(err), err)
+		return s.configZepsuty(stamp, config.ParseFileError(err), err)
 	}
 
-	ostrzeżenia := append(config.Ostrzeżenia(raw), config.OstrzeżeniaAdresów(cfg)...)
+	ostrzeżenia := append(config.Warnings(raw), config.AddressWarnings(cfg)...)
 	for _, o := range ostrzeżenia {
-		slog.Warn("config: podejrzane miejsce", "rodzaj", o.Rodzaj, "linia", o.Linia,
-			"klucz", o.Klucz, "ścieżka", o.Ścieżka, "usługa", o.Usługa)
+		slog.Warn("config: podejrzane miejsce", "rodzaj", o.Kind, "linia", o.Line,
+			"klucz", o.Key, "ścieżka", o.Path, "usługa", o.Service)
 	}
 
 	s.mu.Lock()
@@ -516,8 +516,8 @@ func (s *Server) reload(ctx context.Context) error {
 // configZepsuty zapamiętuje błąd pliku. Panel zostaje przy poprzedniej
 // konfiguracji, a stempel jest ustawiany MIMO błędu — dzięki temu watch() nie
 // próbuje w kółko co 2 s tego samego pliku, tylko czeka na kolejną zmianę.
-func (s *Server) configZepsuty(stamp string, b config.BłądPliku, err error) error {
-	opis := fmt.Sprintf("%d:%d:%s", b.Linia, b.Kolumna, b.Komunikat)
+func (s *Server) configZepsuty(stamp string, b config.FileError, err error) error {
+	opis := fmt.Sprintf("%d:%d:%s", b.Line, b.Column, b.Message)
 	s.mu.Lock()
 	s.stamp = stamp
 	nowy := opis != s.ostatniBłąd
@@ -526,7 +526,7 @@ func (s *Server) configZepsuty(stamp string, b config.BłądPliku, err error) er
 	s.mu.Unlock()
 	if nowy { // każdy odrębny błąd raz
 		slog.Error("config niepoprawny — panel zostaje przy poprzedniej konfiguracji",
-			"linia", b.Linia, "kolumna", b.Kolumna, "err", b.Komunikat)
+			"linia", b.Line, "kolumna", b.Column, "err", b.Message)
 	}
 	s.rozgłośWygląd()
 	return err
@@ -803,21 +803,21 @@ func (s *Server) wyglądInstancji() wyglądWidok {
 	cfg := s.cfg
 	s.mu.RUnlock()
 
-	w := wyglądWidok{Preset: config.DomyślnyPreset, Blur: config.DomyślnyBlur,
-		Dim: config.DomyślnyDim, Ton: config.TonDla(config.DomyślnyPreset),
-		Widok: config.DomyślnyWidok}
+	w := wyglądWidok{Preset: config.DefaultPreset, Blur: config.DefaultBlur,
+		Dim: config.DefaultDim, Ton: config.ToneFor(config.DefaultPreset),
+		Widok: config.DefaultView}
 	if cfg == nil {
 		return w
 	}
 	a := cfg.Appearance
-	if config.Dozwolone(a.Background.Preset, config.PresetyTła) {
+	if config.Allowed(a.Background.Preset, config.BackgroundPresets) {
 		w.Preset = a.Background.Preset
-		w.Ton = config.TonDla(w.Preset) // preset niesie ton; jawny tone niżej go nadpisze
+		w.Ton = config.ToneFor(w.Preset) // preset niesie ton; jawny tone niżej go nadpisze
 	}
-	if config.Dozwolone(a.Background.Tone, config.TonyTła) {
+	if config.Allowed(a.Background.Tone, config.BackgroundTones) {
 		w.Ton = a.Background.Tone
 	}
-	if config.Dozwolone(a.View, config.Widoki) {
+	if config.Allowed(a.View, config.Views) {
 		w.Widok = a.View
 	}
 	if a.Background.Blur >= 0 && a.Background.Blur <= config.MaxBlur {
@@ -826,16 +826,16 @@ func (s *Server) wyglądInstancji() wyglądWidok {
 	if a.Background.Dim >= 0 && a.Background.Dim <= config.MaxDim {
 		w.Dim = a.Background.Dim
 	}
-	if w.Preset == config.PresetPhoto && config.NazwaTła.MatchString(a.Background.Image) {
+	if w.Preset == config.PresetPhoto && config.BackgroundName.MatchString(a.Background.Image) {
 		w.Obraz = a.Background.Image
 	}
 	if w.Preset == config.PresetPhoto && w.Obraz == "" {
-		w.Preset = config.DomyślnyPreset // zdjęcie bez pliku to nie jest tło
+		w.Preset = config.DefaultPreset // zdjęcie bez pliku to nie jest tło
 	}
 	// ! na końcu, bo preset mógł się wyżej zmienić. Ton wybiera się wyłącznie
 	// przy własnej tapecie — preset niesie jasność, więc i jedyny czytelny ton.
 	if w.Preset != config.PresetPhoto {
-		w.Ton = config.TonDla(w.Preset)
+		w.Ton = config.ToneFor(w.Preset)
 	}
 	return w
 }
@@ -849,7 +849,7 @@ func (s *Server) wyglądBramy() wyglądWidok {
 	w := s.wyglądInstancji()
 	w.Obraz = ""
 	if w.Preset == config.PresetPhoto {
-		w.Preset = config.DomyślnyPreset
+		w.Preset = config.DefaultPreset
 		if w.Ton == "light" {
 			w.Preset = "dawn"
 		}
@@ -913,8 +913,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		wg := widokGrupy{Name: g.Name}
 		for _, svc := range g.Services {
 			rozmiar := svc.Size
-			if !config.Dozwolone(rozmiar, config.Rozmiary) {
-				rozmiar = config.DomyślnyRozmiar
+			if !config.Allowed(rozmiar, config.Sizes) {
+				rozmiar = config.DefaultSize
 			}
 			wg.Services = append(wg.Services, widokUsługi{
 				Key:      key(g.Name, svc.Name),
@@ -952,7 +952,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func tagiJSON(t config.Tagi) string {
+func tagiJSON(t config.Tags) string {
 	b, err := json.Marshal(tagiDoJSON(t))
 	if err != nil {
 		return "[]"
@@ -1095,7 +1095,7 @@ func (s *Server) układInstancji() układAPI {
 
 // hrefZ oddaje adres do atrybutu href albo "" — patrz config.AdresKlikalny.
 func hrefZ(raw string) string {
-	if config.AdresKlikalny(raw) {
+	if config.ClickableAddress(raw) {
 		return raw
 	}
 	return ""

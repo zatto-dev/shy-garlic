@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestDemoDiff nie jest testem regresji — wypisuje wynik operacji do wglądu:
-// `go test -run TestDemoDiff -v`. Zostaje w repo jako żywa dokumentacja.
+// TestDemoDiff is not a regression test — it prints the result of an operation
+// for inspection: `go test -run TestDemoDiff -v`. It stays in the repo as living documentation.
 func TestDemoDiff(t *testing.T) {
-	src := wczytajBasic(t)
+	src := loadBasic(t)
 	d, err := Parse(src)
 	if err != nil {
 		t.Fatal(err)
@@ -22,5 +22,5 @@ func TestDemoDiff(t *testing.T) {
 	if err := os.WriteFile("/tmp/shyg-demo-out.yaml", d.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("zapisano /tmp/shyg-demo-out.yaml (%d bajtów, wejście %d)", len(d.Bytes()), len(src))
+	t.Logf("written /tmp/shyg-demo-out.yaml (%d bytes, input %d)", len(d.Bytes()), len(src))
 }

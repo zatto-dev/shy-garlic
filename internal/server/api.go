@@ -106,10 +106,10 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 		switch {
 		case errors.Is(err, config.ErrServiceNotFound), errors.Is(err, config.ErrGroupNotFound):
 			kod = http.StatusNotFound
-		case errors.Is(err, config.ErrDuplikat):
+		case errors.Is(err, config.ErrDuplicate):
 			kod = http.StatusConflict
 			komunikat = i18n.T(i18n.FromRequest(r), "blad_duplikat_nazwy")
-		case errors.Is(err, config.ErrPoleDziedziczone):
+		case errors.Is(err, config.ErrInheritedField):
 			komunikat = i18n.T(i18n.FromRequest(r), "blad_pole_dziedziczone")
 		case errors.Is(err, config.ErrUnsupportedLayout):
 			komunikat = i18n.T(i18n.FromRequest(r), "blad_uklad_pliku")
@@ -123,7 +123,7 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 	}
 
 	diff := config.Diff(przed, d.Bytes(), 3)
-	dodane, usunięte := config.PodsumujDiff(diff)
+	dodane, usunięte := config.SummarizeDiff(diff)
 
 	if r.URL.Query().Get("dry") == "1" {
 		jsonOdp(w, http.StatusOK, map[string]any{
@@ -211,9 +211,9 @@ type żądanieUsługi struct {
 // normalizacji (nil = pole nie przyszło) albo klucz tekstu błędu.
 func (ż żądanieUsługi) opisITagi() (opis *string, tagi *[]string, błąd string) {
 	if ż.Opis != nil {
-		v, err := config.NormalizujOpis(*ż.Opis)
+		v, err := config.NormalizeDescription(*ż.Opis)
 		switch {
-		case errors.Is(err, config.ErrOpisDługi):
+		case errors.Is(err, config.ErrDescriptionTooLong):
 			return nil, nil, "blad_opis_dlugi"
 		case err != nil:
 			return nil, nil, "blad_opis_znaki"
@@ -221,7 +221,7 @@ func (ż żądanieUsługi) opisITagi() (opis *string, tagi *[]string, błąd str
 		opis = &v
 	}
 	if ż.Tagi != nil {
-		v, err := config.NormalizujTagi(*ż.Tagi)
+		v, err := config.NormalizeTags(*ż.Tagi)
 		if err != nil {
 			return nil, nil, "blad_tagi"
 		}
@@ -231,7 +231,7 @@ func (ż żądanieUsługi) opisITagi() (opis *string, tagi *[]string, błąd str
 }
 
 // tagiDoJSON — pusta lista jako [], nie null; JS iteruje po niej bez sprawdzania.
-func tagiDoJSON(t config.Tagi) []string {
+func tagiDoJSON(t config.Tags) []string {
 	if len(t) == 0 {
 		return []string{}
 	}
@@ -261,7 +261,7 @@ func (s *Server) usługaZConfigu(grupa, nazwa string) (config.Service, bool) {
 // rozmiarZŻądania przepuszcza wyłącznie allowlistę; puste zostaje puste, żeby
 // nie dopisywać do pliku klucza, o który nikt nie prosił.
 func rozmiarZŻądania(v string) string {
-	if config.Dozwolone(v, config.Rozmiary) {
+	if config.Allowed(v, config.Sizes) {
 		return v
 	}
 	return ""
@@ -291,7 +291,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
 		return
 	}
-	if !config.PoprawnyAdresUsługi(ż.URL) {
+	if !config.ValidServiceAddress(ż.URL) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 		return
 	}
@@ -310,7 +310,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		svc.Description = *nowyOpis
 	}
 	if noweTagi != nil {
-		svc.Tags = config.Tagi(*noweTagi)
+		svc.Tags = config.Tags(*noweTagi)
 	}
 	svc.Check = check
 
@@ -361,8 +361,8 @@ func (ż żądanieUsługi) parseCheck() (config.Check, string) {
 // zmianaSprawdzania przelicza pola sekcji „Sprawdzanie" z żądania edycji.
 // Wartość równa obecnej (po domyślnych) nie jest zmianą — formularz odsyła to,
 // co pokazał, a domyślne nie mają lądować w pliku. Zwraca klucz tekstu błędu.
-func (ż żądanieUsługi) zmianaSprawdzania(bieżąca config.Check) (config.ZmianaSprawdzania, string) {
-	var z config.ZmianaSprawdzania
+func (ż żądanieUsługi) zmianaSprawdzania(bieżąca config.Check) (config.CheckChange, string) {
+	var z config.CheckChange
 	c, klucz := ż.parseCheck()
 	if klucz != "" {
 		return z, klucz
@@ -408,7 +408,7 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang := i18n.FromRequest(r)
-	if !config.PoprawnyAdresUsługi(ż.URL) {
+	if !config.ValidServiceAddress(ż.URL) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
 		return
 	}
@@ -484,16 +484,16 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if nowyOpis != nil {
-			if err := d.UstawOpisUsługi(ż.Grupa, ż.Nazwa, *nowyOpis); err != nil {
+			if err := d.SetServiceDescription(ż.Grupa, ż.Nazwa, *nowyOpis); err != nil {
 				return err
 			}
 		}
 		if noweTagi != nil {
-			if err := d.UstawTagiUsługi(ż.Grupa, ż.Nazwa, *noweTagi); err != nil {
+			if err := d.SetServiceTags(ż.Grupa, ż.Nazwa, *noweTagi); err != nil {
 				return err
 			}
 		}
-		if err := d.UstawSprawdzanie(ż.Grupa, ż.Nazwa, sprawdzanie); err != nil {
+		if err := d.SetCheck(ż.Grupa, ż.Nazwa, sprawdzanie); err != nil {
 			return err
 		}
 		// zmiana nazwy na końcu — inaczej kolejne szukania po starej nazwie zawiodą
@@ -591,20 +591,20 @@ func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
-	tytuł, err := config.NormalizujTytuł(ż.Tytuł)
+	tytuł, err := config.NormalizeTitle(ż.Tytuł)
 	if err != nil {
 		klucz := "blad_tytul_znaki"
 		switch {
-		case errors.Is(err, config.ErrTytułPusty):
+		case errors.Is(err, config.ErrTitleEmpty):
 			klucz = "blad_tytul_pusty"
-		case errors.Is(err, config.ErrTytułDługi):
+		case errors.Is(err, config.ErrTitleTooLong):
 			klucz = "blad_tytul_dlugi"
 		}
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, klucz))
 		return
 	}
 	opis := fmt.Sprintf(i18n.T(lang, "opis_tytul"), tytuł)
-	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.UstawTytuł(tytuł) }) {
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.SetTitle(tytuł) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true, "title": tytuł})
 	}
 }
@@ -694,7 +694,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "niepoprawny YAML: "+err.Error())
 		return
 	}
-	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.FromRequest(r), "opis_reczna_edycja"), nil, config.OpenSurowy,
+	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.FromRequest(r), "opis_reczna_edycja"), nil, config.OpenRaw,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(ż.YAML)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -870,7 +870,7 @@ func (s *Server) handleVersionsList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]wpis, 0, len(lista))
 	for _, w := range lista {
-		d, u := config.PodsumujDiff(w.Diff)
+		d, u := config.SummarizeDiff(w.Diff)
 		out = append(out, wpis{ID: w.ID, Kiedy: w.At.Format(time.RFC3339),
 			Autor: w.Author, Opis: w.Description, Dodane: d, Usunięte: u})
 	}
@@ -912,7 +912,7 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opis := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_przywrocono"), v.ID, v.Description)
-	if s.zEdycjąOtwarciem(w, r, opis, nil, config.OpenSurowy,
+	if s.zEdycjąOtwarciem(w, r, opis, nil, config.OpenRaw,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Content)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -1185,7 +1185,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 
 	if ż.Próg != nil {
 		if !s.zEdycją(w, r, "próg powiadomień", func(d *config.Document) error {
-			return d.UstawPrógPowiadomień(*ż.Próg)
+			return d.SetNotifyThreshold(*ż.Próg)
 		}) {
 			return
 		}
@@ -1324,7 +1324,7 @@ func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 
 	docelowyPreset, docelowyObraz := bieżący.Preset, bieżący.Obraz
 	if ż.Preset != nil {
-		if !config.Dozwolone(*ż.Preset, config.PresetyTła) {
+		if !config.Allowed(*ż.Preset, config.BackgroundPresets) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
 			return
 		}
@@ -1333,7 +1333,7 @@ func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 		zmiany = append(zmiany, "preset="+*ż.Preset)
 	}
 	if ż.Ton != nil {
-		if !config.Dozwolone(*ż.Ton, config.TonyTła) {
+		if !config.Allowed(*ż.Ton, config.BackgroundTones) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
 			return
 		}
@@ -1341,7 +1341,7 @@ func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 		zmiany = append(zmiany, "tone="+*ż.Ton)
 	}
 	if ż.Widok != nil {
-		if !config.Dozwolone(*ż.Widok, config.Widoki) {
+		if !config.Allowed(*ż.Widok, config.Views) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
 			return
 		}
@@ -1369,7 +1369,7 @@ func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case obraz == "":
 			// czyszczenie referencji — poprawne przy każdym presecie
-		case !config.NazwaTła.MatchString(obraz), docelowyPreset != config.PresetPhoto:
+		case !config.BackgroundName.MatchString(obraz), docelowyPreset != config.PresetPhoto:
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
 			return
 		case !s.tła.Istnieje(obraz):
@@ -1390,7 +1390,7 @@ func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opis := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_wyglad"), strings.Join(zmiany, ", "))
-	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.UstawWygląd(pola) }) {
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.SetAppearance(pola) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -1500,7 +1500,7 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, u := range ż.Usługi {
-		if !config.PoprawnyAdresUsługi(u.URL) {
+		if !config.ValidServiceAddress(u.URL) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 			return
 		}
@@ -1528,7 +1528,7 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 				svc.Description = *opis
 			}
 			if tagi != nil {
-				svc.Tags = config.Tagi(*tagi)
+				svc.Tags = config.Tags(*tagi)
 			}
 			svc.Check, _ = u.parseCheck() // checked above
 			if err := d.AddService(grupa, svc); err != nil {

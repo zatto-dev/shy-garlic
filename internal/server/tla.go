@@ -159,7 +159,7 @@ func sanityzujNazwę(surowa, format string) (string, bool) {
 	}
 
 	nazwa := trzon + "." + format
-	if _, znany := mimeTła[format]; !znany || !config.NazwaTła.MatchString(nazwa) {
+	if _, znany := mimeTła[format]; !znany || !config.BackgroundName.MatchString(nazwa) {
 		return "", false
 	}
 	return nazwa, true
@@ -236,7 +236,7 @@ func (k *KatalogTeł) Lista() ([]WpisTła, int64, error) {
 	out := make([]WpisTła, 0, len(wpisy))
 	var razem int64
 	for _, e := range wpisy {
-		if e.IsDir() || !config.NazwaTła.MatchString(e.Name()) {
+		if e.IsDir() || !config.BackgroundName.MatchString(e.Name()) {
 			continue // tymczasówki zaczynają się od kropki i wypadają tutaj
 		}
 		format, ok := formatZNazwy(e.Name())
@@ -270,7 +270,7 @@ func (k *KatalogTeł) wolnaNazwa(nazwa string) (string, error) {
 	trzon, format := nazwa[:kropka], nazwa[kropka+1:]
 	for i := 2; i < 100; i++ {
 		kandydat := fmt.Sprintf("%s-%d.%s", trzon, i, format)
-		if !config.NazwaTła.MatchString(kandydat) {
+		if !config.BackgroundName.MatchString(kandydat) {
 			return "", errLimitTła
 		}
 		if _, err := k.root.Stat(kandydat); errors.Is(err, os.ErrNotExist) {
@@ -375,7 +375,7 @@ func (k *KatalogTeł) Usuń(nazwa string) error {
 	if !k.Dostępny() {
 		return errTłaWyłączone
 	}
-	if !config.NazwaTła.MatchString(nazwa) {
+	if !config.BackgroundName.MatchString(nazwa) {
 		return errBrakTła
 	}
 	if _, err := k.root.Stat(nazwa); err != nil {
@@ -387,7 +387,7 @@ func (k *KatalogTeł) Usuń(nazwa string) error {
 // Istnieje mówi, czy plik o takiej nazwie leży w katalogu teł. Używane przy
 // zapisie wyglądu: config nie ma prawa wskazać tapety, której nie ma.
 func (k *KatalogTeł) Istnieje(nazwa string) bool {
-	if !k.Dostępny() || !config.NazwaTła.MatchString(nazwa) {
+	if !k.Dostępny() || !config.BackgroundName.MatchString(nazwa) {
 		return false
 	}
 	fi, err := k.root.Stat(nazwa)
@@ -396,7 +396,7 @@ func (k *KatalogTeł) Istnieje(nazwa string) bool {
 
 // Otwórz podaje plik do wysłania. Uchwyt zamyka wołający.
 func (k *KatalogTeł) Otwórz(nazwa string) (*os.File, os.FileInfo, string, error) {
-	if !k.Dostępny() || !config.NazwaTła.MatchString(nazwa) {
+	if !k.Dostępny() || !config.BackgroundName.MatchString(nazwa) {
 		return nil, nil, "", errBrakTła
 	}
 	format, ok := formatZNazwy(nazwa)
@@ -554,7 +554,7 @@ func (s *Server) handleTłaLista(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTłoUsuń(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.FromRequest(r)
 	nazwa := r.PathValue("nazwa")
-	if !config.NazwaTła.MatchString(nazwa) {
+	if !config.BackgroundName.MatchString(nazwa) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
 		return
 	}

@@ -28,11 +28,11 @@ func TestParseRefusesLoneCR(t *testing.T) {
 }
 
 func TestDescriptionCollapsesSpacesLikeLoad(t *testing.T) {
-	got, err := NormalizujOpis("  two  spaces   here ")
+	got, err := NormalizeDescription("  two  spaces   here ")
 	if err != nil || got != "two spaces here" {
 		t.Fatalf("%q, %v", got, err)
 	}
-	if _, err := NormalizujOpis("line\nbreak"); !errors.Is(err, ErrOpisZnaki) {
+	if _, err := NormalizeDescription("line\nbreak"); !errors.Is(err, ErrDescriptionChars) {
 		t.Fatalf("newline must stay rejected, err = %v", err)
 	}
 }

@@ -31,7 +31,7 @@ var atrybutPresetu = regexp.MustCompile(`data-preset="([^"]*)"`)
 func sprawdźWyjścieSzablonu(t *testing.T, html string) {
 	t.Helper()
 	for _, m := range atrybutPresetu.FindAllStringSubmatch(html, -1) {
-		if !config.Dozwolone(m[1], config.PresetyTła) {
+		if !config.Allowed(m[1], config.BackgroundPresets) {
 			t.Errorf("data-preset=%q — wartość spoza allowlisty w atrybucie", m[1])
 		}
 	}
@@ -593,7 +593,7 @@ func TestPodgladStron(t *testing.T) {
 	for _, w := range warianty {
 		s.mu.Lock()
 		s.cfg.Appearance = config.Appearance{
-			Background: config.Background{Preset: w.preset, Blur: 10, Dim: config.DomyślnyDim, Tone: w.ton},
+			Background: config.Background{Preset: w.preset, Blur: 10, Dim: config.DefaultDim, Tone: w.ton},
 			View:       w.widok,
 		}
 		s.mu.Unlock()

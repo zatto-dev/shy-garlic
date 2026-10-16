@@ -109,11 +109,11 @@ func TestPatchUsługiPustyOpisITagiUsuwają(t *testing.T) {
 func TestPatchUsługiOdrzucaZłyOpisITagiPoLudzku(t *testing.T) {
 	s, h, c := serwerOpisy(t)
 	przed := string(s.plikConfigu(t))
-	długi := strings.Repeat("a", config.MaksOpisu+1)
+	długi := strings.Repeat("a", config.MaxDescription+1)
 	cases := []struct{ nazwa, ciało, chcę string }{
 		{"opis za długi", `{"description":"` + długi + `"}`, "blad_opis_dlugi"},
 		{"opis ze znakiem sterującym", `{"description":"a\nb"}`, "blad_opis_znaki"},
-		{"tag za długi", `{"tags":["` + strings.Repeat("t", config.MaksTagu+1) + `"]}`, "blad_tagi"},
+		{"tag za długi", `{"tags":["` + strings.Repeat("t", config.MaxTag+1) + `"]}`, "blad_tagi"},
 		{"za dużo tagów", `{"tags":["a","b","c","d","e","f","g","h","i","j","k","l","m"]}`, "blad_tagi"},
 	}
 	for _, tc := range cases {

@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestDiffPustyGdyBezZmian(t *testing.T) {
-	src := wczytajBasic(t)
+func TestDiffEmptyWhenNoChanges(t *testing.T) {
+	src := loadBasic(t)
 	if d := Diff(src, src, 3); d != "" {
-		t.Fatalf("chcę pustego diffa, mam:\n%s", d)
+		t.Fatalf("want empty diff, got:\n%s", d)
 	}
 }
 
-func TestDiffPokazujeDokładnieToCoZmienione(t *testing.T) {
-	src := wczytajBasic(t)
+func TestDiffShowsExactlyWhatChanged(t *testing.T) {
+	src := loadBasic(t)
 	d, err := Parse(src)
 	if err != nil {
 		t.Fatal(err)
@@ -23,44 +23,44 @@ func TestDiffPokazujeDokładnieToCoZmienione(t *testing.T) {
 	}
 
 	diff := Diff(src, d.Bytes(), 2)
-	dodane, usunięte := PodsumujDiff(diff)
-	if dodane != 1 || usunięte != 1 {
-		t.Fatalf("chcę +1/-1, mam +%d/-%d:\n%s", dodane, usunięte, diff)
+	added, removed := SummarizeDiff(diff)
+	if added != 1 || removed != 1 {
+		t.Fatalf("want +1/-1, got +%d/-%d:\n%s", added, removed, diff)
 	}
 	if !strings.Contains(diff, "-        url: http://10.0.0.5:8989") ||
 		!strings.Contains(diff, "+        url: http://10.0.0.5:8990") {
-		t.Fatalf("diff nie pokazuje zmiany URL:\n%s", diff)
+		t.Fatalf("diff does not show the URL change:\n%s", diff)
 	}
-	// kontekst ma być widoczny, żeby user wiedział, gdzie to jest
+	// context should be visible so the user knows where it is
 	if !strings.Contains(diff, ` icon: sonarr`) {
-		t.Errorf("brak kontekstu wokół zmiany:\n%s", diff)
+		t.Errorf("no context around the change:\n%s", diff)
 	}
 	if !strings.HasPrefix(diff, "@@ ") {
-		t.Errorf("brak nagłówka hunka:\n%s", diff)
+		t.Errorf("no hunk header:\n%s", diff)
 	}
 }
 
-func TestDiffDodaniaUsługi(t *testing.T) {
-	src := wczytajBasic(t)
+func TestDiffServiceAddition(t *testing.T) {
+	src := loadBasic(t)
 	d, _ := Parse(src)
 	if err := d.AddService("Sieć", Service{Name: "AdGuard", URL: "http://10.0.0.2:3000"}); err != nil {
 		t.Fatal(err)
 	}
 	diff := Diff(src, d.Bytes(), 3)
-	dodane, usunięte := PodsumujDiff(diff)
-	if usunięte != 0 {
-		t.Errorf("dodanie usługi nie może niczego usuwać, mam -%d:\n%s", usunięte, diff)
+	added, removed := SummarizeDiff(diff)
+	if removed != 0 {
+		t.Errorf("adding a service must not remove anything, got -%d:\n%s", removed, diff)
 	}
-	if dodane != 2 {
-		t.Errorf("chcę +2 (name, url), mam +%d:\n%s", dodane, diff)
+	if added != 2 {
+		t.Errorf("want +2 (name, url), got +%d:\n%s", added, diff)
 	}
 }
 
-func TestDiffNaPustymIWielkim(t *testing.T) {
+func TestDiffOnEmptyAndLarge(t *testing.T) {
 	if d := Diff(nil, []byte("a\nb\n"), 3); !strings.Contains(d, "+a") || !strings.Contains(d, "+b") {
-		t.Fatalf("diff z pustego pliku:\n%s", d)
+		t.Fatalf("diff from an empty file:\n%s", d)
 	}
 	if d := Diff([]byte("a\nb\n"), nil, 3); !strings.Contains(d, "-a") {
-		t.Fatalf("diff do pustego pliku:\n%s", d)
+		t.Fatalf("diff to an empty file:\n%s", d)
 	}
 }
