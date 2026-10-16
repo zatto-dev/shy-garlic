@@ -1522,8 +1522,25 @@
 
   // ── zakładka Powiadomienia ────────────────────────────────────────────────
 
+  // format wiadomości: lista i podpowiedź kształtu adresu dla wybranego
+  const polaFormatu = $("#webhook-format");
+  let zaladowanyFormat = "";
+
+  function pokazPodpowiedzFormatu(zeSrodowiska) {
+    const podpowiedz = $("#webhook-format-podpowiedz");
+    podpowiedz.textContent = zeSrodowiska
+      ? tr("webhook_format_ze_srodowiska")
+      : tr("format_podpowiedz_" + polaFormatu.value);
+  }
+  polaFormatu.addEventListener("change", () => pokazPodpowiedzFormatu(polaFormatu.disabled));
+
   async function wczytajPowiadomienia() {
     const d = await api("GET", "/api/notify");
+    // Format ze środowiska jest własnością deployu, tak samo jak adres.
+    zaladowanyFormat = d.format;
+    polaFormatu.value = d.format;
+    polaFormatu.disabled = d.formatZrodlo === "srodowisko";
+    pokazPodpowiedzFormatu(polaFormatu.disabled);
     const pole = $("#webhook-adres");
     pole.value = "";
     pole.placeholder = d.webhook || "https://…";
@@ -1531,7 +1548,7 @@
     // ma wiedzieć dlaczego, zamiast klikać w coś, co i tak nie zadziała.
     const zeSrodowiska = d.zrodlo === "srodowisko";
     pole.disabled = zeSrodowiska;
-    $("#webhook-zapisz").disabled = zeSrodowiska;
+    $("#webhook-zapisz").disabled = zeSrodowiska && polaFormatu.disabled;
     // Adres stoi już w polu jako placeholder — status ma mówić co innego,
     // inaczej ten sam ciąg wisi dwa razy pod sobą.
     $("#powiad-stan").textContent = zeSrodowiska
@@ -1547,6 +1564,9 @@
     // Puste pole znaczy „nie zmieniaj" — do wyczyszczenia jest osobny gest,
     // inaczej samo otwarcie zakładki kasowałoby webhook przy zapisie progu.
     if (adres) ciało.webhook = adres;
+    // format wysyłamy tylko po zmianie: stary adres mógł powstać przed regułami
+    // kształtu, a zapis samego progu nie ma go na nowo walidować
+    if (!polaFormatu.disabled && polaFormatu.value !== zaladowanyFormat) ciało.format = polaFormatu.value;
     try {
       await api("PUT", "/api/notify", ciało);
       await wczytajPowiadomienia();

@@ -192,8 +192,9 @@ labels:
 
 ## When something breaks
 
-Set a Discord webhook (or anything else that accepts JSON) and you get one
-sentence when a service goes down and one when it comes back. Nothing else.
+Set a webhook — Discord, Slack, ntfy, Gotify, Telegram or any URL that accepts
+JSON — and you get one short message when a service goes down and one when it
+comes back. Nothing else.
 
 This is deliberately **not** alerting: no escalation, no schedules, no rules, no
 silence windows. If you want real alerting, run Uptime Kuma — we are not trying
@@ -210,6 +211,45 @@ Two details that matter in practice:
   Set it in Settings → Notifications, or with `SHYG_WEBHOOK` for a deployment
   that manages its own secrets — the environment wins, so restarting the
   container never quietly undoes a change made in the UI.
+- **Messages are sent in the background**, one queue per service, so a slow or
+  dead webhook never holds up the check history. A message that could not be
+  delivered (three tries) is not marked as reported and is retried on the next
+  check.
+
+### Message formats
+
+Pick the format in Settings → Notifications, or with `SHYG_WEBHOOK_FORMAT` /
+`--webhook-format` (the environment wins over the panel, exactly like the
+address). The format is stored next to the address in the database.
+
+| Format     | Address you enter                                                | What is sent                                                                 |
+| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | an embed with a coloured bar (the default)                                   |
+| `slack`    | `https://hooks.slack.com/services/…` (Mattermost, Rocket.Chat too) | `{"text": "…"}`                                                              |
+| `ntfy`     | `https://ntfy.sh/<topic>` or your own server                     | plain text body, headers `Title`, `Priority` (`high` for down), `Tags`, `Click` |
+| `gotify`   | `https://<host>/message?token=<APP_TOKEN>`                       | `{"title", "message", "priority"}` (down = 8)                                |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>` | `{"text": "…"}`, no Markdown parsing; the chat id travels in the address     |
+| `generic`  | any https URL                                                    | the JSON below                                                               |
+
+`generic` is a stable contract — fields are never renamed:
+
+```json
+{"event": "down", "service": "Jellyfin", "group": "Media", "state": "down",
+ "previous": "up", "reason": "connection refused",
+ "at": "2026-10-16T12:30:00Z", "url": "http://192.168.1.30:8096"}
+```
+
+`event` is `down`, `degraded`, `recovered` or `test`; `state` is the new state
+and `previous` the last one that was reported (`up`, `degraded` or `down`);
+`reason` is empty for `recovered`. Credentials for ntfy can sit in the address
+(`https://user:password@ntfy.example/topic`).
+
+The **Send a test message** button works in every format. Addresses are masked
+in the API and the UI (scheme and host only), and a failed test never echoes the
+address back — bot tokens live in it. The panel only accepts `https://` addresses;
+if your ntfy or Gotify runs on plain `http` inside your LAN, give the address to
+the deployment instead: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerts`
+`SHYG_WEBHOOK_FORMAT=ntfy` — there the choice belongs to whoever runs it.
 
 ## Install
 
@@ -496,9 +536,9 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
-| The SQLite database   | webhook address, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
+| The SQLite database   | webhook address and format, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
 
 Every flag has an `SHYG_`-prefixed environment variable (`SHYG_ADDR`,
@@ -649,7 +689,7 @@ The dashboard uses exactly the same endpoints you would.
 | `GET`    | `/api/appearance`                | the instance default look                                  |
 | `PUT`    | `/api/appearance`                | change it (goes through the diff, like any edit)           |
 | `GET`    | `/api/notify`                    | notification settings, without the address                 |
-| `PUT`    | `/api/notify`                    | set the webhook address                                    |
+| `PUT`    | `/api/notify`                    | set the webhook address, message format and threshold       |
 | `POST`   | `/api/notify/test`               | send a test message                                        |
 | `POST`   | `/api/background`                | upload a wallpaper (multipart `file`)                      |
 | `GET`    | `/api/background`                | list uploaded wallpapers                                   |

@@ -19,6 +19,7 @@ import (
 	"github.com/zatto-dev/shy-garlic/internal/dockerdisc"
 	"github.com/zatto-dev/shy-garlic/internal/gitrepo"
 	"github.com/zatto-dev/shy-garlic/internal/i18n"
+	"github.com/zatto-dev/shy-garlic/internal/notify"
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
 
@@ -961,22 +962,54 @@ func (s *Server) źródłoWebhooka() string {
 }
 
 func (s *Server) handleNotifyGet(w http.ResponseWriter, r *http.Request) {
+	formaty := make([]string, len(notify.Formaty))
+	for i, f := range notify.Formaty {
+		formaty[i] = string(f)
+	}
 	jsonOdp(w, http.StatusOK, map[string]any{
-		"wlaczony": s.powiad.Włączony(),
-		"webhook":  maskaWebhooka(s.powiad.Webhook()),
-		"zrodlo":   s.źródłoWebhooka(),
-		"prog":     s.powiad.Próg(),
+		"wlaczony":     s.powiad.Włączony(),
+		"webhook":      maskaWebhooka(s.powiad.Webhook()),
+		"zrodlo":       s.źródłoWebhooka(),
+		"format":       string(s.powiad.Format()),
+		"formatZrodlo": s.źródłoFormatu(r.Context()),
+		"formaty":      formaty,
+		"prog":         s.powiad.Próg(),
 	})
 }
 
-// handleNotifyPut pisze do DWÓCH warstw naraz: adres do SQLite (bo jest
-// sekretem, a plik configu jest commitowany), próg do YAML-a (bo nie jest).
-// To jedyne miejsce, gdzie podział warstw przecieka do API — alternatywą były
-// dwie trasy i obsługa połowicznego niepowodzenia po stronie UI.
+func (s *Server) źródłoFormatu(ctx context.Context) string {
+	if s.formatZeŚrodowiska {
+		return "srodowisko"
+	}
+	if v, err := s.st.Ustawienie(ctx, "notify.format"); err == nil && v != "" {
+		return "baza"
+	}
+	return "domyslny"
+}
+
+// klucz tekstu błędu dla adresu, który nie pasuje do formatu
+func błądAdresuFormatu(err error) string {
+	switch {
+	case errors.Is(err, notify.ErrAdresTelegram):
+		return "webhook_adres_telegram"
+	case errors.Is(err, notify.ErrAdresGotify):
+		return "webhook_adres_gotify"
+	}
+	return "webhook_zly_adres"
+}
+
+// handleNotifyPut pisze do DWÓCH warstw naraz: adres i format do SQLite (adres
+// jest sekretem, a plik configu jest commitowany), próg do YAML-a (bo nie
+// jest). To jedyne miejsce, gdzie podział warstw przecieka do API —
+// alternatywą były dwie trasy i obsługa połowicznego niepowodzenia po stronie UI.
+//
+// Najpierw walidacja WSZYSTKIEGO, potem zapis: odrzucone żądanie nie zostawia
+// po sobie połowy zmian.
 func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.Wybierz(r)
 	var ż struct {
 		Webhook *string `json:"webhook"`
+		Format  *string `json:"format"`
 		Próg    *int    `json:"prog"`
 	}
 	if err := dekodujJSON(w, r, &ż); err != nil {
@@ -984,33 +1017,76 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ż.Webhook != nil {
-		if s.webhookZeŚrodowiska {
-			jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_ze_srodowiska"))
+	if ż.Webhook != nil && s.webhookZeŚrodowiska {
+		jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_ze_srodowiska"))
+		return
+	}
+	if ż.Format != nil {
+		if s.formatZeŚrodowiska {
+			jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_format_ze_srodowiska"))
 			return
 		}
-		adres := strings.TrimSpace(*ż.Webhook)
+		if !notify.PoprawnyFormat(*ż.Format) {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_format"))
+			return
+		}
+	}
+	adres := ""
+	if ż.Webhook != nil {
+		adres = strings.TrimSpace(*ż.Webhook)
 		if adres != "" {
-			// ! Tylko https. Sekret jedzie w ścieżce adresu, więc po http
-			// poszedłby otwartym tekstem.
+			// ! Tylko https, w każdym formacie. Sekret jedzie w adresie (ścieżka
+			// albo query), więc po http poszedłby otwartym tekstem. Operator, który
+			// naprawdę chce http w LAN-ie (ntfy, Gotify), ustawia adres przez
+			// SHYG_WEBHOOK — tam wybór należy do deployu, nie do kliknięcia.
 			u, err := url.Parse(adres)
 			if err != nil || u.Scheme != "https" || u.Host == "" {
 				jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_adres"))
 				return
 			}
 		}
+	}
+	if ż.Próg != nil && (*ż.Próg < 1 || *ż.Próg > 10) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_prog"))
+		return
+	}
+	// adres musi pasować do formatu — sprawdzamy parę w stanie, w jakim zostanie
+	// po zapisie, także gdy zmienia się tylko jedno z dwojga
+	if ż.Webhook != nil || ż.Format != nil {
+		format := s.powiad.Format()
+		if ż.Format != nil {
+			format = notify.Format(*ż.Format)
+		}
+		efektywny := s.powiad.Webhook()
+		if ż.Webhook != nil {
+			efektywny = adres
+		}
+		if err := notify.SprawdźAdres(format, efektywny); err != nil {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, błądAdresuFormatu(err)))
+			return
+		}
+	}
+
+	if ż.Webhook != nil {
 		if err := s.st.UstawUstawienie(r.Context(), "notify.webhook", adres); err != nil {
 			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		s.powiad.UstawWebhook(adres)
 	}
-
-	if ż.Próg != nil {
-		if *ż.Próg < 1 || *ż.Próg > 10 {
-			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_prog"))
+	if ż.Format != nil {
+		zapis := *ż.Format
+		if zapis == string(notify.FormatDiscord) {
+			zapis = "" // domyślny nie leży w bazie
+		}
+		if err := s.st.UstawUstawienie(r.Context(), "notify.format", zapis); err != nil {
+			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.powiad.UstawFormat(notify.Format(*ż.Format))
+	}
+
+	if ż.Próg != nil {
 		if !s.zEdycją(w, r, "próg powiadomień", func(d *config.Document) error {
 			return d.UstawPrógPowiadomień(*ż.Próg)
 		}) {

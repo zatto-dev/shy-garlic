@@ -42,6 +42,20 @@ the entries below say when it does.
   line number and a "did you mean" hint, and the file still loads. `defaults:`
   and `x-*` top-level keys (anchor holders), anchors and `<<:` merge keys are
   understood. Service addresses that cannot be used are listed too.
+- **Description and tags on a service.** Two optional keys, `description:` (one
+  line, up to 200 characters) and `tags:` (a list, up to 12 tags of 32
+  characters; a single `tags: media` is accepted too). The description shows as
+  a subtle line under the host on every card (truncated, full text in the
+  tooltip); tags are small chips in list view, on large bento tiles and in the
+  details window — grid cards stay uncluttered. The filter box searches both,
+  and now ignores diacritics ("zdjecia" finds "zdjęcia"). Both are editable in
+  the service dialog; the edit is a splice that adds, replaces or removes only
+  those lines, keeping the quoting style, trailing comments and the file's own
+  tag style (`[a, b]` or a block list). A value inherited through
+  `<<: *defaults` cannot be overridden locally (the YAML parser rejects a
+  duplicate key), so the dialog says so instead of writing a broken file.
+  `POST`/`PATCH /api/services` take `description` and `tags`; an absent field
+  is left alone, an empty one removes it.
 - **Content checks.** `check.contains` and `check.not_contains` look for text in
   the first 1 MiB of the answer, and `check.path` asks another path (and query)
   of the same host instead of the one in `url` — e.g. `/api/health` rather than
@@ -73,21 +87,19 @@ the entries below say when it does.
   `deploy/grafana/shy-garlic.json` is a ready dashboard; the README has
   Prometheus, curl and Home Assistant examples. New endpoints: `GET /metrics`,
   `GET`/`POST /api/tokens`, `DELETE /api/tokens/{id}`.
+- **Webhook formats.** Besides Discord, notifications can go to Slack
+  (Mattermost, Rocket.Chat), ntfy (plain text with `Title`, `Priority`, `Tags`
+  and `Click` headers), Gotify, Telegram or any URL as a stable JSON document
+  (`{event, service, group, state, previous, reason, at, url}`). The format is
+  chosen in Settings → Notifications, stored next to the address in the
+  database, and can be fixed by `SHYG_WEBHOOK_FORMAT` / `--webhook-format`,
+  which wins over the panel exactly like `SHYG_WEBHOOK` (the panel then answers
+  `409`). The address is checked against the format when saved (Telegram needs
+  `…/bot<TOKEN>/sendMessage?chat_id=<ID>`, Gotify `…/message?token=<TOKEN>`),
+  the test button works in every format, and addresses stay masked in the API —
+  including Telegram bot tokens. The panel still accepts `https://` only; plain
+  `http` on a LAN goes through `SHYG_WEBHOOK`.
 - `./x race` runs the tests with the race detector.
-- **Description and tags on a service.** Two optional keys, `description:` (one
-  line, up to 200 characters) and `tags:` (a list, up to 12 tags of 32
-  characters; a single `tags: media` is accepted too). The description shows as
-  a subtle line under the host on every card (truncated, full text in the
-  tooltip); tags are small chips in list view, on large bento tiles and in the
-  details window — grid cards stay uncluttered. The filter box searches both,
-  and now ignores diacritics ("zdjecia" finds "zdjęcia"). Both are editable in
-  the service dialog; the edit is a splice that adds, replaces or removes only
-  those lines, keeping the quoting style, trailing comments and the file's own
-  tag style (`[a, b]` or a block list). A value inherited through
-  `<<: *defaults` cannot be overridden locally (the YAML parser rejects a
-  duplicate key), so the dialog says so instead of writing a broken file.
-  `POST`/`PATCH /api/services` take `description` and `tags`; an absent field
-  is left alone, an empty one removes it.
 
 ### Fixed
 
@@ -97,6 +109,16 @@ the entries below say when it does.
   history rows, the monitor's last result and the notifier state now move to the
   new key together with the edit (in one transaction; a failed migration is
   logged and never rolls back the saved YAML).
+- **A slow or dead webhook no longer stalls the history writer.** Notifications
+  used to be sent from the loop that stores check results, so a failing webhook
+  could hold it for about 2.5 seconds per alert. Messages now go out in the
+  background, one queue per service (order preserved, at most three requests in
+  flight, cancelled on shutdown), with the same "marked as reported only after a
+  successful send" rule: a failed alert is retried on the next check, and the
+  same alert is never queued twice while one is on its way.
+- **A failed test notification no longer shows the webhook address.** The error
+  from the HTTP client carries the full URL — and with it the Discord token, the
+  Telegram bot token or the Gotify token — into the API response and the log.
 - **A failed "down" alert is retried.** The notification state was marked as
   reported before sending, so one failed webhook call lost the alert for good.
   It is now marked after a successful send; each send is tried three times with

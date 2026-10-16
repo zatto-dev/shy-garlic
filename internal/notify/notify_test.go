@@ -61,11 +61,13 @@ func TestPojedynczaPorażkaNiePowiadamia(t *testing.T) {
 	p := Nowy(l.srv.URL, 2)
 
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	if l.ile() != 0 {
 		t.Fatalf("wysłano %d wiadomości po jednej porażce, chcę 0", l.ile())
 	}
 
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	if l.ile() != 1 {
 		t.Fatalf("wysłano %d po drugiej porażce, chcę 1", l.ile())
 	}
@@ -78,6 +80,7 @@ func TestNieSpamujeTymSamymStanem(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		p.Obserwuj(context.Background(), zdarzenie("down"))
+		p.Poczekaj()
 	}
 	if l.ile() != 1 {
 		t.Fatalf("wysłano %d wiadomości przy stałej awarii, chcę 1", l.ile())
@@ -90,8 +93,11 @@ func TestPowrótZgłaszanyOdRazu(t *testing.T) {
 	p := Nowy(l.srv.URL, 2)
 
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	p.Obserwuj(context.Background(), zdarzenie("up"))
+	p.Poczekaj()
 
 	if l.ile() != 2 {
 		t.Fatalf("wiadomości = %d, chcę 2 (awaria + powrót)", l.ile())
@@ -109,6 +115,7 @@ func TestSameSukcesyMilczą(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		p.Obserwuj(context.Background(), zdarzenie("up"))
+		p.Poczekaj()
 	}
 	if l.ile() != 0 {
 		t.Fatalf("wysłano %d wiadomości dla działającej usługi, chcę 0", l.ile())
@@ -121,6 +128,7 @@ func TestBezWebhookaNicSięNieDzieje(t *testing.T) {
 		t.Fatal("pusty webhook ma być wyłączony")
 	}
 	p.Obserwuj(context.Background(), zdarzenie("down")) // nie może panikować
+	p.Poczekaj()
 }
 
 func TestDegradedIDownToOsobneStany(t *testing.T) {
@@ -129,7 +137,9 @@ func TestDegradedIDownToOsobneStany(t *testing.T) {
 	p := Nowy(l.srv.URL, 1)
 
 	p.Obserwuj(context.Background(), zdarzenie("degraded"))
+	p.Poczekaj()
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	if l.ile() != 2 {
 		t.Fatalf("wiadomości = %d, chcę 2 — przejście degraded→down to nowa informacja", l.ile())
 	}
@@ -221,6 +231,7 @@ func TestNieudanaWysyłkaJestPonawiana(t *testing.T) {
 	p := Nowy(srv.URL, 1)
 
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -230,6 +241,7 @@ func TestNieudanaWysyłkaJestPonawiana(t *testing.T) {
 	// dostarczone → kolejny „down" nie może spamować
 	mu.Unlock()
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	mu.Lock()
 	if *licznik != 2 {
 		t.Fatalf("po udanej wysyłce kolejny down wysłał ponownie (%d żądań)", *licznik)
@@ -245,6 +257,7 @@ func TestPorażkaWysyłkiZostawiaStanDoPonowieniaPrzyNastępnymSprawdzeniu(t *te
 	p := Nowy(srv.URL, 1)
 
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	mu.Lock()
 	pierwsza := *licznik
 	mu.Unlock()
@@ -253,6 +266,7 @@ func TestPorażkaWysyłkiZostawiaStanDoPonowieniaPrzyNastępnymSprawdzeniu(t *te
 	}
 
 	p.Obserwuj(context.Background(), zdarzenie("down")) // następne sprawdzenie
+	p.Poczekaj()
 	mu.Lock()
 	defer mu.Unlock()
 	if *licznik != pierwsza+1 {
@@ -261,6 +275,7 @@ func TestPorażkaWysyłkiZostawiaStanDoPonowieniaPrzyNastępnymSprawdzeniu(t *te
 	// a teraz dostarczone — cisza
 	mu.Unlock()
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	mu.Lock()
 	if *licznik != pierwsza+1 {
 		t.Fatalf("po dostarczeniu alert poszedł znowu (%d)", *licznik)
@@ -273,9 +288,11 @@ func TestNieudanyPowrótJestPonawiany(t *testing.T) {
 	l := nowyŁapacz()
 	p := Nowy(l.srv.URL, 1)
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	l.srv.Close() // webhook znika
 
 	p.Obserwuj(context.Background(), zdarzenie("up"))
+	p.Poczekaj()
 	p.mu.Lock()
 	z := p.stan["Media/Jellyfin"].zgłoszony
 	p.mu.Unlock()
@@ -288,6 +305,7 @@ func TestNieudanyPowrótJestPonawiany(t *testing.T) {
 func TestUnknownNieBlokujeMutexu(t *testing.T) {
 	p := Nowy("https://example.test/h", 1)
 	p.Obserwuj(context.Background(), zdarzenie("unknown"))
+	p.Poczekaj()
 	done := make(chan struct{})
 	go func() {
 		p.Zapomnij(map[string]bool{})
@@ -306,6 +324,7 @@ func TestPrzenieśZachowujeStanZgłoszenia(t *testing.T) {
 	defer l.srv.Close()
 	p := Nowy(l.srv.URL, 1)
 	p.Obserwuj(context.Background(), zdarzenie("down"))
+	p.Poczekaj()
 	if l.ile() != 1 {
 		t.Fatalf("setup: wysłano %d", l.ile())
 	}
@@ -316,11 +335,13 @@ func TestPrzenieśZachowujeStanZgłoszenia(t *testing.T) {
 	z := zdarzenie("down")
 	z.Klucz = "Sieć/Jellyfin"
 	p.Obserwuj(context.Background(), z)
+	p.Poczekaj()
 	if l.ile() != 1 {
 		t.Fatalf("po przeniesieniu alert poszedł drugi raz (%d)", l.ile())
 	}
 	z.Stan = "up"
 	p.Obserwuj(context.Background(), z)
+	p.Poczekaj()
 	if l.ile() != 2 {
 		t.Fatalf("powrót po przeniesieniu nie został zgłoszony (%d)", l.ile())
 	}

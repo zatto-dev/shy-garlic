@@ -163,7 +163,7 @@ var teksty = map[string]map[Lang]string{
 	"pelny_ekran":              {EN: "Full screen (Esc to leave)", PL: "Pełny ekran (Esc wychodzi)"},
 	"wyglad_instancji_opis":    {EN: "The default for everyone. Your own picker in the top bar only changes this browser.", PL: "Domyślne dla wszystkich. Picker w pasku zmienia wyłącznie tę przeglądarkę."},
 	"przyciemnienie":           {EN: "Dimming", PL: "Przyciemnienie"},
-	"powiadomienia_opis":       {EN: "One sentence on Discord when a service goes down and when it comes back. Nothing else.", PL: "Jedno zdanie na Discordzie, gdy usługa padnie i gdy wróci. Nic poza tym."},
+	"powiadomienia_opis":       {EN: "One short message when a service goes down and when it comes back. Nothing else.", PL: "Jedna krótka wiadomość, gdy usługa padnie i gdy wróci. Nic poza tym."},
 	"webhook_adres":            {EN: "Webhook address", PL: "Adres webhooka"},
 	"webhook_prog":             {EN: "Failures before notifying", PL: "Awarii przed powiadomieniem"},
 	"webhook_zapisany":         {EN: "Saved.", PL: "Zapisane."},
@@ -281,6 +281,19 @@ var teksty = map[string]map[Lang]string{
 	// błędy API pokazywane userowi
 	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
 	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
+	// formaty webhooka (SHYG-50)
+	"format_webhooka":              {EN: "Message format", PL: "Format wiadomości"},
+	"format_generic":               {EN: "Generic JSON", PL: "Ogólny JSON"},
+	"webhook_zly_format":           {EN: "Unknown message format.", PL: "Nieznany format wiadomości."},
+	"webhook_format_ze_srodowiska": {EN: "The message format is set by SHYG_WEBHOOK_FORMAT (or --webhook-format), so it cannot be changed here.", PL: "Format wiadomości jest ustawiony przez SHYG_WEBHOOK_FORMAT (albo --webhook-format), więc nie da się go zmienić tutaj."},
+	"webhook_adres_telegram":       {EN: "For Telegram the address has to look like https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>.", PL: "Dla Telegrama adres musi wyglądać tak: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>."},
+	"webhook_adres_gotify":         {EN: "For Gotify the address has to look like https://<host>/message?token=<APP_TOKEN>.", PL: "Dla Gotify adres musi wyglądać tak: https://<host>/message?token=<APP_TOKEN>."},
+	"format_podpowiedz_discord":    {EN: "Discord webhook: https://discord.com/api/webhooks/<id>/<token>", PL: "Webhook Discorda: https://discord.com/api/webhooks/<id>/<token>"},
+	"format_podpowiedz_slack":      {EN: "Slack incoming webhook (Mattermost and Rocket.Chat accept the same): https://hooks.slack.com/services/…", PL: "Przychodzący webhook Slacka (Mattermost i Rocket.Chat przyjmują ten sam): https://hooks.slack.com/services/…"},
+	"format_podpowiedz_ntfy":       {EN: "ntfy topic: https://ntfy.sh/<topic>, or your own server. Credentials can go in the address: https://user:password@ntfy.example/<topic>", PL: "Temat ntfy: https://ntfy.sh/<temat> albo Twój serwer. Dane logowania mogą być w adresie: https://user:hasło@ntfy.example/<temat>"},
+	"format_podpowiedz_gotify":     {EN: "Gotify, with the application token in the address: https://<host>/message?token=<APP_TOKEN>", PL: "Gotify, z tokenem aplikacji w adresie: https://<host>/message?token=<APP_TOKEN>"},
+	"format_podpowiedz_telegram":   {EN: "Telegram bot: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>", PL: "Bot Telegrama: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>"},
+	"format_podpowiedz_generic":    {EN: "Any https address. It gets a JSON POST: {event, service, group, state, previous, reason, at, url}.", PL: "Dowolny adres https. Dostaje POST z JSON-em: {event, service, group, state, previous, reason, at, url}."},
 	// tokeny API (SHYG-49)
 	"tokeny_tytul":        {EN: "API tokens", PL: "Tokeny API"},
 	"tokeny_opis":         {EN: "Read-only access for Prometheus, Home Assistant or a script: send Authorization: Bearer <token> to /metrics, /api/status or /api/history. A token cannot change anything and cannot sign in to the panel.", PL: "Dostęp tylko do odczytu dla Prometheusa, Home Assistanta albo skryptu: wyślij Authorization: Bearer <token> na /metrics, /api/status lub /api/history. Token niczego nie zmieni i nie zaloguje do panelu."},

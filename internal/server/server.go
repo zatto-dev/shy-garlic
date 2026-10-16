@@ -46,6 +46,9 @@ type Server struct {
 	// webhookZeŚrodowiska i instancja są ustawiane raz, w New, i nigdy potem —
 	// dlatego bez mutexu.
 	webhookZeŚrodowiska bool
+	// formatZeŚrodowiska — format wiadomości z flagi albo zmiennej; ma tę samą
+	// pierwszeństwo co adres, ale jest niezależny od niego.
+	formatZeŚrodowiska bool
 	// prógZFlagi — --fail-threshold podany jawnie. Wtedy plik go nie rusza,
 	// tak samo jak przy webhooku: to, co przyszło z zewnątrz przy starcie,
 	// jest własnością deployu.
@@ -125,6 +128,9 @@ type Opcje struct {
 	// panel go nie nadpisze. Deploy ma wygrywać z klikaniem: inaczej restart
 	// kontenera po cichu cofałby zmianę zrobioną w UI.
 	WebhookZeŚrodowiska bool
+	// WebhookFormat — format wiadomości podany flagą/zmienną; pusty = z bazy.
+	WebhookFormat              string
+	WebhookFormatZeŚrodowiska bool
 	// PrógZFlagi — --fail-threshold podany jawnie w linii poleceń.
 	PrógZFlagi bool
 	// Instancja — opcje startu do pokazania w panelu, wyłącznie do odczytu.
@@ -158,6 +164,7 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 		docker: dockerdisc.Nowy(o.DockerSock),
 
 		webhookZeŚrodowiska: o.WebhookZeŚrodowiska,
+		formatZeŚrodowiska:  o.WebhookFormatZeŚrodowiska && o.WebhookFormat != "",
 		prógZFlagi:          o.PrógZFlagi,
 		instancja:           o.Instancja,
 
@@ -185,6 +192,17 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 		if adres != "" {
 			s.powiad.UstawWebhook(adres)
 		}
+	}
+
+	// Format: to samo pierwszeństwo — środowisko, potem baza, potem discord.
+	// Nieznany format z bazy (np. z nowszej wersji) nie może wyłączyć alertów,
+	// więc UstawFormat zamienia go na domyślny.
+	if s.formatZeŚrodowiska {
+		s.powiad.UstawFormat(notify.Format(o.WebhookFormat))
+	} else if f, err := st.Ustawienie(context.Background(), "notify.format"); err != nil {
+		return nil, fmt.Errorf("czytam format webhooka z bazy: %w", err)
+	} else if f != "" {
+		s.powiad.UstawFormat(notify.Format(f))
 	}
 	return s, nil
 }

@@ -527,6 +527,18 @@
     <section id="panel-powiadomienia" role="tabpanel" hidden>
       <p class="drobne">{{.T.powiadomienia_opis}}</p>
       <label class="pole-formy">
+        <span>{{.T.format_webhooka}}</span>
+        <select id="webhook-format">
+          <option value="discord">Discord</option>
+          <option value="slack">Slack / Mattermost</option>
+          <option value="ntfy">ntfy</option>
+          <option value="gotify">Gotify</option>
+          <option value="telegram">Telegram</option>
+          <option value="generic">{{.T.format_generic}}</option>
+        </select>
+      </label>
+      <p class="drobne" id="webhook-format-podpowiedz"></p>
+      <label class="pole-formy">
         <span>{{.T.webhook_adres}}</span>
         <input id="webhook-adres" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">
       </label>

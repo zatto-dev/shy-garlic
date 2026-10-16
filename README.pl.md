@@ -192,8 +192,9 @@ labels:
 
 ## Kiedy coś padnie
 
-Ustaw webhooka Discorda (albo cokolwiek innego, co przyjmuje JSON) i dostajesz
-jedno zdanie, gdy usługa padnie, i jedno, gdy wróci. Nic poza tym.
+Ustaw webhooka — Discord, Slack, ntfy, Gotify, Telegram albo dowolny adres
+przyjmujący JSON — i dostajesz jedną krótką wiadomość, gdy usługa padnie, i
+jedną, gdy wróci. Nic poza tym.
 
 To świadomie **nie jest** alerting: bez eskalacji, harmonogramów, reguł i okien
 ciszy. Kto chce prawdziwego alertingu, niech postawi Uptime Kumę — nie zamierzamy
@@ -209,6 +210,45 @@ Dwa szczegóły, które mają znaczenie w praktyce:
   Ustawisz go w Ustawienia → Powiadomienia albo zmienną `SHYG_WEBHOOK`, jeśli
   deploy zarządza swoimi sekretami sam — wartość ze środowiska wygrywa, żeby
   restart kontenera nie cofał po cichu zmiany zrobionej w panelu.
+- **Wiadomości idą w tle**, po jednej kolejce na usługę, więc wolny albo martwy
+  webhook nigdy nie wstrzymuje historii sprawdzeń. Wiadomość, której nie udało się
+  dostarczyć (trzy próby), nie jest uznana za zgłoszoną i wychodzi ponownie przy
+  następnym sprawdzeniu.
+
+### Formaty wiadomości
+
+Format wybierasz w Ustawienia → Powiadomienia albo zmienną `SHYG_WEBHOOK_FORMAT` /
+flagą `--webhook-format` (środowisko wygrywa z panelem, dokładnie jak adres).
+Format leży w bazie obok adresu.
+
+| Format     | Adres, który wpisujesz                                           | Co wychodzi                                                                  |
+| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | embed z kolorowym paskiem (domyślny)                                         |
+| `slack`    | `https://hooks.slack.com/services/…` (także Mattermost, Rocket.Chat) | `{"text": "…"}`                                                          |
+| `ntfy`     | `https://ntfy.sh/<temat>` albo Twój serwer                       | ciało tekstowe, nagłówki `Title`, `Priority` (`high` dla awarii), `Tags`, `Click` |
+| `gotify`   | `https://<host>/message?token=<TOKEN_APLIKACJI>`                 | `{"title", "message", "priority"}` (awaria = 8)                              |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>` | `{"text": "…"}`, bez parsowania Markdowna; id czatu jedzie w adresie       |
+| `generic`  | dowolny adres https                                              | JSON poniżej                                                                 |
+
+`generic` to stabilny kontrakt — pola nigdy nie zmieniają nazw:
+
+```json
+{"event": "down", "service": "Jellyfin", "group": "Media", "state": "down",
+ "previous": "up", "reason": "connection refused",
+ "at": "2026-10-16T12:30:00Z", "url": "http://192.168.1.30:8096"}
+```
+
+`event` to `down`, `degraded`, `recovered` albo `test`; `state` to nowy stan, a
+`previous` — ostatni zgłoszony (`up`, `degraded` lub `down`); `reason` jest pusty
+dla `recovered`. Dane logowania do ntfy mogą siedzieć w adresie
+(`https://user:hasło@ntfy.example/temat`).
+
+Przycisk **Wyślij wiadomość próbną** działa w każdym formacie. Adresy są
+maskowane w API i w panelu (tylko schemat i host), a nieudany test nigdy nie
+odsyła adresu w komunikacie — siedzą w nim tokeny botów. Panel przyjmuje wyłącznie
+adresy `https://`; jeśli Twój ntfy albo Gotify stoi na zwykłym `http` w LAN-ie,
+podaj adres przez deploy: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerty`
+`SHYG_WEBHOOK_FORMAT=ntfy` — tam wybór należy do tego, kto uruchamia.
 
 ## Instalacja
 
@@ -496,9 +536,9 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 
 | Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
 | Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
-| Baza SQLite                  | adres webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
+| Baza SQLite                  | adres i format webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
 | Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
 
 Każda flaga ma odpowiednik w zmiennej środowiskowej z przedrostkiem `SHYG_`
@@ -646,7 +686,7 @@ Panel używa dokładnie tych samych endpointów co Ty.
 | `GET`    | `/api/appearance`                | domyślny wygląd instancji                               |
 | `PUT`    | `/api/appearance`                | zmiana wyglądu (przez diff, jak każda edycja)           |
 | `GET`    | `/api/notify`                    | ustawienia powiadomień, bez adresu                      |
-| `PUT`    | `/api/notify`                    | ustaw adres webhooka                                    |
+| `PUT`    | `/api/notify`                    | ustaw adres webhooka, format wiadomości i próg           |
 | `POST`   | `/api/notify/test`               | wyślij wiadomość testową                                |
 | `POST`   | `/api/background`                | wgraj tapetę (multipart `file`)                         |
 | `GET`    | `/api/background`                | lista wgranych tapet                                    |
