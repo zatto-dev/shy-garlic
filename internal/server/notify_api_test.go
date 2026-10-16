@@ -22,10 +22,10 @@ func (s *Server) plikConfigu(t *testing.T) []byte {
 
 func TestNotifyGetŹródłoBaza(t *testing.T) {
 	s := serwerTestowy(t)
-	if err := s.st.UstawUstawienie(s.ctx, "notify.webhook", "https://example.test/hooks/abc123"); err != nil {
+	if err := s.st.SetSetting(s.ctx, "notify.webhook", "https://example.test/hooks/abc123"); err != nil {
 		t.Fatalf("zapis: %v", err)
 	}
-	s.powiad.UstawWebhook("https://example.test/hooks/abc123")
+	s.powiad.SetWebhook("https://example.test/hooks/abc123")
 
 	rr := httptest.NewRecorder()
 	s.handleNotifyGet(rr, httptest.NewRequest("GET", "/api/notify", nil))
@@ -78,7 +78,7 @@ func TestNotifyPutOdrzucaGdyŹródłoŚrodowisko(t *testing.T) {
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("chcę 409, mam %d", rr.Code)
 	}
-	v, _ := s.st.Ustawienie(s.ctx, "notify.webhook")
+	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "" {
 		t.Fatalf("odrzucone żądanie nie ma nic zapisywać, w bazie leży %q", v)
 	}
@@ -93,11 +93,11 @@ func TestNotifyPutZapisujeDoBazyIWłącza(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
 	}
-	v, _ := s.st.Ustawienie(s.ctx, "notify.webhook")
+	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "https://example.test/hooks/xyz" {
 		t.Fatalf("adres ma wylądować w bazie, mam %q", v)
 	}
-	if !s.powiad.Włączony() {
+	if !s.powiad.Enabled() {
 		t.Fatal("po zapisie powiadomienia mają być włączone bez restartu")
 	}
 }
@@ -117,8 +117,8 @@ func TestNotifyPutOdrzucaHTTP(t *testing.T) {
 
 func TestNotifyPutCzyściWebhook(t *testing.T) {
 	s := serwerTestowy(t)
-	_ = s.st.UstawUstawienie(s.ctx, "notify.webhook", "https://example.test/hook")
-	s.powiad.UstawWebhook("https://example.test/hook")
+	_ = s.st.SetSetting(s.ctx, "notify.webhook", "https://example.test/hook")
+	s.powiad.SetWebhook("https://example.test/hook")
 
 	rr := httptest.NewRecorder()
 	s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify",
@@ -126,10 +126,10 @@ func TestNotifyPutCzyściWebhook(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
 	}
-	if s.powiad.Włączony() {
+	if s.powiad.Enabled() {
 		t.Fatal("po wyczyszczeniu powiadomienia mają być wyłączone")
 	}
-	v, _ := s.st.Ustawienie(s.ctx, "notify.webhook")
+	v, _ := s.st.Setting(s.ctx, "notify.webhook")
 	if v != "" {
 		t.Fatalf("wiersz ma zniknąć z bazy, leży %q", v)
 	}
@@ -143,8 +143,8 @@ func TestNotifyPutZapisujePróg(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("chcę 200, mam %d — ciało: %s", rr.Code, rr.Body.String())
 	}
-	if s.powiad.Próg() != 4 {
-		t.Fatalf("próg ma zadziałać bez restartu, mam %d", s.powiad.Próg())
+	if s.powiad.Threshold() != 4 {
+		t.Fatalf("próg ma zadziałać bez restartu, mam %d", s.powiad.Threshold())
 	}
 	if !strings.Contains(string(s.plikConfigu(t)), "threshold: 4") {
 		t.Fatalf("próg ma wylądować w YAML-u:\n%s", s.plikConfigu(t))
@@ -279,7 +279,7 @@ func TestPrógZPlikuDziałaPoStarcie(t *testing.T) {
 	if err := s.reload(s.ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := s.powiad.Próg(); got != 5 {
+	if got := s.powiad.Threshold(); got != 5 {
 		t.Fatalf("próg z pliku ma obowiązywać po starcie, mam %d", got)
 	}
 }
@@ -289,14 +289,14 @@ func TestPrógZPlikuDziałaPoStarcie(t *testing.T) {
 func TestFlagaProguBijePlik(t *testing.T) {
 	s := serwerTestowy(t)
 	s.prógZFlagi = true
-	s.powiad.UstawPróg(7)
+	s.powiad.SetThreshold(7)
 	if !s.zapiszDoConfigu(t, "notify:\n  threshold: 5\n") {
 		return
 	}
 	if err := s.reload(s.ctx); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := s.powiad.Próg(); got != 7 {
+	if got := s.powiad.Threshold(); got != 7 {
 		t.Fatalf("flaga ma wygrać z plikiem, mam %d", got)
 	}
 }

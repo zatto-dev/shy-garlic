@@ -1,7 +1,7 @@
-// Package i18n trzyma teksty interfejsu po polsku i angielsku.
+// Package i18n holds the interface texts in Polish and English.
 //
-// Bez zewnętrznej biblioteki i bez plików do wczytywania — dwa języki mieszczą
-// się w jednej mapie, a dzięki temu binarka nadal nie potrzebuje niczego obok.
+// No external library and no files to load — two languages fit
+// in a single map, and thanks to that the binary still needs nothing next to it.
 package i18n
 
 import (
@@ -16,23 +16,23 @@ const (
 	PL Lang = "pl"
 	EN Lang = "en"
 
-	Ciasteczko = "shyg_lang"
+	CookieName = "shyg_lang"
 )
 
-var Języki = []Lang{EN, PL}
+var Languages = []Lang{EN, PL}
 
-// Nazwa zwraca nazwę języka w nim samym — do przełącznika.
-func (l Lang) Nazwa() string {
+// Name returns the language's name in itself — for the switcher.
+func (l Lang) Name() string {
 	if l == PL {
 		return "Polski"
 	}
 	return "English"
 }
 
-func (l Lang) Krótko() string { return strings.ToUpper(string(l)) }
+func (l Lang) Short() string { return strings.ToUpper(string(l)) }
 
-var teksty = map[string]map[Lang]string{
-	// nagłówek i panel
+var texts = map[string]map[Lang]string{
+	// header and panel
 	"szukaj":            {EN: "Search services…", PL: "Szukaj usługi…"},
 	"filtruj_aria":      {EN: "Filter services", PL: "Filtruj usługi"},
 	"usluga":            {EN: "Service", PL: "Usługa"},
@@ -65,7 +65,7 @@ var teksty = map[string]map[Lang]string{
 	"menu_dodaj_aria":   {EN: "Add…", PL: "Dodaj…"},
 	"skroty_podpowiedz": {EN: "/ search · E edit · B background · 1 2 3 views", PL: "/ szukaj · E edycja · B tło · 1 2 3 widoki"},
 
-	// stany usług
+	// service states
 	"opis_up":           {EN: "up", PL: "działa"},
 	"opis_degraded":     {EN: "responding, but not as expected", PL: "odpowiada, ale nie tak jak powinien"},
 	"opis_down":         {EN: "not responding", PL: "nie odpowiada"},
@@ -85,7 +85,7 @@ var teksty = map[string]map[Lang]string{
 	"powod_http":        {EN: "HTTP %d", PL: "HTTP %d"},
 	"brak_powodu":       {EN: "no reason recorded", PL: "brak zapisanego powodu"},
 
-	// okno usługi
+	// service window
 	"nowa_usluga":   {EN: "New service", PL: "Nowa usługa"},
 	"edytuj_usluge": {EN: "Edit service", PL: "Edytuj usługę"},
 	"nazwa":         {EN: "Name", PL: "Nazwa"},
@@ -102,7 +102,7 @@ var teksty = map[string]map[Lang]string{
 	"zapisz":        {EN: "Save", PL: "Zapisz"},
 	"zamknij":       {EN: "Close", PL: "Zamknij"},
 
-	// ustawienia
+	// settings
 	"konta":        {EN: "Accounts", PL: "Konta"},
 	"login":        {EN: "login", PL: "login"},
 	"haslo_min":    {EN: "password (min. 8)", PL: "hasło (min. 8)"},
@@ -121,7 +121,7 @@ var teksty = map[string]map[Lang]string{
 	"usun_male":        {EN: "delete", PL: "usuń"},
 	"haslo_zmienione":  {EN: "Password changed. Other sessions were signed out. API tokens stay valid — revoke them under API tokens if you no longer trust one.", PL: "Hasło zmienione. Pozostałe sesje wylogowano. Tokeny API dalej działają — odwołaj je w sekcji Tokeny API, jeśli któremuś już nie ufasz."},
 
-	// wygląd i tło
+	// appearance and background
 	"wyglad":           {EN: "Appearance", PL: "Wygląd"},
 	"tlo":              {EN: "Background", PL: "Tło"},
 	"tlo_aria":         {EN: "Background settings (B)", PL: "Ustawienia tła (B)"},
@@ -140,58 +140,58 @@ var teksty = map[string]map[Lang]string{
 	"tapeta_tip": {
 		EN: "Tip: drop any image anywhere on the page to use it as the wallpaper.",
 		PL: "Podpowiedź: upuść dowolny obraz w dowolnym miejscu strony, żeby użyć go jako tapety."},
-	"tapeta_wgrana":            {EN: "Wallpaper uploaded.", PL: "Tapeta wgrana."},
-	"tapeta_za_duza":           {EN: "The image is larger than %d MB.", PL: "Obraz jest większy niż %d MB."},
-	"tapeta_zly_typ":           {EN: "Only JPEG, PNG, WebP, AVIF and GIF are accepted.", PL: "Przyjmujemy tylko JPEG, PNG, WebP, AVIF i GIF."},
-	"tapeta_limit":             {EN: "No room for another wallpaper — remove one first.", PL: "Brak miejsca na kolejną tapetę — usuń najpierw jakąś."},
-	"tapeta_uzywana":           {EN: "in use", PL: "w użyciu"},
-	"tapeta_uzywana_blad":      {EN: "This wallpaper is in use — change the background first.", PL: "Ta tapeta jest w użyciu — zmień najpierw tło."},
-	"tapeta_wylaczona":         {EN: "Uploads are off — the data directory is not writable.", PL: "Wgrywanie wyłączone — katalog danych nie jest zapisywalny."},
-	"blad_zapisu_tla":          {EN: "Could not upload the image.", PL: "Nie udało się wgrać obrazu."},
-	"rozmycie":                 {EN: "Blur", PL: "Rozmycie"},
+	"tapeta_wgrana":             {EN: "Wallpaper uploaded.", PL: "Tapeta wgrana."},
+	"tapeta_za_duza":            {EN: "The image is larger than %d MB.", PL: "Obraz jest większy niż %d MB."},
+	"tapeta_zly_typ":            {EN: "Only JPEG, PNG, WebP, AVIF and GIF are accepted.", PL: "Przyjmujemy tylko JPEG, PNG, WebP, AVIF i GIF."},
+	"tapeta_limit":              {EN: "No room for another wallpaper — remove one first.", PL: "Brak miejsca na kolejną tapetę — usuń najpierw jakąś."},
+	"tapeta_uzywana":            {EN: "in use", PL: "w użyciu"},
+	"tapeta_uzywana_blad":       {EN: "This wallpaper is in use — change the background first.", PL: "Ta tapeta jest w użyciu — zmień najpierw tło."},
+	"tapeta_wylaczona":          {EN: "Uploads are off — the data directory is not writable.", PL: "Wgrywanie wyłączone — katalog danych nie jest zapisywalny."},
+	"blad_zapisu_tla":           {EN: "Could not upload the image.", PL: "Nie udało się wgrać obrazu."},
+	"rozmycie":                  {EN: "Blur", PL: "Rozmycie"},
 	"webhook_ze_srodowiska":     {EN: "The webhook is set by an environment variable, so the panel will not change it.", PL: "Webhook jest ustawiony zmienną środowiskową, więc panel go nie zmieni."},
 	"webhook_zly_adres":         {EN: "The webhook address has to be an https:// URL.", PL: "Adres webhooka musi być adresem https://."},
 	"webhook_zly_prog":          {EN: "The failure threshold has to be between 1 and 10.", PL: "Próg awarii musi mieścić się między 1 a 10."},
 	"webhook_zrodlo_brak":       {EN: "No webhook set — notifications are off.", PL: "Webhook nieustawiony — powiadomienia wyłączone."},
 	"docker_wylaczony":          {EN: "Suggesting services from containers is turned off in the config file.", PL: "Podpowiadanie usług z kontenerów jest wyłączone w pliku konfiguracyjnym."},
-	"zakladka_wyglad":          {EN: "Appearance", PL: "Wygląd"},
-	"zakladka_powiadomienia":   {EN: "Notifications", PL: "Powiadomienia"},
-	"zakladka_konta":           {EN: "Accounts", PL: "Konta"},
-	"zakladka_historia":        {EN: "History", PL: "Historia"},
-	"zakladka_plik":            {EN: "File", PL: "Plik"},
-	"zakladka_instancja":       {EN: "Instance", PL: "Instancja"},
-	"pelny_ekran":              {EN: "Full screen (Esc to leave)", PL: "Pełny ekran (Esc wychodzi)"},
-	"wyglad_instancji_opis":    {EN: "The default for everyone. Your own picker in the top bar only changes this browser.", PL: "Domyślne dla wszystkich. Picker w pasku zmienia wyłącznie tę przeglądarkę."},
-	"przyciemnienie":           {EN: "Dimming", PL: "Przyciemnienie"},
-	"powiadomienia_opis":       {EN: "One short message when a service goes down and when it comes back. Nothing else.", PL: "Jedna krótka wiadomość, gdy usługa padnie i gdy wróci. Nic poza tym."},
-	"webhook_adres":            {EN: "Webhook address", PL: "Adres webhooka"},
-	"webhook_prog":             {EN: "Failures before notifying", PL: "Awarii przed powiadomieniem"},
-	"webhook_zapisany":         {EN: "Saved.", PL: "Zapisane."},
-	"instancja_opis":           {EN: "Set at startup with a flag or an environment variable. Shown here so you know where each value came from.", PL: "Ustawiane przy starcie flagą albo zmienną środowiskową. Pokazane tutaj, żeby było wiadomo, skąd wzięła się każda wartość."},
-	"instancja_opcja":          {EN: "Option", PL: "Opcja"},
-	"instancja_wartosc":        {EN: "Value", PL: "Wartość"},
-	"instancja_zrodlo":         {EN: "Source", PL: "Źródło"},
-	"zrodlo_flaga":             {EN: "flag", PL: "flaga"},
-	"zrodlo_srodowisko":        {EN: "environment", PL: "środowisko"},
-	"zrodlo_domyslna":          {EN: "default", PL: "domyślna"},
+	"zakladka_wyglad":           {EN: "Appearance", PL: "Wygląd"},
+	"zakladka_powiadomienia":    {EN: "Notifications", PL: "Powiadomienia"},
+	"zakladka_konta":            {EN: "Accounts", PL: "Konta"},
+	"zakladka_historia":         {EN: "History", PL: "Historia"},
+	"zakladka_plik":             {EN: "File", PL: "Plik"},
+	"zakladka_instancja":        {EN: "Instance", PL: "Instancja"},
+	"pelny_ekran":               {EN: "Full screen (Esc to leave)", PL: "Pełny ekran (Esc wychodzi)"},
+	"wyglad_instancji_opis":     {EN: "The default for everyone. Your own picker in the top bar only changes this browser.", PL: "Domyślne dla wszystkich. Picker w pasku zmienia wyłącznie tę przeglądarkę."},
+	"przyciemnienie":            {EN: "Dimming", PL: "Przyciemnienie"},
+	"powiadomienia_opis":        {EN: "One short message when a service goes down and when it comes back. Nothing else.", PL: "Jedna krótka wiadomość, gdy usługa padnie i gdy wróci. Nic poza tym."},
+	"webhook_adres":             {EN: "Webhook address", PL: "Adres webhooka"},
+	"webhook_prog":              {EN: "Failures before notifying", PL: "Awarii przed powiadomieniem"},
+	"webhook_zapisany":          {EN: "Saved.", PL: "Zapisane."},
+	"instancja_opis":            {EN: "Set at startup with a flag or an environment variable. Shown here so you know where each value came from.", PL: "Ustawiane przy starcie flagą albo zmienną środowiskową. Pokazane tutaj, żeby było wiadomo, skąd wzięła się każda wartość."},
+	"instancja_opcja":           {EN: "Option", PL: "Opcja"},
+	"instancja_wartosc":         {EN: "Value", PL: "Wartość"},
+	"instancja_zrodlo":          {EN: "Source", PL: "Źródło"},
+	"zrodlo_flaga":              {EN: "flag", PL: "flaga"},
+	"zrodlo_srodowisko":         {EN: "environment", PL: "środowisko"},
+	"zrodlo_domyslna":           {EN: "default", PL: "domyślna"},
 	"wyglad_przywroc_instancji": {EN: "Back to the instance default", PL: "Przywróć domyślne instancji"},
-	"wyglad_dla_wszystkich":    {EN: "Set for everyone →", PL: "Ustaw dla wszystkich →"},
-	"ton":                      {EN: "Text", PL: "Tekst"},
-	"ton_jasny":                {EN: "Light text", PL: "Jasny tekst"},
-	"ton_ciemny":               {EN: "Dark text", PL: "Ciemny tekst"},
-	"wyglad_zapisz_domyslny":   {EN: "Save as the instance default", PL: "Zapisz jako domyślny instancji"},
-	"wyglad_zapisany":          {EN: "Appearance saved to the file.", PL: "Wygląd zapisany do pliku."},
-	"blad_wygladu":             {EN: "Invalid appearance value.", PL: "Nieprawidłowa wartość wyglądu."},
-	"widok":                    {EN: "View", PL: "Widok"},
-	"widok_grid":               {EN: "Grid · 1", PL: "Siatka · 1"},
-	"widok_bento":              {EN: "Bento · 2", PL: "Bento · 2"},
-	"widok_lista":              {EN: "List · 3", PL: "Lista · 3"},
-	"rozmiar":                  {EN: "Card size", PL: "Rozmiar kafla"},
-	"rozmiar_sm":               {EN: "Small", PL: "Mały"},
-	"rozmiar_md":               {EN: "Medium", PL: "Średni"},
-	"rozmiar_lg":               {EN: "Large", PL: "Duży"},
+	"wyglad_dla_wszystkich":     {EN: "Set for everyone →", PL: "Ustaw dla wszystkich →"},
+	"ton":                       {EN: "Text", PL: "Tekst"},
+	"ton_jasny":                 {EN: "Light text", PL: "Jasny tekst"},
+	"ton_ciemny":                {EN: "Dark text", PL: "Ciemny tekst"},
+	"wyglad_zapisz_domyslny":    {EN: "Save as the instance default", PL: "Zapisz jako domyślny instancji"},
+	"wyglad_zapisany":           {EN: "Appearance saved to the file.", PL: "Wygląd zapisany do pliku."},
+	"blad_wygladu":              {EN: "Invalid appearance value.", PL: "Nieprawidłowa wartość wyglądu."},
+	"widok":                     {EN: "View", PL: "Widok"},
+	"widok_grid":                {EN: "Grid · 1", PL: "Siatka · 1"},
+	"widok_bento":               {EN: "Bento · 2", PL: "Bento · 2"},
+	"widok_lista":               {EN: "List · 3", PL: "Lista · 3"},
+	"rozmiar":                   {EN: "Card size", PL: "Rozmiar kafla"},
+	"rozmiar_sm":                {EN: "Small", PL: "Mały"},
+	"rozmiar_md":                {EN: "Medium", PL: "Średni"},
+	"rozmiar_lg":                {EN: "Large", PL: "Duży"},
 
-	// opisy zmian — trafiają do historii i do wiadomości commita
+	// change descriptions — they go into the history and into the commit message
 	"opis_dodano_usluge":    {EN: `added service %q to group %q`, PL: `dodano usługę %q do grupy %q`},
 	"opis_zmieniono_usluge": {EN: `changed service %q`, PL: `zmieniono usługę %q`},
 	"opis_przeniesiono":     {EN: `moved service %q from %q to %q`, PL: `przeniesiono usługę %q z %q do %q`},
@@ -207,7 +207,7 @@ var teksty = map[string]map[Lang]string{
 	"opis_reczna_edycja":    {EN: "manual file edit", PL: "ręczna edycja pliku"},
 	"opis_przywrocono":      {EN: `restored version #%d (%s)`, PL: `przywrócono wersję #%d (%s)`},
 
-	// szczegóły usługi
+	// service details
 	"szczegoly":        {EN: "Details", PL: "Szczegóły"},
 	"sprawdz_teraz":    {EN: "Check now", PL: "Sprawdź teraz"},
 	"zmiany_stanu":     {EN: "State changes", PL: "Zmiany stanu"},
@@ -220,7 +220,7 @@ var teksty = map[string]map[Lang]string{
 	"brak_danych":      {EN: "no data yet", PL: "brak danych"},
 	"sprawdzam":        {EN: "checking…", PL: "sprawdzam…"},
 
-	// podpowiadanie z Dockera
+	// suggestions from Docker
 	"znajdz_uslugi":      {EN: "Find services", PL: "Znajdź usługi"},
 	"docker_niedostepny": {EN: "Docker socket not available", PL: "Gniazdo Dockera niedostępne"},
 	"menu_docker_nowe":   {EN: "%d new", PL: "%d nowych"},
@@ -234,14 +234,14 @@ var teksty = map[string]map[Lang]string{
 	"dodaj_zaznaczone":   {EN: "Add selected", PL: "Dodaj zaznaczone"},
 	"do_grupy":           {EN: "to group", PL: "do grupy"},
 
-	// powiadomienia
+	// notifications
 	"powiadomienia":    {EN: "Notifications", PL: "Powiadomienia"},
 	"powiad_wlaczone":  {EN: "Webhook configured — you get a message when a service goes down and when it comes back.", PL: "Webhook skonfigurowany — dostajesz wiadomość, gdy usługa padnie i gdy wróci."},
 	"powiad_wylaczone": {EN: "No webhook. Paste one above (a Discord webhook works) to get notified.", PL: "Brak webhooka. Wklej go wyżej (webhook Discorda działa), żeby dostawać powiadomienia."},
 	"wyslij_test":      {EN: "Send a test message", PL: "Wyślij wiadomość próbną"},
 	"test_wyslany":     {EN: "Test message sent.", PL: "Wiadomość próbna wysłana."},
 
-	// podgląd zmian i historia
+	// change preview and history
 	"podglad_zmian":      {EN: "Review the change", PL: "Podgląd zmiany"},
 	"podglad_opis":       {EN: "This is exactly what will change in your file. Nothing else is touched.", PL: "Dokładnie to zmieni się w Twoim pliku. Nic poza tym nie zostanie ruszone."},
 	"zapisz_zmiane":      {EN: "Save to file", PL: "Zapisz do pliku"},
@@ -256,14 +256,14 @@ var teksty = map[string]map[Lang]string{
 	"git_aktywny":        {EN: "config is in a git repository — every save is committed", PL: "config leży w repozytorium git — każdy zapis jest commitowany"},
 	"potwierdz_przywroc": {EN: "Restore the file to version #%s?", PL: "Przywrócić plik do wersji #%s?"},
 
-	// potwierdzenia i mini-dialogi
+	// confirmations and mini-dialogs
 	"nazwa_grupy_tytul":    {EN: "Group name", PL: "Nazwa grupy"},
 	"pytanie_nazwa_grupy":  {EN: "New group name:", PL: "Nazwa nowej grupy:"},
 	"potwierdzenie_tytul":  {EN: "Are you sure?", PL: "Na pewno?"},
 	"potwierdz_tak":        {EN: "Yes, delete", PL: "Tak, usuń"},
 	"potwierdz_usun_konto": {EN: "Delete account %s?", PL: "Usunąć konto %s?"},
 
-	// logowanie
+	// login
 	"logowanie":        {EN: "Sign in", PL: "Logowanie"},
 	"pierwsze_urucho":  {EN: "First run", PL: "Pierwsze uruchomienie"},
 	"zaloguj":          {EN: "Sign in", PL: "Zaloguj"},
@@ -278,10 +278,10 @@ var teksty = map[string]map[Lang]string{
 	"haslo_za_krotkie": {EN: "Password must be at least 8 characters.", PL: "Hasło musi mieć co najmniej 8 znaków."},
 	"login_za_krotki":  {EN: "Login must be at least 2 characters.", PL: "Login musi mieć co najmniej 2 znaki."},
 
-	// błędy API pokazywane userowi
-	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
-	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
-	// formaty webhooka (SHYG-50)
+	// API errors shown to the user
+	"blad_tytul_pusty": {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
+	"blad_tytul_dlugi": {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
+	// webhook formats (SHYG-50)
 	"format_webhooka":              {EN: "Message format", PL: "Format wiadomości"},
 	"format_generic":               {EN: "Generic JSON", PL: "Ogólny JSON"},
 	"webhook_zly_format":           {EN: "Unknown message format.", PL: "Nieznany format wiadomości."},
@@ -294,7 +294,7 @@ var teksty = map[string]map[Lang]string{
 	"format_podpowiedz_gotify":     {EN: "Gotify, with the application token in the address: https://<host>/message?token=<APP_TOKEN>", PL: "Gotify, z tokenem aplikacji w adresie: https://<host>/message?token=<APP_TOKEN>"},
 	"format_podpowiedz_telegram":   {EN: "Telegram bot: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>", PL: "Bot Telegrama: https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>"},
 	"format_podpowiedz_generic":    {EN: "Any https address. It gets a JSON POST: {event, service, group, state, previous, reason, at, url}.", PL: "Dowolny adres https. Dostaje POST z JSON-em: {event, service, group, state, previous, reason, at, url}."},
-	// tokeny API (SHYG-49)
+	// API tokens (SHYG-49)
 	"tokeny_tytul":        {EN: "API tokens", PL: "Tokeny API"},
 	"tokeny_opis":         {EN: "Read-only access for Prometheus, Home Assistant or a script: send Authorization: Bearer <token> to /metrics, /api/status or /api/history. A token cannot change anything and cannot sign in to the panel.", PL: "Dostęp tylko do odczytu dla Prometheusa, Home Assistanta albo skryptu: wyślij Authorization: Bearer <token> na /metrics, /api/status lub /api/history. Token niczego nie zmieni i nie zaloguje do panelu."},
 	"tokeny_nazwa":        {EN: "Name, e.g. prometheus", PL: "Nazwa, np. prometheus"},
@@ -311,13 +311,13 @@ var teksty = map[string]map[Lang]string{
 	"skopiowano":          {EN: "Copied", PL: "Skopiowano"},
 	"blad_token_nazwa":    {EN: "Give the token a name (1–64 characters, no control characters).", PL: "Nazwij token (1–64 znaki, bez znaków sterujących)."},
 	"blad_token_limit":    {EN: "Too many tokens (50 at most). Revoke one you no longer use.", PL: "Za dużo tokenów (najwyżej 50). Odwołaj któryś, którego już nie używasz."},
-	// kontrola treści (SHYG-48)
+	// content check (SHYG-48)
 	"chip_tresc":           {EN: "wrong content", PL: "zła treść"},
 	"powod_stanu":          {EN: "Reason", PL: "Powód"},
 	"kontrola_get":         {EN: "GET %s", PL: "GET %s"},
 	"kontrola_zawiera":     {EN: "must contain “%s”", PL: "musi zawierać „%s”"},
 	"kontrola_nie_zawiera": {EN: "must not contain “%s”", PL: "nie może zawierać „%s”"},
-	// opis i tagi usługi (SHYG-47)
+	// service description and tags (SHYG-47)
 	"opis_uslugi":             {EN: "Description", PL: "Opis"},
 	"opis_uslugi_placeholder": {EN: "A short line shown under the name", PL: "Krótka linia pod nazwą"},
 	"tagi_uslugi":             {EN: "Tags", PL: "Tagi"},
@@ -327,22 +327,22 @@ var teksty = map[string]map[Lang]string{
 	"blad_tagi":               {EN: "Tags: at most 12, each up to 32 characters, without control characters.", PL: "Tagi: najwyżej 12, każdy do 32 znaków, bez znaków sterujących."},
 	"blad_pole_dziedziczone":  {EN: "This value is inherited from a shared block (<<: *defaults), so it cannot be changed here. Edit it in the file.", PL: "Ta wartość jest dziedziczona ze wspólnego bloku (<<: *defaults), więc nie da się jej zmienić tutaj. Zmień ją w pliku."},
 	"blad_duplikat_nazwy":     {EN: "That name is already taken here. Pick a different one.", PL: "Ta nazwa jest tu już zajęta. Wybierz inną."},
-	"blad_tytul_znaki":  {EN: "The title must be a single line without control characters.", PL: "Tytuł musi być jedną linią, bez znaków sterujących."},
-	"blad_adres_uslugi": {EN: "Invalid address: use http://, https:// or tcp://host:port.", PL: "Zły adres: użyj http://, https:// albo tcp://host:port."},
-	"baner_blad_poprzednia": {EN: "The config file has an error. The panel keeps running on the last working configuration until it is fixed.", PL: "Plik konfiguracji ma błąd. Panel działa dalej na ostatniej działającej konfiguracji, dopóki go nie poprawisz."},
-	"baner_blad_historia":   {EN: "The config file has an error. The panel is showing the last version saved in history.", PL: "Plik konfiguracji ma błąd. Panel pokazuje ostatnią wersję zapisaną w historii."},
-	"baner_blad_pusta":      {EN: "The config file has an error and there is no earlier version to fall back to — nothing to show until it is fixed.", PL: "Plik konfiguracji ma błąd, a nie ma wcześniejszej wersji, na którą można wrócić — nie ma czego pokazać, dopóki go nie poprawisz."},
-	"baner_pozycja":         {EN: "Line %d, column %d: %s", PL: "Linia %d, kolumna %d: %s"},
-	"baner_linia":           {EN: "Line %d: %s", PL: "Linia %d: %s"},
-	"baner_ostrz_tytul":     {EN: "The config loaded, but part of it is ignored:", PL: "Config się wczytał, ale część jest pomijana:"},
-	"baner_ostrz_klucz":     {EN: `unknown key "%s" (%s)`, PL: `nieznany klucz „%s” (%s)`},
-	"baner_ostrz_linia":     {EN: "line %d", PL: "linia %d"},
-	"baner_ostrz_sugestia":  {EN: `— did you mean "%s"?`, PL: `— chodziło o „%s”?`},
-	"baner_ostrz_adres":     {EN: `service "%s" in group "%s" has an address that cannot be used: %s (use http://, https:// or tcp://host:port)`, PL: `usługa „%s” w grupie „%s” ma adres, którego nie da się użyć: %s (użyj http://, https:// albo tcp://host:port)`},
-	"baner_poziom_glowny":   {EN: "top level", PL: "poziom główny"},
-	"blad_przenoszenie": {EN: "Could not move: invalid group, name or position.", PL: "Nie można przenieść: zła grupa, nazwa albo pozycja."},
+	"blad_tytul_znaki":        {EN: "The title must be a single line without control characters.", PL: "Tytuł musi być jedną linią, bez znaków sterujących."},
+	"blad_adres_uslugi":       {EN: "Invalid address: use http://, https:// or tcp://host:port.", PL: "Zły adres: użyj http://, https:// albo tcp://host:port."},
+	"baner_blad_poprzednia":   {EN: "The config file has an error. The panel keeps running on the last working configuration until it is fixed.", PL: "Plik konfiguracji ma błąd. Panel działa dalej na ostatniej działającej konfiguracji, dopóki go nie poprawisz."},
+	"baner_blad_historia":     {EN: "The config file has an error. The panel is showing the last version saved in history.", PL: "Plik konfiguracji ma błąd. Panel pokazuje ostatnią wersję zapisaną w historii."},
+	"baner_blad_pusta":        {EN: "The config file has an error and there is no earlier version to fall back to — nothing to show until it is fixed.", PL: "Plik konfiguracji ma błąd, a nie ma wcześniejszej wersji, na którą można wrócić — nie ma czego pokazać, dopóki go nie poprawisz."},
+	"baner_pozycja":           {EN: "Line %d, column %d: %s", PL: "Linia %d, kolumna %d: %s"},
+	"baner_linia":             {EN: "Line %d: %s", PL: "Linia %d: %s"},
+	"baner_ostrz_tytul":       {EN: "The config loaded, but part of it is ignored:", PL: "Config się wczytał, ale część jest pomijana:"},
+	"baner_ostrz_klucz":       {EN: `unknown key "%s" (%s)`, PL: `nieznany klucz „%s” (%s)`},
+	"baner_ostrz_linia":       {EN: "line %d", PL: "linia %d"},
+	"baner_ostrz_sugestia":    {EN: `— did you mean "%s"?`, PL: `— chodziło o „%s”?`},
+	"baner_ostrz_adres":       {EN: `service "%s" in group "%s" has an address that cannot be used: %s (use http://, https:// or tcp://host:port)`, PL: `usługa „%s” w grupie „%s” ma adres, którego nie da się użyć: %s (użyj http://, https:// albo tcp://host:port)`},
+	"baner_poziom_glowny":     {EN: "top level", PL: "poziom główny"},
+	"blad_przenoszenie":       {EN: "Could not move: invalid group, name or position.", PL: "Nie można przenieść: zła grupa, nazwa albo pozycja."},
 
-	// edycja sekcji „Sprawdzanie" (GH #6)
+	// editing the "Checking" section (GH #6)
 	"blad_czas_sprawdzania": {EN: "Interval and timeout take a duration of at least 1s, such as 30s, 2m or 1h.", PL: "Co ile i timeout przyjmują czas od 1s w górę, np. 30s, 2m albo 1h."},
 	"blad_uklad_pliku":      {EN: "This part of the file is laid out in a way the editor cannot change safely. Nothing was saved — edit it in the file.", PL: "Ta część pliku ma układ, którego edytor nie zmieni bezpiecznie. Nic nie zapisano — zmień to w pliku."},
 	"blad_kody_http":        {EN: "Accepted codes: HTTP status codes from 100 to 599, separated by commas.", PL: "Akceptowane kody: kody HTTP od 100 do 599, oddzielone przecinkami."},
@@ -352,11 +352,11 @@ var teksty = map[string]map[Lang]string{
 		PL: "plik zmienił się na dysku od czasu wczytania — odśwież stronę i powtórz zmianę"},
 }
 
-// T zwraca tekst w danym języku; przy braku tłumaczenia wraca do angielskiego.
-func T(l Lang, klucz string) string {
-	m, ok := teksty[klucz]
+// T returns the text in the given language; when a translation is missing it falls back to English.
+func T(l Lang, key string) string {
+	m, ok := texts[key]
 	if !ok {
-		return klucz
+		return key
 	}
 	if v, ok := m[l]; ok && v != "" {
 		return v
@@ -364,49 +364,49 @@ func T(l Lang, klucz string) string {
 	return m[EN]
 }
 
-// Mapa zwraca komplet tekstów dla języka — wygodne dla szablonów i dla JS-a.
-func Mapa(l Lang) map[string]string {
-	out := make(map[string]string, len(teksty))
-	for k := range teksty {
+// Map returns the full set of texts for a language — handy for templates and for JS.
+func Map(l Lang) map[string]string {
+	out := make(map[string]string, len(texts))
+	for k := range texts {
 		out[k] = T(l, k)
 	}
 	return out
 }
 
-// Klucze zwraca posortowaną listę kluczy — używane w testach spójności.
-func Klucze() []string {
-	out := make([]string, 0, len(teksty))
-	for k := range teksty {
+// Keys returns a sorted list of keys — used in consistency tests.
+func Keys() []string {
+	out := make([]string, 0, len(texts))
+	for k := range texts {
 		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
 }
 
-// Wybierz ustala język: ciasteczko użytkownika, potem Accept-Language,
-// a w ostateczności angielski.
-func Wybierz(r *http.Request) Lang {
-	if c, err := r.Cookie(Ciasteczko); err == nil {
-		if l := Rozpoznaj(c.Value); l != "" {
+// FromRequest determines the language: the user's cookie, then Accept-Language,
+// and as a last resort English.
+func FromRequest(r *http.Request) Lang {
+	if c, err := r.Cookie(CookieName); err == nil {
+		if l := ParseLang(c.Value); l != "" {
 			return l
 		}
 	}
-	for _, część := range strings.Split(r.Header.Get("Accept-Language"), ",") {
-		kod := strings.TrimSpace(strings.SplitN(część, ";", 2)[0])
-		if l := Rozpoznaj(kod); l != "" {
+	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		code := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if l := ParseLang(code); l != "" {
 			return l
 		}
 	}
 	return EN
 }
 
-// Rozpoznaj mapuje kod języka na obsługiwany; pusty string = nieobsługiwany.
-func Rozpoznaj(kod string) Lang {
-	kod = strings.ToLower(strings.TrimSpace(kod))
+// ParseLang maps a language code to a supported one; an empty string = unsupported.
+func ParseLang(code string) Lang {
+	code = strings.ToLower(strings.TrimSpace(code))
 	switch {
-	case kod == "pl" || strings.HasPrefix(kod, "pl-"):
+	case code == "pl" || strings.HasPrefix(code, "pl-"):
 		return PL
-	case kod == "en" || strings.HasPrefix(kod, "en-"):
+	case code == "en" || strings.HasPrefix(code, "en-"):
 		return EN
 	}
 	return ""

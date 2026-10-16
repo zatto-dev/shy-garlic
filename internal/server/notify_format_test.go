@@ -57,7 +57,7 @@ func TestNotifyPutZapisujeFormatDoBazy(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("kod %d: %s", rr.Code, rr.Body)
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.format"); v != "ntfy" {
+	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "ntfy" {
 		t.Errorf("w bazie: %q", v)
 	}
 	if s.powiad.Format() != notify.FormatNtfy {
@@ -70,7 +70,7 @@ func TestNotifyPutZapisujeFormatDoBazy(t *testing.T) {
 	if rr := putNotify(s, `{"format":"discord"}`); rr.Code != http.StatusOK {
 		t.Fatalf("kod %d", rr.Code)
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.format"); v != "" {
+	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "" {
 		t.Errorf("discord jest domyślny i nie powinien leżeć w bazie: %q", v)
 	}
 }
@@ -83,7 +83,7 @@ func TestNotifyPutOdrzucaNieznanyFormat(t *testing.T) {
 			t.Errorf("%q: kod %d, chcę 400", f, rr.Code)
 		}
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.format"); v != "" {
+	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "" {
 		t.Errorf("w bazie coś zostało: %q", v)
 	}
 }
@@ -93,7 +93,7 @@ func TestNotifyPutOdrzucaNieznanyFormat(t *testing.T) {
 func TestNotifyPutFormatZeŚrodowiskaTo409(t *testing.T) {
 	s := serwerTestowy(t)
 	s.formatZeŚrodowiska = true
-	s.powiad.UstawFormat(notify.FormatSlack)
+	s.powiad.SetFormat(notify.FormatSlack)
 	rr := putNotify(s, `{"format":"ntfy"}`)
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("kod %d, chcę 409", rr.Code)
@@ -101,7 +101,7 @@ func TestNotifyPutFormatZeŚrodowiskaTo409(t *testing.T) {
 	if s.powiad.Format() != notify.FormatSlack {
 		t.Error("format zmieniony mimo 409")
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.format"); v != "" {
+	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "" {
 		t.Errorf("baza ruszona: %q", v)
 	}
 	if m := getNotify(t, s); m["formatZrodlo"] != "srodowisko" {
@@ -114,7 +114,7 @@ func TestNotifyPutFormatZeŚrodowiskaTo409(t *testing.T) {
 func TestNotifyPutFormatDziałaPrzyAdresieZeŚrodowiska(t *testing.T) {
 	s := serwerTestowy(t)
 	s.webhookZeŚrodowiska = true
-	s.powiad.UstawWebhook("https://ntfy.example/temat")
+	s.powiad.SetWebhook("https://ntfy.example/temat")
 	if rr := putNotify(s, `{"format":"ntfy"}`); rr.Code != http.StatusOK {
 		t.Fatalf("kod %d: %s", rr.Code, rr.Body)
 	}
@@ -127,10 +127,10 @@ func TestNotifyPutPilnujeKształtuAdresuWgFormatu(t *testing.T) {
 	if rr.Code != http.StatusBadRequest || !strings.Contains(komunikat(rr), "chat_id") {
 		t.Fatalf("kod %d: %s", rr.Code, rr.Body)
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.webhook"); v != "" {
+	if v, _ := s.st.Setting(s.ctx, "notify.webhook"); v != "" {
 		t.Errorf("adres zapisany mimo odrzucenia: %q", v)
 	}
-	if v, _ := s.st.Ustawienie(s.ctx, "notify.format"); v != "" {
+	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "" {
 		t.Errorf("format zapisany mimo odrzucenia: %q", v)
 	}
 	// dobry
@@ -160,7 +160,7 @@ func TestNotifyPutPilnujeKształtuAdresuWgFormatu(t *testing.T) {
 }
 
 func TestNotifyPutWszystkieFormatyWymagająHTTPS(t *testing.T) {
-	for _, f := range notify.Formaty {
+	for _, f := range notify.Formats {
 		s := serwerTestowy(t)
 		rr := putNotify(s, `{"format":"`+string(f)+`","webhook":"http://lan.example/message?token=x&chat_id=1"}`)
 		if rr.Code != http.StatusBadRequest {
@@ -220,10 +220,10 @@ func TestPrzyciskTestDziałaWKażdymFormacie(t *testing.T) {
 		notify.FormatNtfy: "/temat", notify.FormatGotify: "/message?token=T",
 		notify.FormatTelegram: "/bot1:A/sendMessage?chat_id=7", notify.FormatGeneric: "/h",
 	}
-	for _, f := range notify.Formaty {
+	for _, f := range notify.Formats {
 		s := serwerTestowy(t)
-		s.powiad.UstawWebhook(srv.URL + ścieżki[f]) // http: omija regułę https z PUT, to nie jest test tej reguły
-		s.powiad.UstawFormat(f)
+		s.powiad.SetWebhook(srv.URL + ścieżki[f]) // http: omija regułę https z PUT, to nie jest test tej reguły
+		s.powiad.SetFormat(f)
 		rr := httptest.NewRecorder()
 		s.handleNotifyTest(rr, httptest.NewRequest("POST", "/api/notify/test", nil))
 		if rr.Code != http.StatusOK {
@@ -232,12 +232,12 @@ func TestPrzyciskTestDziałaWKażdymFormacie(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(got) != len(notify.Formaty) {
-		t.Fatalf("żądań %d, chcę %d: %v", len(got), len(notify.Formaty), got)
+	if len(got) != len(notify.Formats) {
+		t.Fatalf("żądań %d, chcę %d: %v", len(got), len(notify.Formats), got)
 	}
 	for i, g := range got {
 		if !strings.Contains(strings.ToLower(g), "test") {
-			t.Errorf("%s: %s", notify.Formaty[i], g)
+			t.Errorf("%s: %s", notify.Formats[i], g)
 		}
 	}
 }
@@ -248,8 +248,8 @@ func TestPrzyciskTestNieZdradzaAdresuPrzyBłędzie(t *testing.T) {
 	srv.Close()
 
 	s := serwerTestowy(t)
-	s.powiad.UstawWebhook(adres)
-	s.powiad.UstawFormat(notify.FormatTelegram)
+	s.powiad.SetWebhook(adres)
+	s.powiad.SetFormat(notify.FormatTelegram)
 	rr := httptest.NewRecorder()
 	s.handleNotifyTest(rr, httptest.NewRequest("POST", "/api/notify/test", nil))
 	if rr.Code != http.StatusBadGateway {
@@ -286,7 +286,7 @@ func serwerZOpcjami(t *testing.T, o Opcje, przed func(*store.Store)) *Server {
 
 func TestFormatPoStarcieZBazy(t *testing.T) {
 	s := serwerZOpcjami(t, Opcje{}, func(st *store.Store) {
-		_ = st.UstawUstawienie(context.Background(), "notify.format", "gotify")
+		_ = st.SetSetting(context.Background(), "notify.format", "gotify")
 	})
 	if s.powiad.Format() != notify.FormatGotify || s.formatZeŚrodowiska {
 		t.Errorf("format %q, zeŚrodowiska=%v", s.powiad.Format(), s.formatZeŚrodowiska)
@@ -295,7 +295,7 @@ func TestFormatPoStarcieZBazy(t *testing.T) {
 
 func TestFormatZeŚrodowiskaBijeBazę(t *testing.T) {
 	s := serwerZOpcjami(t, Opcje{WebhookFormat: "slack", WebhookFormatZeŚrodowiska: true}, func(st *store.Store) {
-		_ = st.UstawUstawienie(context.Background(), "notify.format", "gotify")
+		_ = st.SetSetting(context.Background(), "notify.format", "gotify")
 	})
 	if s.powiad.Format() != notify.FormatSlack || !s.formatZeŚrodowiska {
 		t.Errorf("format %q, zeŚrodowiska=%v", s.powiad.Format(), s.formatZeŚrodowiska)
@@ -304,7 +304,7 @@ func TestFormatZeŚrodowiskaBijeBazę(t *testing.T) {
 
 func TestNieznanyFormatWBazieNieWyłączaAlertów(t *testing.T) {
 	s := serwerZOpcjami(t, Opcje{}, func(st *store.Store) {
-		_ = st.UstawUstawienie(context.Background(), "notify.format", "format-z-przyszłości")
+		_ = st.SetSetting(context.Background(), "notify.format", "format-z-przyszłości")
 	})
 	if s.powiad.Format() != notify.FormatDiscord {
 		t.Errorf("format %q, chcę discord", s.powiad.Format())
@@ -314,11 +314,11 @@ func TestNieznanyFormatWBazieNieWyłączaAlertów(t *testing.T) {
 func TestTekstyFormatówMająObaJęzyki(t *testing.T) {
 	klucze := []string{"format_webhooka", "webhook_zly_format", "webhook_format_ze_srodowiska",
 		"webhook_adres_telegram", "webhook_adres_gotify", "format_generic"}
-	for _, f := range notify.Formaty {
+	for _, f := range notify.Formats {
 		klucze = append(klucze, "format_podpowiedz_"+string(f))
 	}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
-		m := i18n.Mapa(l)
+		m := i18n.Map(l)
 		for _, k := range klucze {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: brak tekstu %q", l, k)

@@ -248,16 +248,16 @@ func TestZmianaHasłaUnieważniaInneSesje(t *testing.T) {
 	s := serwerTestowy(t)
 	ctx := context.Background()
 	h := s.Handler()
-	u, err := s.st.DodajUżytkownika(ctx, "admin", "haslo12345")
+	u, err := s.st.AddUser(ctx, "admin", "haslo12345")
 	if err != nil {
 		t.Fatal(err)
 	}
-	inny, err := s.st.DodajUżytkownika(ctx, "drugi", "haslo12345")
+	inny, err := s.st.AddUser(ctx, "drugi", "haslo12345")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tok := func(id int64) *http.Cookie {
-		v, _, err := s.st.NowaSesja(ctx, id)
+		v, _, err := s.st.NewSession(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}

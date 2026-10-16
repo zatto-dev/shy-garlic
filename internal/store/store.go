@@ -1,8 +1,8 @@
-// Package store trzyma to, czego nie da się trzymać w pliku YAML:
-// użytkowników, sesje i historię sprawdzeń.
+// Package store holds what cannot be kept in the YAML file:
+// users, sessions and the check history.
 //
-// SQLite w czystym Go (modernc.org/sqlite) — bez cgo, więc binarka zostaje
-// statyczna i obraz nadal jest jednoplikowy.
+// SQLite in pure Go (modernc.org/sqlite) — no cgo, so the binary stays
+// static and the image is still a single file.
 package store
 
 import (
@@ -21,40 +21,40 @@ import (
 )
 
 var (
-	ErrZłeDane     = errors.New("invalid credentials")
-	ErrBrakUżytkow = errors.New("user not found")
-	ErrJużIstnieje = errors.New("user already exists")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserExists         = errors.New("user already exists")
 )
 
-// CzasSesji — jak długo żyje ciasteczko logowania.
-const CzasSesji = 30 * 24 * time.Hour
+// SessionDuration — how long the login cookie lives.
+const SessionDuration = 30 * 24 * time.Hour
 
 type Store struct{ db *sql.DB }
 
-type Użytkownik struct {
+type User struct {
 	ID        int64
 	Login     string
-	Utworzony time.Time
+	CreatedAt time.Time
 }
 
-type Wynik struct {
-	Klucz string
-	Stan  string
-	Kod   int
+type Result struct {
+	Key   string
+	State string
+	Code  int
 	MS    int64
-	Błąd  string
-	Kiedy time.Time
+	Err   string
+	At    time.Time
 }
 
-func Open(ścieżka string) (*Store, error) {
-	db, err := sql.Open("sqlite", ścieżka+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+func Open(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
-	// SQLite nie lubi równoległych zapisów; jeden pisarz wystarcza w zupełności
+	// SQLite dislikes concurrent writes; a single writer is entirely enough
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
-	if err := s.migruj(); err != nil {
+	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func Open(ścieżka string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) migruj() error {
+func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS users (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,26 +116,26 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	if err != nil {
 		return err
 	}
-	if err := s.dopiszUserIDTokenów(); err != nil {
+	if err := s.backfillTokenUserIDs(); err != nil {
 		return err
 	}
-	return s.zahaszujSesje()
+	return s.hashSessions()
 }
 
-// dopiszUserIDTokenów: tokeny API pamiętały tylko tekstowy login autora, więc
-// usunięcie konta ich nie ruszało. user_id wiąże token z kontem (bez klucza
-// obcego — ALTER TABLE ADD COLUMN z REFERENCES jest w SQLite wybredny, a
-// usuwanie robi UsuńUżytkownika). Stare wiersze dostają user_id po loginie
-// autora; te, których autora nie ma w users, zostają bez właściciela.
-// Idempotentne.
-func (s *Store) dopiszUserIDTokenów() error {
+// backfillTokenUserIDs: API tokens remembered only the author's text login, so
+// removing an account did not touch them. user_id ties a token to an account (without a
+// foreign key — ALTER TABLE ADD COLUMN with REFERENCES is finicky in SQLite, and
+// the removal is done by RemoveUser). Old rows get user_id by the author's login;
+// those whose author is not in users stay without an owner.
+// Idempotent.
+func (s *Store) backfillTokenUserIDs() error {
 	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('api_tokens') WHERE name = 'user_id'`)
 	if err != nil {
 		return err
 	}
-	jest := rows.Next()
+	exists := rows.Next()
 	rows.Close()
-	if !jest {
+	if !exists {
 		if _, err := s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN user_id INTEGER`); err != nil {
 			return err
 		}
@@ -145,55 +145,55 @@ func (s *Store) dopiszUserIDTokenów() error {
 	return err
 }
 
-// skrótTokenu — w bazie leży sha256 tokenu, nie sam token: wyciek pliku .db
-// (backup, snapshot) nie daje wtedy działających ciasteczek. Token ma 256 bitów
-// losowości, więc szybki skrót wystarcza (bcrypt byłby tu bez sensu).
-func skrótTokenu(token string) string {
+// tokenHash — the database holds the token's sha256, not the token itself: a leak of the
+// .db file (backup, snapshot) then yields no working cookies. The token has 256 bits
+// of randomness, so a fast hash is enough (bcrypt would make no sense here).
+func tokenHash(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
 }
 
-// zahaszujSesje przepisuje jawne tokeny ze starych baz na skróty, żeby po
-// aktualizacji nikt nie został wylogowany. Idempotentne: skrót ma 64 znaki
-// (hex), jawny token 43 (base64 z 32 bajtów).
-func (s *Store) zahaszujSesje() error {
+// hashSessions rewrites plain tokens from old databases into hashes, so that after
+// an upgrade nobody gets logged out. Idempotent: a hash is 64 characters
+// (hex), a plain token is 43 (base64 of 32 bytes).
+func (s *Store) hashSessions() error {
 	rows, err := s.db.Query(`SELECT token FROM sessions WHERE length(token) <> 64`)
 	if err != nil {
 		return err
 	}
-	var jawne []string
+	var plain []string
 	for rows.Next() {
 		var t string
 		if err := rows.Scan(&t); err != nil {
 			rows.Close()
 			return err
 		}
-		jawne = append(jawne, t)
+		plain = append(plain, t)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for _, t := range jawne {
-		if _, err := s.db.Exec(`UPDATE sessions SET token = ? WHERE token = ?`, skrótTokenu(t), t); err != nil {
+	for _, t := range plain {
+		if _, err := s.db.Exec(`UPDATE sessions SET token = ? WHERE token = ?`, tokenHash(t), t); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ── ustawienia instancji ─────────────────────────────────────────────────────
+// ── instance settings ───────────────────────────────────────────────────────
 //
-// Klucz-wartość dla rzeczy, które NIE mogą trafić do pliku konfiguracyjnego,
-// bo ten jest pokazywany w UI i commitowany do gita. Dziś mieszka tu jedno:
-// adres webhooka powiadomień, czyli poświadczenie.
+// Key-value for things that must NOT end up in the configuration file,
+// because that one is shown in the UI and committed to git. Today it holds one thing:
+// the notification webhook address, i.e. a credential.
 
-// Ustawienie zwraca wartość albo pusty string, gdy klucza nie ma. Brak klucza
-// nie jest błędem — wywołujący i tak musiałby go odróżniać od pustej wartości,
-// a nie ma po co.
-func (s *Store) Ustawienie(ctx context.Context, klucz string) (string, error) {
+// Setting returns the value, or an empty string when the key does not exist. A missing key
+// is not an error — the caller would have to tell it apart from an empty value
+// anyway, and there is no point.
+func (s *Store) Setting(ctx context.Context, key string) (string, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, klucz).Scan(&v)
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -203,50 +203,50 @@ func (s *Store) Ustawienie(ctx context.Context, klucz string) (string, error) {
 	return v, nil
 }
 
-// UstawUstawienie zapisuje wartość. Pusta kasuje wiersz.
-func (s *Store) UstawUstawienie(ctx context.Context, klucz, wartość string) error {
-	if wartość == "" {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, klucz)
+// SetSetting saves the value. An empty one deletes the row.
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	if value == "" {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key)
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO settings (key, value, at) VALUES (?, ?, CURRENT_TIMESTAMP)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value, at = CURRENT_TIMESTAMP`, klucz, wartość)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, at = CURRENT_TIMESTAMP`, key, value)
 	return err
 }
 
-// ── użytkownicy ──────────────────────────────────────────────────────────────
+// ── users ───────────────────────────────────────────────────────────────────
 
-func (s *Store) LiczbaUżytkowników(ctx context.Context) (int, error) {
+func (s *Store) UserCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
 
-func (s *Store) DodajUżytkownika(ctx context.Context, login, hasło string) (*Użytkownik, error) {
+func (s *Store) AddUser(ctx context.Context, login, password string) (*User, error) {
 	if len(login) < 2 {
 		return nil, errors.New("login too short")
 	}
-	if len(hasło) < 8 {
+	if len(password) < 8 {
 		return nil, errors.New("password must be at least 8 characters")
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(hasło), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users (login, hash) VALUES (?, ?)`, login, string(h))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrJużIstnieje, err)
+		return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
 	}
 	id, _ := res.LastInsertId()
-	return &Użytkownik{ID: id, Login: login, Utworzony: time.Now()}, nil
+	return &User{ID: id, Login: login, CreatedAt: time.Now()}, nil
 }
 
-func (s *Store) ZmieńHasło(ctx context.Context, userID int64, nowe string) error {
-	if len(nowe) < 8 {
+func (s *Store) ChangePassword(ctx context.Context, userID int64, newPassword string) error {
+	if len(newPassword) < 8 {
 		return errors.New("password must be at least 8 characters")
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(nowe), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -254,38 +254,38 @@ func (s *Store) ZmieńHasło(ctx context.Context, userID int64, nowe string) err
 	return err
 }
 
-// Sprawdź weryfikuje login i hasło. Przy złym loginie i tak liczy bcrypta,
-// żeby czas odpowiedzi nie zdradzał, które konta istnieją.
-func (s *Store) Sprawdź(ctx context.Context, login, hasło string) (*Użytkownik, error) {
-	var u Użytkownik
+// Authenticate verifies login and password. On a wrong login it still computes bcrypt,
+// so the response time does not reveal which accounts exist.
+func (s *Store) Authenticate(ctx context.Context, login, password string) (*User, error) {
+	var u User
 	var hash string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, login, hash, created_at FROM users WHERE login = ?`, login).
-		Scan(&u.ID, &u.Login, &hash, &u.Utworzony)
+		Scan(&u.ID, &u.Login, &hash, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		bcrypt.CompareHashAndPassword(
-			[]byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"), []byte(hasło))
-		return nil, ErrZłeDane
+			[]byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"), []byte(password))
+		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
 		return nil, err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(hasło)) != nil {
-		return nil, ErrZłeDane
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		return nil, ErrInvalidCredentials
 	}
 	return &u, nil
 }
 
-func (s *Store) Użytkownicy(ctx context.Context) ([]Użytkownik, error) {
+func (s *Store) Users(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, login, created_at FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Użytkownik
+	var out []User
 	for rows.Next() {
-		var u Użytkownik
-		if err := rows.Scan(&u.ID, &u.Login, &u.Utworzony); err != nil {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Login, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -293,9 +293,9 @@ func (s *Store) Użytkownicy(ctx context.Context) ([]Użytkownik, error) {
 	return out, rows.Err()
 }
 
-// UsuńUżytkownika kasuje konto razem z jego sesjami (kaskada) i tokenami API —
-// token wystawiony przez usuniętego użytkownika nie ma prawa przeżyć jego konta.
-func (s *Store) UsuńUżytkownika(ctx context.Context, id int64) error {
+// RemoveUser deletes the account together with its sessions (cascade) and API tokens —
+// a token issued by a removed user has no right to outlive their account.
+func (s *Store) RemoveUser(ctx context.Context, id int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -310,72 +310,72 @@ func (s *Store) UsuńUżytkownika(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
-// ── sesje ────────────────────────────────────────────────────────────────────
+// ── sessions ────────────────────────────────────────────────────────────────
 
-func (s *Store) NowaSesja(ctx context.Context, userID int64) (string, time.Time, error) {
+func (s *Store) NewSession(ctx context.Context, userID int64) (string, time.Time, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", time.Time{}, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(b)
-	wygasa := time.Now().Add(CzasSesji)
+	expiresAt := time.Now().Add(SessionDuration)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, skrótTokenu(token), userID, wygasa)
-	return token, wygasa, err
+		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, tokenHash(token), userID, expiresAt)
+	return token, expiresAt, err
 }
 
-func (s *Store) Sesja(ctx context.Context, token string) (*Użytkownik, error) {
-	var u Użytkownik
+func (s *Store) Session(ctx context.Context, token string) (*User, error) {
+	var u User
 	err := s.db.QueryRowContext(ctx, `
 SELECT u.id, u.login, u.created_at FROM sessions s
 JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, skrótTokenu(token)).
-		Scan(&u.ID, &u.Login, &u.Utworzony)
+WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, tokenHash(token)).
+		Scan(&u.ID, &u.Login, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrBrakUżytkow
+		return nil, ErrUserNotFound
 	}
 	return &u, err
 }
 
-func (s *Store) UsuńSesję(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, skrótTokenu(token))
+func (s *Store) RemoveSession(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, tokenHash(token))
 	return err
 }
 
-// UsuńInneSesje kończy wszystkie sesje użytkownika poza wskazaną. Po zmianie
-// hasła ktoś, kto miał skradzione ciasteczko, nie może dalej siedzieć w panelu.
-func (s *Store) UsuńInneSesje(ctx context.Context, userID int64, zostaw string) error {
+// RemoveOtherSessions ends all of a user's sessions except the given one. After a password
+// change, someone who had a stolen cookie cannot keep sitting in the panel.
+func (s *Store) RemoveOtherSessions(ctx context.Context, userID int64, keep string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE user_id = ? AND token <> ?`, userID, skrótTokenu(zostaw))
+		`DELETE FROM sessions WHERE user_id = ? AND token <> ?`, userID, tokenHash(keep))
 	return err
 }
 
-func (s *Store) SprzątnijSesje(ctx context.Context) error {
+func (s *Store) CleanupSessions(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
 	return err
 }
 
-// ── historia sprawdzeń ───────────────────────────────────────────────────────
+// ── check history ───────────────────────────────────────────────────────────
 //
-// Tego nie ma żaden lekki panel na rynku: stan sprzed godziny, nie tylko teraz.
+// No lightweight panel on the market has this: the state from an hour ago, not just now.
 
-func (s *Store) ZapiszWynik(ctx context.Context, w Wynik) error {
+func (s *Store) SaveResult(ctx context.Context, w Result) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO checks (key, state, code, ms, err, at) VALUES (?, ?, ?, ?, ?, ?)`,
-		w.Klucz, w.Stan, w.Kod, w.MS, w.Błąd, w.Kiedy.UTC())
+		w.Key, w.State, w.Code, w.MS, w.Err, w.At.UTC())
 	return err
 }
 
-// PrzenieśKlucze przepisuje historię sprawdzeń pod nowe klucze (stary → nowy)
-// w jednej transakcji: albo przenoszą się wszystkie wiersze, albo żaden.
+// MoveKeys rewrites the check history under new keys (old → new)
+// in a single transaction: either all rows move, or none.
 //
-// Klucz usługi to grupa+"/"+nazwa, więc zmiana nazwy i przeniesienie do innej
-// grupy zmieniają klucz. Bez tego karta po przeciągnięciu traciła cały 24-godzinny
-// pasek. Przyjmuje pary, a nie prefiks: nazwa grupy może zawierać „/", a pary
-// z configu są jednoznaczne. Jeśli pod nowym kluczem już coś leży, wiersze się
-// łączą — historia nie jest nigdy kasowana.
-func (s *Store) PrzenieśKlucze(ctx context.Context, pary map[string]string) error {
-	if len(pary) == 0 {
+// A service key is group+"/"+name, so renaming and moving to another
+// group change the key. Without this, a card lost its whole 24-hour bar after being
+// dragged. It takes pairs, not a prefix: a group name may contain "/", and the pairs
+// from the config are unambiguous. If something already lies under the new key, the rows
+// merge — history is never deleted.
+func (s *Store) MoveKeys(ctx context.Context, pairs map[string]string) error {
+	if len(pairs) == 0 {
 		return nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -383,85 +383,84 @@ func (s *Store) PrzenieśKlucze(ctx context.Context, pary map[string]string) err
 		return err
 	}
 	defer tx.Rollback()
-	for stary, nowy := range pary {
-		if stary == nowy {
+	for oldKey, newKey := range pairs {
+		if oldKey == newKey {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE checks SET key = ? WHERE key = ?`, nowy, stary); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE checks SET key = ? WHERE key = ?`, newKey, oldKey); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// Historia zwraca ostatnie n wyników dla usługi, od najstarszego.
-func (s *Store) Historia(ctx context.Context, klucz string, n int) ([]Wynik, error) {
+// History returns the last n results for a service, from the oldest.
+func (s *Store) History(ctx context.Context, key string, n int) ([]Result, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT key, state, COALESCE(code,0), COALESCE(ms,0), COALESCE(err,''), at
-		 FROM checks WHERE key = ? ORDER BY at DESC LIMIT ?`, klucz, n)
+		 FROM checks WHERE key = ? ORDER BY at DESC LIMIT ?`, key, n)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Wynik
+	var out []Result
 	for rows.Next() {
-		var w Wynik
-		if err := rows.Scan(&w.Klucz, &w.Stan, &w.Kod, &w.MS, &w.Błąd, &w.Kiedy); err != nil {
+		var w Result
+		if err := rows.Scan(&w.Key, &w.State, &w.Code, &w.MS, &w.Err, &w.At); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
 	}
-	// odwróć: chcemy chronologicznie
+	// reverse: we want chronological order
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, rows.Err()
 }
 
-// Dostępność liczy procent czasu w stanie "up" w zadanym oknie.
-func (s *Store) Dostępność(ctx context.Context, klucz string, okno time.Duration) (float64, int, error) {
-	od := time.Now().Add(-okno).UTC()
-	var wszystkie, ok int
+// Availability computes the percentage of time in the "up" state within the given window.
+func (s *Store) Availability(ctx context.Context, key string, window time.Duration) (float64, int, error) {
+	since := time.Now().Add(-window).UTC()
+	var all, ok int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN state = 'up' THEN 1 ELSE 0 END), 0)
-		 FROM checks WHERE key = ? AND at >= ?`, klucz, od).Scan(&wszystkie, &ok)
-	if err != nil || wszystkie == 0 {
+		 FROM checks WHERE key = ? AND at >= ?`, key, since).Scan(&all, &ok)
+	if err != nil || all == 0 {
 		return 0, 0, err
 	}
-	return float64(ok) / float64(wszystkie) * 100, wszystkie, nil
+	return float64(ok) / float64(all) * 100, all, nil
 }
 
-// Przytnij usuwa wpisy starsze niż podany okres — panel domowy nie potrzebuje
-// historii sprzed pół roku, a plik ma nie puchnąć w nieskończoność.
-func (s *Store) Przytnij(ctx context.Context, starszeNiż time.Duration) (int64, error) {
+// Prune removes entries older than the given period — a home panel does not need
+// history from half a year ago, and the file should not grow forever.
+func (s *Store) Prune(ctx context.Context, olderThan time.Duration) (int64, error) {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM checks WHERE at < ?`, time.Now().Add(-starszeNiż).UTC())
+		`DELETE FROM checks WHERE at < ?`, time.Now().Add(-olderThan).UTC())
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
-
-// ── historia konfiguracji ────────────────────────────────────────────────────
+// ── config history ──────────────────────────────────────────────────────────
 //
-// Każdy zapis z UI zostawia ślad: pełną treść pliku po zmianie i diff.
-// Dzięki temu „cofnij" jest jednym kliknięciem, a nie szukaniem backupu.
+// Every save from the UI leaves a trace: the full file content after the change, and a diff.
+// Thanks to that "undo" is one click, not a hunt for a backup.
 
-type Wersja struct {
-	ID     int64
-	Kiedy  time.Time
-	Autor  string
-	Opis   string
-	Treść  string
-	Diff   string
+type Version struct {
+	ID          int64
+	At          time.Time
+	Author      string
+	Description string
+	Content     string
+	Diff        string
 }
 
-// ZapiszWersję zapisuje stan pliku po zmianie i przycina historię do 50 wpisów.
-func (s *Store) ZapiszWersję(ctx context.Context, autor, opis, treść, diff string) error {
+// SaveVersion saves the file state after a change and trims the history to 50 entries.
+func (s *Store) SaveVersion(ctx context.Context, author, description, content, diff string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO config_versions (author, opis, tresc, diff) VALUES (?, ?, ?, ?)`,
-		autor, opis, treść, diff); err != nil {
+		author, description, content, diff); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
@@ -470,18 +469,18 @@ func (s *Store) ZapiszWersję(ctx context.Context, autor, opis, treść, diff st
 	return err
 }
 
-// Wersje zwraca listę zmian bez treści plików — do wyświetlenia w UI.
-func (s *Store) Wersje(ctx context.Context, limit int) ([]Wersja, error) {
+// Versions returns the list of changes without file contents — for display in the UI.
+func (s *Store) Versions(ctx context.Context, limit int) ([]Version, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, at, author, opis, diff FROM config_versions ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Wersja
+	var out []Version
 	for rows.Next() {
-		var w Wersja
-		if err := rows.Scan(&w.ID, &w.Kiedy, &w.Autor, &w.Opis, &w.Diff); err != nil {
+		var w Version
+		if err := rows.Scan(&w.ID, &w.At, &w.Author, &w.Description, &w.Diff); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -489,46 +488,45 @@ func (s *Store) Wersje(ctx context.Context, limit int) ([]Wersja, error) {
 	return out, rows.Err()
 }
 
-// Wersja zwraca pojedynczy wpis razem z treścią pliku.
-func (s *Store) Wersja(ctx context.Context, id int64) (*Wersja, error) {
-	var w Wersja
+// Version returns a single entry together with the file content.
+func (s *Store) Version(ctx context.Context, id int64) (*Version, error) {
+	var w Version
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, at, author, opis, tresc, diff FROM config_versions WHERE id = ?`, id).
-		Scan(&w.ID, &w.Kiedy, &w.Autor, &w.Opis, &w.Treść, &w.Diff)
+		Scan(&w.ID, &w.At, &w.Author, &w.Description, &w.Content, &w.Diff)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("version not found")
 	}
 	return &w, err
 }
 
+// ── service statistics ──────────────────────────────────────────────────────
 
-// ── statystyki usługi ────────────────────────────────────────────────────────
-
-type Statystyki struct {
-	Próbek     int
-	Dostępność float64 // procent czasu w stanie "up"
-	P50        int64   // mediana czasu odpowiedzi w ms
-	P95        int64
-	Najgorszy  int64
+type Statistics struct {
+	Samples      int
+	Availability float64 // percentage of time in the "up" state
+	P50          int64   // median response time in ms
+	P95          int64
+	Worst        int64
 }
 
-// Staty liczy dostępność i czasy odpowiedzi w oknie. Percentyle liczone w SQL,
-// bo przy kilku tysiącach wierszy nie ma po co przerzucać ich do Go.
-func (s *Store) Staty(ctx context.Context, klucz string, okno time.Duration) (Statystyki, error) {
-	od := time.Now().Add(-okno).UTC()
-	var st Statystyki
-	var udanych int
+// Stats computes availability and response times within a window. Percentiles are computed in SQL,
+// because with a few thousand rows there is no point shipping them to Go.
+func (s *Store) Stats(ctx context.Context, key string, window time.Duration) (Statistics, error) {
+	since := time.Now().Add(-window).UTC()
+	var st Statistics
+	var successes int
 	err := s.db.QueryRowContext(ctx, `
 SELECT COUNT(*),
        COALESCE(SUM(CASE WHEN state = 'up' THEN 1 ELSE 0 END), 0),
        COALESCE(MAX(ms), 0)
-FROM checks WHERE key = ? AND at >= ?`, klucz, od).Scan(&st.Próbek, &udanych, &st.Najgorszy)
-	if err != nil || st.Próbek == 0 {
-		return Statystyki{}, err
+FROM checks WHERE key = ? AND at >= ?`, key, since).Scan(&st.Samples, &successes, &st.Worst)
+	if err != nil || st.Samples == 0 {
+		return Statistics{}, err
 	}
-	st.Dostępność = float64(udanych) / float64(st.Próbek) * 100
+	st.Availability = float64(successes) / float64(st.Samples) * 100
 
-	// percentyle tylko z udanych sprawdzeń — czas odpowiedzi błędu nic nie mówi
+	// percentiles only from successful checks — an error's response time says nothing
 	err = s.db.QueryRowContext(ctx, `
 SELECT COALESCE((SELECT ms FROM checks WHERE key = ?1 AND at >= ?2 AND state = 'up'
                  ORDER BY ms LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM checks
@@ -536,37 +534,37 @@ SELECT COALESCE((SELECT ms FROM checks WHERE key = ?1 AND at >= ?2 AND state = '
        COALESCE((SELECT ms FROM checks WHERE key = ?1 AND at >= ?2 AND state = 'up'
                  ORDER BY ms LIMIT 1 OFFSET (SELECT COUNT(*)*95/100 FROM checks
                    WHERE key = ?1 AND at >= ?2 AND state = 'up')), 0)`,
-		klucz, od).Scan(&st.P50, &st.P95)
+		key, since).Scan(&st.P50, &st.P95)
 	return st, err
 }
 
-type ZmianaStanu struct {
-	Kiedy time.Time
-	Z     string
-	Na    string
-	Błąd  string
-	// Kod — status HTTP w momencie zmiany. Bez niego lista zmian pokazuje
-	// tekst błędu albo nic, a „HTTP 502" mówi człowiekowi więcej.
-	Kod int
+type StateChange struct {
+	At   time.Time
+	From string
+	To   string
+	Err  string
+	// Code — the HTTP status at the moment of the change. Without it the change list shows
+	// the error text or nothing, and "HTTP 502" tells a human more.
+	Code int
 }
 
-// Zmiany zwraca momenty, w których usługa zmieniła stan — czyli to, co
-// człowiek naprawdę chce zobaczyć zamiast tysiąca identycznych pomiarów.
-func (s *Store) Zmiany(ctx context.Context, klucz string, limit int) ([]ZmianaStanu, error) {
+// Changes returns the moments when a service changed state — which is what a
+// human actually wants to see instead of a thousand identical measurements.
+func (s *Store) Changes(ctx context.Context, key string, limit int) ([]StateChange, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT at, poprzedni, state, COALESCE(err, ''), COALESCE(code, 0) FROM (
   SELECT at, state, err, code, LAG(state) OVER (ORDER BY at) AS poprzedni
   FROM checks WHERE key = ?
 ) WHERE poprzedni IS NOT NULL AND poprzedni <> state
-ORDER BY at DESC LIMIT ?`, klucz, limit)
+ORDER BY at DESC LIMIT ?`, key, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ZmianaStanu
+	var out []StateChange
 	for rows.Next() {
-		var z ZmianaStanu
-		if err := rows.Scan(&z.Kiedy, &z.Z, &z.Na, &z.Błąd, &z.Kod); err != nil {
+		var z StateChange
+		if err := rows.Scan(&z.At, &z.From, &z.To, &z.Err, &z.Code); err != nil {
 			return nil, err
 		}
 		out = append(out, z)

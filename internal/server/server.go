@@ -40,8 +40,8 @@ type Server struct {
 	lim    *limiter
 	ikony  *Katalog
 	tła    *KatalogTeł
-	powiad *notify.Powiadamiacz
-	docker *dockerdisc.Klient
+	powiad *notify.Notifier
+	docker *dockerdisc.Client
 
 	// webhookZeŚrodowiska i instancja są ustawiane raz, w New, i nigdy potem —
 	// dlatego bez mutexu.
@@ -65,7 +65,7 @@ type Server struct {
 	użycieTokenów map[int64]time.Time // kiedy ostatnio zapisaliśmy last_used_at
 
 	muDostępności   sync.Mutex
-	dostępnościMapa map[string]store.DostępnośćUsługi
+	dostępnościMapa map[string]store.ServiceAvailability
 	dostępnościDo   time.Time
 	dostępnościTTL  time.Duration
 
@@ -160,8 +160,8 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 		path: path, mon: health.New(), tmpl: tmpl, st: st,
 		lim: nowyLimiter(), ikony: NowyKatalog(o.IconsZip, o.CacheDir),
 		tła:    NowyKatalogTeł(o.BackgroundDir),
-		powiad: notify.Nowy(o.Webhook, o.PrógAwarii),
-		docker: dockerdisc.Nowy(o.DockerSock),
+		powiad: notify.New(o.Webhook, o.PrógAwarii),
+		docker: dockerdisc.New(o.DockerSock),
 
 		webhookZeŚrodowiska: o.WebhookZeŚrodowiska,
 		formatZeŚrodowiska:  o.WebhookFormatZeŚrodowiska && o.WebhookFormat != "",
@@ -185,12 +185,12 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 	// precedencja musi być ta sama tu i w handleNotifyPut, inaczej panel
 	// pokazywałby jedno, a monitor używał drugiego.
 	if !o.WebhookZeŚrodowiska {
-		adres, err := st.Ustawienie(context.Background(), "notify.webhook")
+		adres, err := st.Setting(context.Background(), "notify.webhook")
 		if err != nil {
 			return nil, fmt.Errorf("czytam webhook z bazy: %w", err)
 		}
 		if adres != "" {
-			s.powiad.UstawWebhook(adres)
+			s.powiad.SetWebhook(adres)
 		}
 	}
 
@@ -198,11 +198,11 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 	// Nieznany format z bazy (np. z nowszej wersji) nie może wyłączyć alertów,
 	// więc UstawFormat zamienia go na domyślny.
 	if s.formatZeŚrodowiska {
-		s.powiad.UstawFormat(notify.Format(o.WebhookFormat))
-	} else if f, err := st.Ustawienie(context.Background(), "notify.format"); err != nil {
+		s.powiad.SetFormat(notify.Format(o.WebhookFormat))
+	} else if f, err := st.Setting(context.Background(), "notify.format"); err != nil {
 		return nil, fmt.Errorf("czytam format webhooka z bazy: %w", err)
 	} else if f != "" {
-		s.powiad.UstawFormat(notify.Format(f))
+		s.powiad.SetFormat(notify.Format(f))
 	}
 	return s, nil
 }
@@ -349,9 +349,9 @@ func (s *Server) zapisujHistorię(ctx context.Context) {
 				if !nowy {
 					continue
 				}
-				err := s.st.ZapiszWynik(ctx, store.Wynik{
-					Klucz: klucz, Stan: string(r.State), Kod: r.Code,
-					MS: r.MS, Błąd: r.Err, Kiedy: r.At,
+				err := s.st.SaveResult(ctx, store.Result{
+					Key: klucz, State: string(r.State), Code: r.Code,
+					MS: r.MS, Err: r.Err, At: r.At,
 				})
 				if err != nil {
 					slog.Debug("zapis historii", "err", err)
@@ -373,11 +373,11 @@ func (s *Server) migrujKlucze(ctx context.Context, pary map[string]string) {
 	if len(pary) == 0 {
 		return
 	}
-	if err := s.st.PrzenieśKlucze(ctx, pary); err != nil {
+	if err := s.st.MoveKeys(ctx, pary); err != nil {
 		slog.Error("migracja historii po zmianie klucza", "err", err, "pary", len(pary))
 	}
-	s.mon.PrzenieśKlucze(pary)
-	s.powiad.Przenieś(pary)
+	s.mon.MoveKeys(pary)
+	s.powiad.Move(pary)
 	s.muOst.Lock()
 	for stary, nowy := range pary {
 		if stary == nowy {
@@ -393,7 +393,7 @@ func (s *Server) migrujKlucze(ctx context.Context, pary map[string]string) {
 
 // powiadom przekazuje wynik do powiadamiacza razem z opisem usługi.
 func (s *Server) powiadom(ctx context.Context, klucz string, r health.Result) {
-	if !s.powiad.Włączony() {
+	if !s.powiad.Enabled() {
 		return
 	}
 	grupa, nazwa, _ := strings.Cut(klucz, "/")
@@ -410,9 +410,9 @@ func (s *Server) powiadom(ctx context.Context, klucz string, r health.Result) {
 	}
 	s.mu.RUnlock()
 
-	s.powiad.Obserwuj(ctx, notify.Zdarzenie{
-		Klucz: klucz, Nazwa: nazwa, Grupa: grupa, URL: adres,
-		Stan: string(r.State), Kod: r.Code, Błąd: r.Err, MS: r.MS, Kiedy: r.At,
+	s.powiad.Observe(ctx, notify.Event{
+		Key: klucz, Name: nazwa, Group: grupa, URL: adres,
+		State: string(r.State), Code: r.Code, Err: r.Err, MS: r.MS, At: r.At,
 	})
 }
 
@@ -421,8 +421,8 @@ func (s *Server) sprzątaj(ctx context.Context) {
 	t := time.NewTicker(6 * time.Hour)
 	defer t.Stop()
 	for {
-		_ = s.st.SprzątnijSesje(ctx)
-		if n, err := s.st.Przytnij(ctx, 30*24*time.Hour); err == nil && n > 0 {
+		_ = s.st.CleanupSessions(ctx)
+		if n, err := s.st.Prune(ctx, 30*24*time.Hour); err == nil && n > 0 {
 			slog.Info("historia przycięta", "usunięto", n)
 		}
 		// jedyne miejsce, gdzie panel sam kasuje plik z dysku — i tylko taki,
@@ -464,13 +464,13 @@ func (s *Server) wczytajPoStarcie(ctx context.Context) error {
 }
 
 func (s *Server) ostatniaDobraZHistorii(ctx context.Context) (*config.Config, string) {
-	if wersje, err := s.st.Wersje(ctx, 20); err == nil {
+	if wersje, err := s.st.Versions(ctx, 20); err == nil {
 		for _, w := range wersje {
-			pełna, err := s.st.Wersja(ctx, w.ID)
+			pełna, err := s.st.Version(ctx, w.ID)
 			if err != nil {
 				continue
 			}
-			if cfg, err := config.Load([]byte(pełna.Treść)); err == nil {
+			if cfg, err := config.Load([]byte(pełna.Content)); err == nil {
 				return cfg, "historia"
 			}
 		}
@@ -538,7 +538,7 @@ func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 	// ustawienie notify.threshold w pliku i restart cicho przywracały wartość
 	// domyślną — a w tym projekcie plik jest źródłem prawdy.
 	if !s.prógZFlagi {
-		s.powiad.UstawPróg(cfg.Notify.Threshold)
+		s.powiad.SetThreshold(cfg.Notify.Threshold)
 	}
 
 	targets := make([]health.Target, 0, 16)
@@ -567,7 +567,7 @@ func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 	for _, t := range targets {
 		żywe[t.Key] = true
 	}
-	s.powiad.Zapomnij(żywe)
+	s.powiad.Forget(żywe)
 	s.rozgłośWygląd()
 	slog.Info("config wczytany", "usług", len(targets), "grup", len(cfg.Groups))
 }
@@ -867,13 +867,13 @@ func drugi(l i18n.Lang) i18n.Lang {
 
 // wypełnijJęzyk uzupełnia wszystko, co szablon wie o języku.
 func wypełnijJęzyk(l i18n.Lang) (map[string]string, template.JS, string, string, string) {
-	t := i18n.Mapa(l)
+	t := i18n.Map(l)
 	b, err := json.Marshal(t)
 	if err != nil {
 		b = []byte("{}")
 	}
 	d := drugi(l)
-	return t, template.JS(b), string(d), d.Nazwa(), d.Krótko()
+	return t, template.JS(b), string(d), d.Name(), d.Short()
 }
 
 // Version ustawiane przy buildzie (-ldflags).
@@ -888,7 +888,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	dane := widokStrony{Title: cfg.Title, Wersja: Version, LiczbaIkon: s.ikony.Liczba(), Lang: string(lang)}
 	dane.T, dane.TJSON, dane.DrugiJezyk, dane.DrugiJezykNazwa, dane.DrugiJezykKrotko = wypełnijJęzyk(lang)
 	dane.Wyglad = s.wyglądInstancji()
@@ -1021,7 +1021,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	// baner pliku jedzie tym samym wybudzeniem — błąd pojawia się i znika na
 	// otwartych kartach bez odświeżania
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	wyślijBaner := func() bool {
 		b, err := json.Marshal(s.banerInstancji(lang))
 		if err != nil {

@@ -37,7 +37,7 @@ func bearer(token string) []string { return []string{"Authorization", "Bearer " 
 
 func nowyToken(t *testing.T, s *Server) string {
 	t.Helper()
-	token, _, err := s.st.NowyTokenAPI(s.ctx, "test", "admin")
+	token, _, err := s.st.NewAPIToken(s.ctx, "test", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestTokenyAPIWalidacjaNazwy(t *testing.T) {
 
 func TestTokenyAPILimitSztuk(t *testing.T) {
 	_, h, c := serwerOpisy(t)
-	for i := 0; i < store.MaksTokenówAPI; i++ {
+	for i := 0; i < store.MaxAPITokens; i++ {
 		if w := wyślij(h, c, "POST", "/api/tokens", `{"name":"t"}`); w.Code != http.StatusCreated {
 			t.Fatalf("token %d: kod %d", i, w.Code)
 		}
@@ -203,7 +203,7 @@ func TestBearerDziałaWyłącznieNaTrzechTrasach(t *testing.T) {
 	if string(s.plikConfigu(t)) != przed {
 		t.Error("plik configu zmieniony przez żądania z tokenem")
 	}
-	if l, _ := s.st.TokenyAPI(s.ctx); len(l) != 1 {
+	if l, _ := s.st.APITokens(s.ctx); len(l) != 1 {
 		t.Errorf("tokenów po próbach: %d, chcę 1", len(l))
 	}
 }
@@ -276,10 +276,10 @@ func TestOstatnieUżycieTokenuAktualizowaneRzadko(t *testing.T) {
 	s, h, _ := serwerOpisy(t)
 	token := nowyToken(t, s)
 	pobierz := func() string {
-		l, _ := s.st.TokenyAPI(s.ctx)
-		return l[0].OstatnieUżycie.String()
+		l, _ := s.st.APITokens(s.ctx)
+		return l[0].LastUsedAt.String()
 	}
-	if l, _ := s.st.TokenyAPI(s.ctx); !l[0].OstatnieUżycie.IsZero() {
+	if l, _ := s.st.APITokens(s.ctx); !l[0].LastUsedAt.IsZero() {
 		t.Fatal("nowy token ma last_used")
 	}
 	wyślijBezCiastka(h, "GET", "/api/status", "", bearer(token)...)
@@ -446,7 +446,7 @@ func TestTekstyTokenówMająObaJęzyki(t *testing.T) {
 		"tokeny_brak", "tokeny_odwolaj", "tokeny_potwierdz", "tokeny_uzyty", "tokeny_nieuzyty",
 		"tokeny_utworzony", "tokeny_odwolany", "kopiuj", "skopiowano", "blad_token_nazwa", "blad_token_limit"}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
-		m := i18n.Mapa(l)
+		m := i18n.Map(l)
 		for _, k := range klucze {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: brak tekstu %q", l, k)
@@ -477,23 +477,23 @@ func TestUsunięcieKontaOdwołujeTokenyAZmianaHasłaNie(t *testing.T) {
 	s := serwerTestowy(t)
 	c := ciasteczkoZalogowanego(t, s) // admin
 	h := s.Handler()
-	inny, err := s.st.DodajUżytkownika(s.ctx, "inny", "haslo12345")
+	inny, err := s.st.AddUser(s.ctx, "inny", "haslo12345")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tInnego, _, _ := s.st.NowyTokenAPI(s.ctx, "inny-tok", "inny")
-	tAdmina, _, _ := s.st.NowyTokenAPI(s.ctx, "admin-tok", "admin")
+	tInnego, _, _ := s.st.NewAPIToken(s.ctx, "inny-tok", "inny")
+	tAdmina, _, _ := s.st.NewAPIToken(s.ctx, "admin-tok", "admin")
 
 	if w := wyślij(h, c, "POST", "/api/password", `{"old":"haslo12345","new":"nowehaslo123"}`); w.Code != http.StatusOK {
 		t.Fatalf("zmiana hasła: %d %s", w.Code, w.Body)
 	}
-	if _, err := s.st.SprawdźTokenAPI(s.ctx, tAdmina); err != nil {
+	if _, err := s.st.VerifyAPIToken(s.ctx, tAdmina); err != nil {
 		t.Errorf("zmiana hasła unieważniła token: %v", err)
 	}
 	if w := wyślij(h, c, "DELETE", "/api/users/"+strconv.FormatInt(inny.ID, 10), ""); w.Code != http.StatusOK {
 		t.Fatalf("usunięcie konta: %d %s", w.Code, w.Body)
 	}
-	if _, err := s.st.SprawdźTokenAPI(s.ctx, tInnego); err == nil {
+	if _, err := s.st.VerifyAPIToken(s.ctx, tInnego); err == nil {
 		t.Error("token usuniętego konta dalej działa")
 	}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.PL} {

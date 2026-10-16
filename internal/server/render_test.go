@@ -601,7 +601,7 @@ func TestPodgladStron(t *testing.T) {
 
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r = r.WithContext(context.WithValue(r.Context(), kluczUżytkownika,
-			&store.Użytkownik{ID: 1, Login: "admin"}))
+			&store.User{ID: 1, Login: "admin"}))
 		rec := httptest.NewRecorder()
 		s.handleIndex(rec, r)
 		if rec.Code != http.StatusOK {
@@ -776,7 +776,7 @@ func TestTekstyKolejnościITytułuMająObaJęzyki(t *testing.T) {
 		"opis_kolejnosc_uslugi", "opis_kolejnosc_grupy",
 	}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
-		m := i18n.Mapa(l)
+		m := i18n.Map(l)
 		for _, k := range klucze {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: brak tekstu %q", l, k)

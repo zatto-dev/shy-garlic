@@ -108,11 +108,11 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 			kod = http.StatusNotFound
 		case errors.Is(err, config.ErrDuplikat):
 			kod = http.StatusConflict
-			komunikat = i18n.T(i18n.Wybierz(r), "blad_duplikat_nazwy")
+			komunikat = i18n.T(i18n.FromRequest(r), "blad_duplikat_nazwy")
 		case errors.Is(err, config.ErrPoleDziedziczone):
-			komunikat = i18n.T(i18n.Wybierz(r), "blad_pole_dziedziczone")
+			komunikat = i18n.T(i18n.FromRequest(r), "blad_pole_dziedziczone")
 		case errors.Is(err, config.ErrUnsupportedLayout):
-			komunikat = i18n.T(i18n.Wybierz(r), "blad_uklad_pliku")
+			komunikat = i18n.T(i18n.FromRequest(r), "blad_uklad_pliku")
 		}
 		jsonBłąd(w, kod, komunikat)
 		return false
@@ -140,7 +140,7 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 
 	if err := d.Save(); err != nil {
 		if errors.Is(err, config.ErrChangedOnDisk) {
-			jsonBłąd(w, http.StatusConflict, i18n.T(i18n.Wybierz(r), "konflikt_pliku"))
+			jsonBłąd(w, http.StatusConflict, i18n.T(i18n.FromRequest(r), "konflikt_pliku"))
 			return false
 		}
 		jsonBłąd(w, http.StatusInternalServerError, "zapis nieudany: "+err.Error())
@@ -151,7 +151,7 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 	if u := UżytkownikZŻądania(r); u != nil {
 		autor = u.Login
 	}
-	if err := s.st.ZapiszWersję(r.Context(), autor, opis, string(d.Bytes()), diff); err != nil {
+	if err := s.st.SaveVersion(r.Context(), autor, opis, string(d.Bytes()), diff); err != nil {
 		slog.Error("historia configu", "err", err)
 	}
 	s.commitDoGita(r.Context(), opis, autor)
@@ -174,7 +174,7 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 // commitDoGita zostawia ślad w repozytorium, jeśli config w nim leży.
 // Brak repo albo brak gita to nie błąd — po prostu nic się nie dzieje.
 func (s *Server) commitDoGita(ctx context.Context, opis, autor string) {
-	if !gitrepo.WRepo(ctx, s.path) {
+	if !gitrepo.InRepo(ctx, s.path) {
 		return
 	}
 	wiadomość := "shyg: " + opis
@@ -292,17 +292,17 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !config.PoprawnyAdresUsługi(ż.URL) {
-		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 		return
 	}
 	check, kluczCheck := ż.parseCheck()
 	if kluczCheck != "" {
-		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), kluczCheck))
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), kluczCheck))
 		return
 	}
 	nowyOpis, noweTagi, błąd := ż.opisITagi()
 	if błąd != "" {
-		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), błąd))
 		return
 	}
 	svc := config.Service{Name: ż.Nazwa, URL: ż.URL, Icon: ż.Ikona, Size: rozmiarZŻądania(ż.Rozmiar)}
@@ -314,7 +314,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	svc.Check = check
 
-	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_usluge"), ż.Nazwa, ż.Grupa)
+	opis := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_usluge"), ż.Nazwa, ż.Grupa)
 	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.AddService(ż.Grupa, svc) }) {
 		jsonOdp(w, http.StatusCreated, map[string]any{"ok": true})
 	}
@@ -407,7 +407,7 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
 		return
 	}
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	if !config.PoprawnyAdresUsługi(ż.URL) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
 		return
@@ -516,7 +516,7 @@ func (s *Server) handleServiceDelete(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "podaj group i name")
 		return
 	}
-	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_usunieto_usluge"), nazwa, grupa)
+	opis := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_usunieto_usluge"), nazwa, grupa)
 	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.RemoveService(grupa, nazwa) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -531,7 +531,7 @@ func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
 		DoGrupy string `json:"toGroup"`
 		Pozycja *int   `json:"index"`
 	}
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
@@ -563,7 +563,7 @@ func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
 		Nazwa   string `json:"name"`
 		Pozycja *int   `json:"index"`
 	}
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
@@ -586,7 +586,7 @@ func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
 	var ż struct {
 		Tytuł string `json:"title"`
 	}
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
@@ -619,7 +619,7 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name")
 		return
 	}
-	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_grupe"), ż.Nazwa),
+	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_grupe"), ż.Nazwa),
 		func(d *config.Document) error { return d.AddGroup(ż.Nazwa) }) {
 		jsonOdp(w, http.StatusCreated, map[string]any{"ok": true})
 	}
@@ -651,7 +651,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		return pary
 	}
-	if s.zEdycjąZKluczami(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
+	if s.zEdycjąZKluczami(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
 		migr, func(d *config.Document) error { return d.RenameGroup(ż.Nazwa, ż.NowaNazwa) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -663,7 +663,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name")
 		return
 	}
-	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_usunieto_grupe"), nazwa),
+	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_usunieto_grupe"), nazwa),
 		func(d *config.Document) error { return d.RemoveGroup(nazwa) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -694,7 +694,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "niepoprawny YAML: "+err.Error())
 		return
 	}
-	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.Wybierz(r), "opis_reczna_edycja"), nil, config.OpenSurowy,
+	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.FromRequest(r), "opis_reczna_edycja"), nil, config.OpenSurowy,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(ż.YAML)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -738,12 +738,12 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("n")); err == nil && v > 0 && v <= 500 {
 		n = v
 	}
-	h, err := s.st.Historia(r.Context(), klucz, n)
+	h, err := s.st.History(r.Context(), klucz, n)
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dostępność, próbek, _ := s.st.Dostępność(r.Context(), klucz, 24*time.Hour)
+	dostępność, próbek, _ := s.st.Availability(r.Context(), klucz, 24*time.Hour)
 
 	type punkt struct {
 		Stan  string `json:"state"`
@@ -752,7 +752,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	punkty := make([]punkt, 0, len(h))
 	for _, w := range h {
-		punkty = append(punkty, punkt{Stan: w.Stan, MS: w.MS, Kiedy: w.Kiedy.Format(time.RFC3339)})
+		punkty = append(punkty, punkt{Stan: w.State, MS: w.MS, Kiedy: w.At.Format(time.RFC3339)})
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{
 		"key":     klucz,
@@ -765,7 +765,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // ── konta ────────────────────────────────────────────────────────────────────
 
 func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
-	lista, err := s.st.Użytkownicy(r.Context())
+	lista, err := s.st.Users(r.Context())
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
@@ -790,7 +790,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
-	if _, err := s.st.DodajUżytkownika(r.Context(), strings.TrimSpace(ż.Login), ż.Hasło); err != nil {
+	if _, err := s.st.AddUser(r.Context(), strings.TrimSpace(ż.Login), ż.Hasło); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -808,12 +808,12 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nie możesz usunąć własnego konta")
 		return
 	}
-	lista, _ := s.st.Użytkownicy(r.Context())
+	lista, _ := s.st.Users(r.Context())
 	if len(lista) <= 1 {
 		jsonBłąd(w, http.StatusBadRequest, "to ostatnie konto — panel zostałby bez dostępu")
 		return
 	}
-	if err := s.st.UsuńUżytkownika(r.Context(), id); err != nil {
+	if err := s.st.RemoveUser(r.Context(), id); err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -834,18 +834,18 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusUnauthorized, "brak sesji")
 		return
 	}
-	if _, err := s.st.Sprawdź(r.Context(), ja.Login, ż.Stare); err != nil {
+	if _, err := s.st.Authenticate(r.Context(), ja.Login, ż.Stare); err != nil {
 		jsonBłąd(w, http.StatusForbidden, "obecne hasło się nie zgadza")
 		return
 	}
-	if err := s.st.ZmieńHasło(r.Context(), ja.ID, ż.Nowe); err != nil {
+	if err := s.st.ChangePassword(r.Context(), ja.ID, ż.Nowe); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// ! Zmiana hasła musi wyrzucić resztę sesji. Ktoś z ukradzionym ciasteczkiem
 	// inaczej zostawał w panelu do końca 30 dni. Bieżąca sesja zostaje.
 	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
-		if err := s.st.UsuńInneSesje(r.Context(), ja.ID, c.Value); err != nil {
+		if err := s.st.RemoveOtherSessions(r.Context(), ja.ID, c.Value); err != nil {
 			slog.Error("kończenie innych sesji po zmianie hasła", "err", err)
 		}
 	}
@@ -855,7 +855,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 // ── historia zmian configu ───────────────────────────────────────────────────
 
 func (s *Server) handleVersionsList(w http.ResponseWriter, r *http.Request) {
-	lista, err := s.st.Wersje(r.Context(), 30)
+	lista, err := s.st.Versions(r.Context(), 30)
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
@@ -871,10 +871,10 @@ func (s *Server) handleVersionsList(w http.ResponseWriter, r *http.Request) {
 	out := make([]wpis, 0, len(lista))
 	for _, w := range lista {
 		d, u := config.PodsumujDiff(w.Diff)
-		out = append(out, wpis{ID: w.ID, Kiedy: w.Kiedy.Format(time.RFC3339),
-			Autor: w.Autor, Opis: w.Opis, Dodane: d, Usunięte: u})
+		out = append(out, wpis{ID: w.ID, Kiedy: w.At.Format(time.RFC3339),
+			Autor: w.Author, Opis: w.Description, Dodane: d, Usunięte: u})
 	}
-	jsonOdp(w, http.StatusOK, map[string]any{"versions": out, "git": gitrepo.WRepo(r.Context(), s.path)})
+	jsonOdp(w, http.StatusOK, map[string]any{"versions": out, "git": gitrepo.InRepo(r.Context(), s.path)})
 }
 
 func (s *Server) handleVersionOne(w http.ResponseWriter, r *http.Request) {
@@ -883,14 +883,14 @@ func (s *Server) handleVersionOne(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "złe id")
 		return
 	}
-	v, err := s.st.Wersja(r.Context(), id)
+	v, err := s.st.Version(r.Context(), id)
 	if err != nil {
 		jsonBłąd(w, http.StatusNotFound, err.Error())
 		return
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{
-		"id": v.ID, "at": v.Kiedy.Format(time.RFC3339), "author": v.Autor,
-		"summary": v.Opis, "diff": v.Diff, "yaml": v.Treść,
+		"id": v.ID, "at": v.At.Format(time.RFC3339), "author": v.Author,
+		"summary": v.Description, "diff": v.Diff, "yaml": v.Content,
 	})
 }
 
@@ -902,18 +902,18 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "złe id")
 		return
 	}
-	v, err := s.st.Wersja(r.Context(), id)
+	v, err := s.st.Version(r.Context(), id)
 	if err != nil {
 		jsonBłąd(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if _, err := config.Load([]byte(v.Treść)); err != nil {
+	if _, err := config.Load([]byte(v.Content)); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "ta wersja się nie parsuje: "+err.Error())
 		return
 	}
-	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_przywrocono"), v.ID, v.Opis)
+	opis := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_przywrocono"), v.ID, v.Description)
 	if s.zEdycjąOtwarciem(w, r, opis, nil, config.OpenSurowy,
-		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Treść)) }) {
+		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Content)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -954,14 +954,14 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("n")); err == nil && v > 0 && v <= 1000 {
 		n = v
 	}
-	historia, err := s.st.Historia(r.Context(), klucz, n)
+	historia, err := s.st.History(r.Context(), klucz, n)
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	doba, _ := s.st.Staty(r.Context(), klucz, 24*time.Hour)
-	tydzień, _ := s.st.Staty(r.Context(), klucz, 7*24*time.Hour)
-	zmiany, _ := s.st.Zmiany(r.Context(), klucz, 12)
+	doba, _ := s.st.Stats(r.Context(), klucz, 24*time.Hour)
+	tydzień, _ := s.st.Stats(r.Context(), klucz, 7*24*time.Hour)
+	zmiany, _ := s.st.Changes(r.Context(), klucz, 12)
 
 	type punkt struct {
 		Stan  string `json:"state"`
@@ -972,8 +972,8 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 	punkty := make([]punkt, 0, len(historia))
 	for _, h := range historia {
-		punkty = append(punkty, punkt{Stan: h.Stan, MS: h.MS, Kiedy: h.Kiedy.Format(time.RFC3339),
-			Kod: h.Kod, Błąd: h.Błąd})
+		punkty = append(punkty, punkt{Stan: h.State, MS: h.MS, Kiedy: h.At.Format(time.RFC3339),
+			Kod: h.Code, Błąd: h.Err})
 	}
 
 	type zmiana struct {
@@ -986,13 +986,13 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 	zm := make([]zmiana, 0, len(zmiany))
 	for _, z := range zmiany {
-		zm = append(zm, zmiana{Kiedy: z.Kiedy.Format(time.RFC3339), Z: z.Z, Na: z.Na,
-			Błąd: z.Błąd, Kod: z.Kod})
+		zm = append(zm, zmiana{Kiedy: z.At.Format(time.RFC3339), Z: z.From, Na: z.To,
+			Błąd: z.Err, Kod: z.Code})
 	}
 
-	statyJSON := func(x store.Statystyki) map[string]any {
-		return map[string]any{"samples": x.Próbek, "uptime": x.Dostępność,
-			"p50": x.P50, "p95": x.P95, "max": x.Najgorszy}
+	statyJSON := func(x store.Statistics) map[string]any {
+		return map[string]any{"samples": x.Samples, "uptime": x.Availability,
+			"p50": x.P50, "p95": x.P95, "max": x.Worst}
 	}
 
 	ikona := s.rozwiążIkonę(svc.Icon, svc.Name)
@@ -1018,15 +1018,15 @@ func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "podaj key")
 		return
 	}
-	res, err := s.mon.SprawdźTeraz(r.Context(), klucz)
+	res, err := s.mon.CheckNow(r.Context(), klucz)
 	if err != nil {
 		jsonBłąd(w, http.StatusNotFound, err.Error())
 		return
 	}
 	// wynik od razu do historii, żeby wykres go pokazał
-	_ = s.st.ZapiszWynik(r.Context(), store.Wynik{
-		Klucz: klucz, Stan: string(res.State), Kod: res.Code,
-		MS: res.MS, Błąd: res.Err, Kiedy: res.At,
+	_ = s.st.SaveResult(r.Context(), store.Result{
+		Key: klucz, State: string(res.State), Code: res.Code,
+		MS: res.MS, Err: res.Err, At: res.At,
 	})
 	jsonOdp(w, http.StatusOK, res)
 }
@@ -1059,18 +1059,18 @@ func (s *Server) źródłoWebhooka() string {
 }
 
 func (s *Server) handleNotifyGet(w http.ResponseWriter, r *http.Request) {
-	formaty := make([]string, len(notify.Formaty))
-	for i, f := range notify.Formaty {
+	formaty := make([]string, len(notify.Formats))
+	for i, f := range notify.Formats {
 		formaty[i] = string(f)
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{
-		"wlaczony":     s.powiad.Włączony(),
+		"wlaczony":     s.powiad.Enabled(),
 		"webhook":      maskaWebhooka(s.powiad.Webhook()),
 		"zrodlo":       s.źródłoWebhooka(),
 		"format":       string(s.powiad.Format()),
 		"formatZrodlo": s.źródłoFormatu(r.Context()),
 		"formaty":      formaty,
-		"prog":         s.powiad.Próg(),
+		"prog":         s.powiad.Threshold(),
 	})
 }
 
@@ -1078,7 +1078,7 @@ func (s *Server) źródłoFormatu(ctx context.Context) string {
 	if s.formatZeŚrodowiska {
 		return "srodowisko"
 	}
-	if v, err := s.st.Ustawienie(ctx, "notify.format"); err == nil && v != "" {
+	if v, err := s.st.Setting(ctx, "notify.format"); err == nil && v != "" {
 		return "baza"
 	}
 	return "domyslny"
@@ -1087,9 +1087,9 @@ func (s *Server) źródłoFormatu(ctx context.Context) string {
 // klucz tekstu błędu dla adresu, który nie pasuje do formatu
 func błądAdresuFormatu(err error) string {
 	switch {
-	case errors.Is(err, notify.ErrAdresTelegram):
+	case errors.Is(err, notify.ErrTelegramAddress):
 		return "webhook_adres_telegram"
-	case errors.Is(err, notify.ErrAdresGotify):
+	case errors.Is(err, notify.ErrGotifyAddress):
 		return "webhook_adres_gotify"
 	}
 	return "webhook_zly_adres"
@@ -1103,7 +1103,7 @@ func błądAdresuFormatu(err error) string {
 // Najpierw walidacja WSZYSTKIEGO, potem zapis: odrzucone żądanie nie zostawia
 // po sobie połowy zmian.
 func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	var ż struct {
 		Webhook *string `json:"webhook"`
 		Format  *string `json:"format"`
@@ -1123,7 +1123,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 			jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_format_ze_srodowiska"))
 			return
 		}
-		if !notify.PoprawnyFormat(*ż.Format) {
+		if !notify.ValidFormat(*ż.Format) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_format"))
 			return
 		}
@@ -1158,29 +1158,29 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 		if ż.Webhook != nil {
 			efektywny = adres
 		}
-		if err := notify.SprawdźAdres(format, efektywny); err != nil {
+		if err := notify.ValidateAddress(format, efektywny); err != nil {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, błądAdresuFormatu(err)))
 			return
 		}
 	}
 
 	if ż.Webhook != nil {
-		if err := s.st.UstawUstawienie(r.Context(), "notify.webhook", adres); err != nil {
+		if err := s.st.SetSetting(r.Context(), "notify.webhook", adres); err != nil {
 			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.powiad.UstawWebhook(adres)
+		s.powiad.SetWebhook(adres)
 	}
 	if ż.Format != nil {
 		zapis := *ż.Format
 		if zapis == string(notify.FormatDiscord) {
 			zapis = "" // domyślny nie leży w bazie
 		}
-		if err := s.st.UstawUstawienie(r.Context(), "notify.format", zapis); err != nil {
+		if err := s.st.SetSetting(r.Context(), "notify.format", zapis); err != nil {
 			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.powiad.UstawFormat(notify.Format(*ż.Format))
+		s.powiad.SetFormat(notify.Format(*ż.Format))
 	}
 
 	if ż.Próg != nil {
@@ -1189,7 +1189,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 		}) {
 			return
 		}
-		s.powiad.UstawPróg(*ż.Próg)
+		s.powiad.SetThreshold(*ż.Próg)
 	}
 
 	s.handleNotifyGet(w, r)
@@ -1201,8 +1201,8 @@ func (s *Server) handleInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
-	if !s.powiad.Włączony() {
-		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "webhook_zrodlo_brak"))
+	if !s.powiad.Enabled() {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "webhook_zrodlo_brak"))
 		return
 	}
 	if err := s.powiad.Test(r.Context()); err != nil {
@@ -1224,8 +1224,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{
 		"version":     Version,
-		"notify":      s.powiad.Włączony(),
-		"git":         gitrepo.WRepo(r.Context(), s.path),
+		"notify":      s.powiad.Enabled(),
+		"git":         gitrepo.InRepo(r.Context(), s.path),
 		"icons":       map[string]any{"mode": s.ikony.Tryb(), "total": s.ikony.Liczba()},
 		"config":      s.path,
 		"docker":      s.dockerDostępny(),
@@ -1255,7 +1255,7 @@ func (s *Server) ileNowychWDockerze(ctx context.Context, host string) int {
 
 	ctx, anuluj := context.WithTimeout(ctx, 2*time.Second)
 	defer anuluj()
-	kandydaci, err := s.docker.Kandydaci(ctx, host)
+	kandydaci, err := s.docker.Candidates(ctx, host)
 	if err != nil {
 		return s.dockerIle
 	}
@@ -1276,7 +1276,7 @@ func (s *Server) ileNowychWDockerze(ctx context.Context, host string) int {
 	}
 	nowe := 0
 	for _, k := range kandydaci {
-		if !mamy[strings.ToLower(k.Nazwa)] && !(k.URL != "" && mamy[strings.ToLower(k.URL)]) {
+		if !mamy[strings.ToLower(k.Name)] && !(k.URL != "" && mamy[strings.ToLower(k.URL)]) {
 			nowe++
 		}
 	}
@@ -1311,7 +1311,7 @@ type żądanieWyglądu struct {
 // 400, a nie cichym wyprostowaniem. Użytkownik ma się dowiedzieć, że się
 // pomylił, zamiast dostać zapisaną wartość, o którą nie prosił.
 func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	var ż żądanieWyglądu
 	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
@@ -1413,7 +1413,7 @@ func (s *Server) dockerWłączony() bool {
 // dockerDostępny łączy oba warunki: gniazdo musi być, a użytkownik nie mógł go
 // wyłączyć w pliku.
 func (s *Server) dockerDostępny() bool {
-	return s.docker != nil && s.docker.Dostępny() && s.dockerWłączony()
+	return s.docker != nil && s.docker.Available() && s.dockerWłączony()
 }
 
 func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
@@ -1421,10 +1421,10 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	// sam", 404 „nie ma gniazda" — mylenie ich zmusza użytkownika do zgadywania,
 	// czy szukać błędu w pliku, czy w wolumenie.
 	if !s.dockerWłączony() {
-		jsonBłąd(w, http.StatusForbidden, i18n.T(i18n.Wybierz(r), "docker_wylaczony"))
+		jsonBłąd(w, http.StatusForbidden, i18n.T(i18n.FromRequest(r), "docker_wylaczony"))
 		return
 	}
-	if s.docker == nil || !s.docker.Dostępny() {
+	if s.docker == nil || !s.docker.Available() {
 		jsonBłąd(w, http.StatusNotFound, "gniazdo Dockera niedostępne")
 		return
 	}
@@ -1436,7 +1436,7 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		host = h
 	}
 
-	kandydaci, err := s.docker.Kandydaci(r.Context(), host)
+	kandydaci, err := s.docker.Candidates(r.Context(), host)
 	if err != nil {
 		jsonBłąd(w, http.StatusBadGateway, err.Error())
 		return
@@ -1458,7 +1458,7 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	type propozycja struct {
-		dockerdisc.Kandydat
+		dockerdisc.Candidate
 		Znana bool `json:"known"`
 	}
 	out := make([]propozycja, 0, len(kandydaci))
@@ -1466,12 +1466,12 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		// Docker zna tylko obraz, a ten bywa myłący: kontener „jellyfin" z
 		// obrazu nginx dostałby ikonę nginxa. Jeśli katalog ma ikonę o nazwie
 		// usługi, jest trafniejsza niż ta z obrazu.
-		if n := strings.ToLower(k.Nazwa); n != k.Ikona && s.ikony.Ma(n) {
-			k.Ikona = n
+		if n := strings.ToLower(k.Name); n != k.Icon && s.ikony.Ma(n) {
+			k.Icon = n
 		}
 		out = append(out, propozycja{
-			Kandydat: k,
-			Znana:    mamy[strings.ToLower(k.Nazwa)] || (k.URL != "" && mamy[strings.ToLower(k.URL)]),
+			Candidate: k,
+			Znana:    mamy[strings.ToLower(k.Name)] || (k.URL != "" && mamy[strings.ToLower(k.URL)]),
 		})
 	}
 
@@ -1501,20 +1501,20 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, u := range ż.Usługi {
 		if !config.PoprawnyAdresUsługi(u.URL) {
-			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 			return
 		}
 		if _, _, błąd := u.opisITagi(); błąd != "" {
-			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), błąd))
 			return
 		}
 		if _, klucz := u.parseCheck(); klucz != "" {
-			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), klucz))
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), klucz))
 			return
 		}
 	}
 
-	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)
+	opis := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)
 	ok := s.zEdycją(w, r, opis, func(d *config.Document) error {
 		for _, u := range ż.Usługi {
 			grupa := u.Grupa

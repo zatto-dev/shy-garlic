@@ -44,7 +44,7 @@ func TestKontrolaTreściZConfiguDoWyniku(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := s.mon.SprawdźTeraz(s.ctx, "G/S")
+	r, err := s.mon.CheckNow(s.ctx, "G/S")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestKontrolaTreściZConfiguDoWyniku(t *testing.T) {
 	if ostatnia != "/health" {
 		t.Errorf("sprawdzanie poszło na %q, chcę /health", ostatnia)
 	}
-	if r.State != health.StateDegraded || !strings.HasPrefix(r.Err, health.PrefiksTreści) {
+	if r.State != health.StateDegraded || !strings.HasPrefix(r.Err, health.ContentPrefix) {
 		t.Fatalf("%+v", r)
 	}
 
@@ -85,7 +85,7 @@ func TestKontrolaTreściZConfiguDoWyniku(t *testing.T) {
 
 func TestTekstyKontroliTreściMająObaJęzyki(t *testing.T) {
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
-		m := i18n.Mapa(l)
+		m := i18n.Map(l)
 		for _, k := range []string{"chip_tresc", "powod_stanu", "kontrola_get", "kontrola_zawiera", "kontrola_nie_zawiera"} {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: brak tekstu %q", l, k)

@@ -66,7 +66,7 @@ func run() error {
 		return err
 	}
 
-	if *formatWebhooka != "" && !notify.PoprawnyFormat(*formatWebhooka) {
+	if *formatWebhooka != "" && !notify.ValidFormat(*formatWebhooka) {
 		return fmt.Errorf("--webhook-format %q: dozwolone %s", *formatWebhooka, strings.Join(formatyTekst(), ", "))
 	}
 
@@ -158,8 +158,8 @@ func opisInstancji(fs *flag.FlagSet, o opcjeCLI) []server.OpisOpcji {
 }
 
 func formatyTekst() []string {
-	out := make([]string, len(notify.Formaty))
-	for i, f := range notify.Formaty {
+	out := make([]string, len(notify.Formats))
+	for i, f := range notify.Formats {
 		out[i] = string(f)
 	}
 	return out

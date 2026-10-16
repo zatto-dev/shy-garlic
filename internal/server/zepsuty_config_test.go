@@ -93,16 +93,16 @@ func TestStartZZepsutymConfigiemNieUmiera(t *testing.T) {
 func TestStartZeZepsutymConfigiemBierzeOstatniąDobrąZHistorii(t *testing.T) {
 	s := serwerNaTreści(t, configZepsuty)
 	ctx := context.Background()
-	if err := s.st.ZapiszWersję(ctx, "x", "stara", "title: Stary\ngroups:\n  - name: Archiwum\n", ""); err != nil {
+	if err := s.st.SaveVersion(ctx, "x", "stara", "title: Stary\ngroups:\n  - name: Archiwum\n", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.st.ZapiszWersję(ctx, "x", "uszkodzona", configZepsuty, ""); err != nil {
+	if err := s.st.SaveVersion(ctx, "x", "uszkodzona", configZepsuty, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.st.ZapiszWersję(ctx, "x", "dobra", configDobry, ""); err != nil {
+	if err := s.st.SaveVersion(ctx, "x", "dobra", configDobry, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.st.ZapiszWersję(ctx, "x", "też uszkodzona", configZepsuty, ""); err != nil {
+	if err := s.st.SaveVersion(ctx, "x", "też uszkodzona", configZepsuty, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.wczytajPoStarcie(ctx); err != nil {

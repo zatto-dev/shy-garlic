@@ -456,7 +456,7 @@ func (k *KatalogTeł) SprzątnijStare(używana string) int {
 // jako tło instancji idzie przez PUT /api/appearance, czyli przez diff, wersję
 // i commit. Tu lądują wyłącznie bajty.
 func (s *Server) handleTłoUpload(w http.ResponseWriter, r *http.Request) {
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	if !s.tła.Dostępny() {
 		jsonBłąd(w, http.StatusServiceUnavailable, i18n.T(lang, "tapeta_wylaczona"))
 		return
@@ -552,7 +552,7 @@ func (s *Server) handleTłaLista(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTłoUsuń(w http.ResponseWriter, r *http.Request) {
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	nazwa := r.PathValue("nazwa")
 	if !config.NazwaTła.MatchString(nazwa) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))

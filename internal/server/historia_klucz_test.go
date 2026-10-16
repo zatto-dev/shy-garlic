@@ -19,9 +19,9 @@ import (
 func zasiejHistorię(t *testing.T, s *Server, klucz string, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		err := s.st.ZapiszWynik(context.Background(), store.Wynik{
-			Klucz: klucz, Stan: "up", Kod: 200, MS: 3,
-			Kiedy: time.Now().Add(-time.Duration(n-i) * time.Minute),
+		err := s.st.SaveResult(context.Background(), store.Result{
+			Key: klucz, State: "up", Code: 200, MS: 3,
+			At: time.Now().Add(-time.Duration(n-i) * time.Minute),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -56,7 +56,7 @@ func TestPrzeniesienieMiedzyGrupamiZachowujeHistorię(t *testing.T) {
 	if n := punktyUsługi(t, h, c, "Sieć/Sonarr"); n != 4 {
 		t.Errorf("pod nowym kluczem %d punktów, chcę 4", n)
 	}
-	if hist, _ := s.st.Historia(context.Background(), "Media/Sonarr", 10); len(hist) != 0 {
+	if hist, _ := s.st.History(context.Background(), "Media/Sonarr", 10); len(hist) != 0 {
 		t.Errorf("stary klucz zachował %d wierszy", len(hist))
 	}
 }
@@ -109,7 +109,7 @@ func TestDryRunNieRuszaHistorii(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("dry: %d %s", w.Code, w.Body)
 	}
-	if hist, _ := s.st.Historia(context.Background(), "Media/Sonarr", 10); len(hist) != 2 {
+	if hist, _ := s.st.History(context.Background(), "Media/Sonarr", 10); len(hist) != 2 {
 		t.Errorf("dry-run przeniósł historię: %d wierszy", len(hist))
 	}
 }

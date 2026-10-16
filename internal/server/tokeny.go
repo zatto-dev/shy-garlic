@@ -94,12 +94,12 @@ func (s *Server) uwierzytelnijToken(w http.ResponseWriter, r *http.Request) bool
 		return false
 	}
 	token, _ := bearerZNagłówka(r)
-	t, err := s.st.SprawdźTokenAPI(r.Context(), token)
+	t, err := s.st.VerifyAPIToken(r.Context(), token)
 	switch {
 	case err == nil:
 		s.oznaczUżycieTokenu(r, t.ID)
 		return true
-	case errors.Is(err, store.ErrZłyToken):
+	case errors.Is(err, store.ErrInvalidToken):
 		s.limTokenów.zapiszPorażkę(ip)
 		if s.logiTokenów.wolno(ip, time.Now()) {
 			slog.Warn("nieudane uwierzytelnienie tokenem API", "ip", ip, "ścieżka", r.URL.Path)
@@ -123,7 +123,7 @@ func (s *Server) oznaczUżycieTokenu(r *http.Request, id int64) {
 	}
 	s.użycieTokenów[id] = teraz
 	s.muUżycie.Unlock()
-	if err := s.st.OznaczUżycieTokenu(r.Context(), id, teraz); err != nil {
+	if err := s.st.MarkTokenUsed(r.Context(), id, teraz); err != nil {
 		slog.Debug("last_used_at tokenu", "err", err)
 	}
 }
@@ -179,17 +179,17 @@ type tokenAPI struct {
 	LastUsed string `json:"lastUsed"` // pusty = nigdy
 }
 
-func tokenDoAPI(t store.TokenAPI) tokenAPI {
-	o := tokenAPI{ID: t.ID, Nazwa: t.Nazwa, Hint: t.Wskazówka, Autor: t.Autor,
-		Created: t.Utworzony.UTC().Format(time.RFC3339)}
-	if !t.OstatnieUżycie.IsZero() {
-		o.LastUsed = t.OstatnieUżycie.UTC().Format(time.RFC3339)
+func tokenDoAPI(t store.APIToken) tokenAPI {
+	o := tokenAPI{ID: t.ID, Nazwa: t.Name, Hint: t.Hint, Autor: t.Author,
+		Created: t.CreatedAt.UTC().Format(time.RFC3339)}
+	if !t.LastUsedAt.IsZero() {
+		o.LastUsed = t.LastUsedAt.UTC().Format(time.RFC3339)
 	}
 	return o
 }
 
 func (s *Server) handleTokensList(w http.ResponseWriter, r *http.Request) {
-	lista, err := s.st.TokenyAPI(r.Context())
+	lista, err := s.st.APITokens(r.Context())
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
@@ -202,7 +202,7 @@ func (s *Server) handleTokensList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	var ż struct {
 		Nazwa string `json:"name"`
 	}
@@ -214,19 +214,19 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	if u := UżytkownikZŻądania(r); u != nil {
 		autor = u.Login
 	}
-	token, wpis, err := s.st.NowyTokenAPI(r.Context(), ż.Nazwa, autor)
+	token, wpis, err := s.st.NewAPIToken(r.Context(), ż.Nazwa, autor)
 	switch {
-	case errors.Is(err, store.ErrNazwaTokenu):
+	case errors.Is(err, store.ErrTokenName):
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_token_nazwa"))
 		return
-	case errors.Is(err, store.ErrZaDużoTokenów):
+	case errors.Is(err, store.ErrTooManyTokens):
 		jsonBłąd(w, http.StatusConflict, i18n.T(lang, "blad_token_limit"))
 		return
 	case err != nil:
 		jsonBłąd(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	slog.Info("utworzono token API", "nazwa", wpis.Nazwa, "autor", autor)
+	slog.Info("utworzono token API", "nazwa", wpis.Name, "autor", autor)
 	// ! to jedyna odpowiedź z całym tokenem; nic nie ma jej zapamiętać
 	w.Header().Set("Cache-Control", "no-store")
 	o := tokenDoAPI(wpis)
@@ -241,8 +241,8 @@ func (s *Server) handleTokenDelete(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "złe id")
 		return
 	}
-	if err := s.st.UsuńTokenAPI(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrBrakTokenu) {
+	if err := s.st.RemoveAPIToken(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrTokenNotFound) {
 			jsonBłąd(w, http.StatusNotFound, err.Error())
 			return
 		}

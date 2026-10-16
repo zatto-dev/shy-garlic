@@ -257,7 +257,7 @@ func serwerMetryki(t *testing.T) (*Server, http.Handler) {
 			if u.URL == "" {
 				continue
 			}
-			if _, err := s.mon.SprawdźTeraz(s.ctx, key(g.Name, u.Name)); err != nil {
+			if _, err := s.mon.CheckNow(s.ctx, key(g.Name, u.Name)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -267,7 +267,7 @@ func serwerMetryki(t *testing.T) (*Server, http.Handler) {
 
 func pobierzMetryki(t *testing.T, s *Server, h http.Handler) (*httptest.ResponseRecorder, wyjścieMetryk) {
 	t.Helper()
-	token, _, err := s.st.NowyTokenAPI(s.ctx, "test", "admin")
+	token, _, err := s.st.NewAPIToken(s.ctx, "test", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func pobierzMetryki(t *testing.T, s *Server, h http.Handler) (*httptest.Response
 
 func TestMetrykiFormatIEscapowanie(t *testing.T) {
 	s, h := serwerMetryki(t)
-	_ = s.st.ZapiszWynik(s.ctx, store.Wynik{Klucz: "Media/Plain", Stan: "up", Kiedy: time.Now()})
+	_ = s.st.SaveResult(s.ctx, store.Result{Key: "Media/Plain", State: "up", At: time.Now()})
 	w, m := pobierzMetryki(t, s, h)
 
 	if ct := w.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4; charset=utf-8" {
@@ -366,9 +366,9 @@ func TestMetrykiDostępność24h(t *testing.T) {
 	s, h := serwerMetryki(t)
 	teraz := time.Now()
 	for i, stan := range []string{"up", "up", "up", "down"} {
-		_ = s.st.ZapiszWynik(s.ctx, store.Wynik{Klucz: "Media/Plain", Stan: stan, Kiedy: teraz.Add(-time.Duration(i+1) * time.Hour)})
+		_ = s.st.SaveResult(s.ctx, store.Result{Key: "Media/Plain", State: stan, At: teraz.Add(-time.Duration(i+1) * time.Hour)})
 	}
-	_ = s.st.ZapiszWynik(s.ctx, store.Wynik{Klucz: "Media/Plain", Stan: "down", Kiedy: teraz.Add(-72 * time.Hour)})
+	_ = s.st.SaveResult(s.ctx, store.Result{Key: "Media/Plain", State: "down", At: teraz.Add(-72 * time.Hour)})
 
 	_, m := pobierzMetryki(t, s, h)
 	// 3 z 4 próbek w oknie to „up"; piąta, sprzed 3 dni, jest poza oknem 24 h

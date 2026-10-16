@@ -1,15 +1,15 @@
 package health
 
 import (
-	"sync"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
 
-func serwerZwracający(code int) *httptest.Server {
+func statusServer(code int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if code == 302 {
 			w.Header().Set("Location", "/gdzie-indziej")
@@ -18,12 +18,12 @@ func serwerZwracający(code int) *httptest.Server {
 	}))
 }
 
-// To jest test tezy produktu. Konkurencja oblewa każdy z tych przypadków.
-func TestCheckSemantykaKodów(t *testing.T) {
+// This tests the product's thesis. The competition fails every one of these cases.
+func TestCheckCodeSemantics(t *testing.T) {
 	cases := []struct {
-		kod  int
-		chcę State
-		czemu string
+		code int
+		want State
+		why  string
 	}{
 		{200, StateUp, "oczywiste"},
 		{301, StateUp, "Glance uznaje przekierowanie za awarię"},
@@ -38,26 +38,26 @@ func TestCheckSemantykaKodów(t *testing.T) {
 	m := New()
 	defer m.Close()
 	for _, c := range cases {
-		s := serwerZwracający(c.kod)
+		s := statusServer(c.code)
 		got := Check(context.Background(), m.client, Target{URL: s.URL, Timeout: 2 * time.Second})
-		if got.State != c.chcę {
-			t.Errorf("kod %d → %s, chcę %s (%s)", c.kod, got.State, c.chcę, c.czemu)
+		if got.State != c.want {
+			t.Errorf("kod %d → %s, chcę %s (%s)", c.code, got.State, c.want, c.why)
 		}
-		if got.Code != c.kod {
-			t.Errorf("kod %d → zapisany %d", c.kod, got.Code)
+		if got.Code != c.code {
+			t.Errorf("kod %d → zapisany %d", c.code, got.Code)
 		}
 		s.Close()
 	}
 }
 
-func TestCheckRozróżniaBrakPołączeniaOdZłegoKodu(t *testing.T) {
-	s := serwerZwracający(200)
-	adres := s.URL
-	s.Close() // teraz nikt nie słucha
+func TestCheckDistinguishesNoConnectionFromBadCode(t *testing.T) {
+	s := statusServer(200)
+	address := s.URL
+	s.Close() // nobody is listening now
 
 	m := New()
 	defer m.Close()
-	got := Check(context.Background(), m.client, Target{URL: adres, Timeout: 2 * time.Second})
+	got := Check(context.Background(), m.client, Target{URL: address, Timeout: 2 * time.Second})
 	if got.State != StateDown {
 		t.Fatalf("stan = %s, chcę down", got.State)
 	}
@@ -66,13 +66,13 @@ func TestCheckRozróżniaBrakPołączeniaOdZłegoKodu(t *testing.T) {
 	}
 }
 
-func TestCheckWłasnaListaExpect(t *testing.T) {
-	s := serwerZwracający(418)
+func TestCheckCustomExpectList(t *testing.T) {
+	s := statusServer(418)
 	defer s.Close()
 
 	m := New()
 	defer m.Close()
-	// user, który wie, że jego usługa zwraca 418, ma móc to zadeklarować
+	// a user who knows their service returns 418 must be able to declare it
 	got := Check(context.Background(), m.client, Target{URL: s.URL, Expect: []int{418}, Timeout: 2 * time.Second})
 	if got.State != StateUp {
 		t.Fatalf("stan = %s, chcę up dla jawnie oczekiwanego 418", got.State)
@@ -93,9 +93,9 @@ func TestCheckTimeout(t *testing.T) {
 	}
 }
 
-// Scheduler ma chodzić po stronie serwera, bez otwartej przeglądarki.
-func TestMonitorSprawdzaSamZSiebie(t *testing.T) {
-	s := serwerZwracający(200)
+// The scheduler must run server-side, with no browser open.
+func TestMonitorChecksOnItsOwn(t *testing.T) {
+	s := statusServer(200)
 	defer s.Close()
 
 	m := New()
@@ -103,13 +103,13 @@ func TestMonitorSprawdzaSamZSiebie(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	zmiany, odepnij := m.Subscribe()
-	defer odepnij()
+	changes, unsubscribe := m.Subscribe()
+	defer unsubscribe()
 
 	m.SetTargets(ctx, []Target{{Key: "test", URL: s.URL, Interval: 50 * time.Millisecond, Timeout: time.Second}})
 
 	select {
-	case <-zmiany:
+	case <-changes:
 	case <-time.After(3 * time.Second):
 		t.Fatal("scheduler nie odpalił sprawdzenia sam z siebie")
 	}
@@ -117,27 +117,27 @@ func TestMonitorSprawdzaSamZSiebie(t *testing.T) {
 	if got := m.Snapshot()["test"]; got.State != StateUp {
 		t.Fatalf("stan = %s, chcę up", got.State)
 	}
-	// historia ma rosnąć bez udziału przeglądarki
+	// history must grow without the browser's involvement
 	time.Sleep(200 * time.Millisecond)
 	if len(m.History("test")) < 2 {
 		t.Fatalf("historia = %d wpisów, chcę >= 2", len(m.History("test")))
 	}
 }
 
-// SHYG-41: po zmianie klucza karta zachowuje stan i wykres.
-func TestPrzenieśKluczeZachowujeStanIWykres(t *testing.T) {
+// SHYG-41: after a key change the card keeps its state and chart.
+func TestMoveKeysKeepsStateAndChart(t *testing.T) {
 	m := New()
 	defer m.Close()
 	m.record("A/x", Result{State: StateUp, MS: 7, At: time.Now()})
 	m.record("A/x", Result{State: StateDown, At: time.Now()})
 	m.record("A/inny", Result{State: StateUp, At: time.Now()})
 
-	m.PrzenieśKlucze(map[string]string{"A/x": "B/x", "Brak/brak": "C/c"})
+	m.MoveKeys(map[string]string{"A/x": "B/x", "Brak/brak": "C/c"})
 
 	if got := m.Snapshot()["B/x"].State; got != StateDown {
 		t.Errorf("stan pod nowym kluczem = %q, chcę down", got)
 	}
-	if _, ma := m.Snapshot()["A/x"]; ma {
+	if _, has := m.Snapshot()["A/x"]; has {
 		t.Error("stary klucz został w snapshocie")
 	}
 	if n := len(m.History("B/x")); n != 2 {
@@ -150,19 +150,19 @@ func TestPrzenieśKluczeZachowujeStanIWykres(t *testing.T) {
 		t.Error("cudzy stan ruszony")
 	}
 
-	// SetTargets na nowym kluczu nie kasuje stanu (nie wraca „unknown")
+	// SetTargets on a new key does not delete the state (no return to "unknown")
 	m.SetTargets(context.Background(), []Target{{Key: "B/x", URL: "http://127.0.0.1:1", Interval: time.Hour}})
 	if got := m.Snapshot()["B/x"].State; got == StateUnknown || got == "" {
 		t.Errorf("SetTargets zgubił stan: %q", got)
 	}
 }
 
-// SHYG-44: SetTargets wołane równolegle (reload z watch() i z zapisu z panelu)
-// pisało m.cancel bez muteksu — osierocone pętle i wyścig na WaitGroup.
-// Test ma sens pod -race; bez niego sprawdza przynajmniej brak paniki i wycieku.
-func TestSetTargetsRównolegle(t *testing.T) {
+// SHYG-44: SetTargets called concurrently (reload from watch() and from a panel save)
+// wrote m.cancel without a mutex — orphaned loops and a race on the WaitGroup.
+// The test only makes full sense under -race; without it it at least checks there is no panic or leak.
+func TestSetTargetsConcurrently(t *testing.T) {
 	m := New()
-	cele := []Target{
+	targets := []Target{
 		{Key: "A/a", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: 100 * time.Millisecond},
 		{Key: "A/b", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: 100 * time.Millisecond},
 	}
@@ -172,13 +172,13 @@ func TestSetTargetsRównolegle(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 20; i++ {
-				m.SetTargets(context.Background(), cele)
+				m.SetTargets(context.Background(), targets)
 			}
 		}()
 	}
 	wg.Wait()
 
-	// po wszystkim działa dokładnie jeden komplet pętli i Close je kończy
+	// afterwards exactly one full set of loops is running and Close ends them
 	done := make(chan struct{})
 	go func() { m.Close(); close(done) }()
 	select {
@@ -186,5 +186,5 @@ func TestSetTargetsRównolegle(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close wisi — zostały osierocone pętle")
 	}
-	m.wg.Wait() // nic nie może zostać po Close
+	m.wg.Wait() // nothing may remain after Close
 }

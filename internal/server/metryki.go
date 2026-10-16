@@ -74,13 +74,13 @@ func (r *rodzinaMetryk) zapisz(b *strings.Builder) {
 // dostępnościZCache — odpowiedź Dostępności jest liczona co najwyżej raz na
 // dostępnościTTL; scrape co kilka sekund nie ma za każdym razem grupować
 // dziesiątek tysięcy wierszy historii.
-func (s *Server) dostępnościZCache(ctx context.Context) map[string]store.DostępnośćUsługi {
+func (s *Server) dostępnościZCache(ctx context.Context) map[string]store.ServiceAvailability {
 	s.muDostępności.Lock()
 	defer s.muDostępności.Unlock()
 	if s.dostępnościMapa != nil && time.Now().Before(s.dostępnościDo) {
 		return s.dostępnościMapa
 	}
-	m, err := s.st.Dostępności(ctx, 24*time.Hour)
+	m, err := s.st.Availabilities(ctx, 24*time.Hour)
 	if err != nil {
 		return s.dostępnościMapa // lepiej stare dane niż żadne
 	}
@@ -129,8 +129,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 					}
 					ostatnie.dodaj(et, float64(wynik.At.Unix()))
 				}
-				if d, ok := dostępności[klucz]; ok && d.Próbek > 0 {
-					dostępność.dodaj(et+`,window="24h"`, float64(d.Udanych)/float64(d.Próbek))
+				if d, ok := dostępności[klucz]; ok && d.Samples > 0 {
+					dostępność.dodaj(et+`,window="24h"`, float64(d.Successes)/float64(d.Samples))
 				}
 			}
 		}

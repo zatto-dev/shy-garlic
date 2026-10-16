@@ -108,12 +108,12 @@ func TestServiceMoveWGrupieIMiędzyGrupami(t *testing.T) {
 	}
 
 	// każdy ruch zostawia wpis w historii (najnowszy pierwszy), z opisem
-	wersje, err := s.st.Wersje(s.ctx, 10)
+	wersje, err := s.st.Versions(s.ctx, 10)
 	if err != nil || len(wersje) != 3 {
 		t.Fatalf("historia: %v, %d wpisów, chcę 3", err, len(wersje))
 	}
-	if !strings.Contains(wersje[0].Opis, "Jellyfin") || !strings.Contains(wersje[1].Opis, "position 2") {
-		t.Errorf("opisy historii: %q / %q", wersje[0].Opis, wersje[1].Opis)
+	if !strings.Contains(wersje[0].Description, "Jellyfin") || !strings.Contains(wersje[1].Description, "position 2") {
+		t.Errorf("opisy historii: %q / %q", wersje[0].Description, wersje[1].Description)
 	}
 }
 
@@ -263,7 +263,7 @@ func TestNoweTrasyWymagająSameOriginIZalogowania(t *testing.T) {
 func TestRuchWToSamoMiejsceNieTworzyWersji(t *testing.T) {
 	s, h, c := serwerKolejność(t)
 	przed := string(s.plikConfigu(t))
-	wersjePrzed, err := s.st.Wersje(s.ctx, 100)
+	wersjePrzed, err := s.st.Versions(s.ctx, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestRuchWToSamoMiejsceNieTworzyWersji(t *testing.T) {
 	if po := string(s.plikConfigu(t)); po != przed {
 		t.Error("plik się zmienił przy ruchu w to samo miejsce")
 	}
-	wersjePo, _ := s.st.Wersje(s.ctx, 100)
+	wersjePo, _ := s.st.Versions(s.ctx, 100)
 	if len(wersjePo) != len(wersjePrzed) {
 		t.Errorf("wersji w historii: %d -> %d, chcę bez zmiany", len(wersjePrzed), len(wersjePo))
 	}

@@ -26,8 +26,8 @@ type kluczKontekstu string
 const kluczUżytkownika kluczKontekstu = "user"
 
 // UżytkownikZŻądania zwraca zalogowanego użytkownika, jeśli jest.
-func UżytkownikZŻądania(r *http.Request) *store.Użytkownik {
-	u, _ := r.Context().Value(kluczUżytkownika).(*store.Użytkownik)
+func UżytkownikZŻądania(r *http.Request) *store.User {
+	u, _ := r.Context().Value(kluczUżytkownika).(*store.User)
 	return u
 }
 
@@ -232,7 +232,7 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 		_, maBearer := bearerZNagłówka(r)
 		maszynowa := trasaTokenowa(r) && (maBearer || r.URL.Path == "/metrics")
 
-		if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
+		if n, err := s.st.UserCount(r.Context()); err == nil && n == 0 {
 			if maszynowa {
 				odmówBezSesji(w, r)
 				return
@@ -243,7 +243,7 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 
 		c, err := r.Cookie(ciasteczkoSesji)
 		if err == nil {
-			if u, err := s.st.Sesja(r.Context(), c.Value); err == nil {
+			if u, err := s.st.Session(r.Context(), c.Value); err == nil {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), kluczUżytkownika, u)))
 				return
 			}
@@ -270,7 +270,7 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 }
 
 func (s *Server) ustawSesję(w http.ResponseWriter, r *http.Request, userID int64) error {
-	token, wygasa, err := s.st.NowaSesja(r.Context(), userID)
+	token, wygasa, err := s.st.NewSession(r.Context(), userID)
 	if err != nil {
 		return err
 	}
@@ -320,15 +320,15 @@ type widokLogowania struct {
 func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	_ = r.ParseForm()
-	l := i18n.Rozpoznaj(r.FormValue("lang"))
+	l := i18n.ParseLang(r.FormValue("lang"))
 	if l == "" {
-		l = i18n.Rozpoznaj(r.URL.Query().Get("set"))
+		l = i18n.ParseLang(r.URL.Query().Get("set"))
 	}
 	if l == "" {
 		l = i18n.EN
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: i18n.Ciasteczko, Value: string(l), Path: "/",
+		Name: i18n.CookieName, Value: string(l), Path: "/",
 		MaxAge: 365 * 24 * 3600, HttpOnly: false,
 		Secure: poHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
@@ -341,17 +341,17 @@ func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
-	if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
+	if n, err := s.st.UserCount(r.Context()); err == nil && n == 0 {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
 	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
-		if _, err := s.st.Sesja(r.Context(), c.Value); err == nil {
+		if _, err := s.st.Session(r.Context(), c.Value); err == nil {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 	}
-	lang := i18n.Wybierz(r)
+	lang := i18n.FromRequest(r)
 	s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
 		Next: r.URL.Query().Get("next"), Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
 }
@@ -370,19 +370,19 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	if !s.lim.wolno(ip) {
 		slog.Warn("za dużo prób logowania", "ip", ip)
 		w.WriteHeader(http.StatusTooManyRequests)
-		lang := i18n.Wybierz(r)
+		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
 			Błąd: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
 			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
 		return
 	}
 
-	u, err := s.st.Sprawdź(r.Context(), login, hasło)
+	u, err := s.st.Authenticate(r.Context(), login, hasło)
 	if err != nil {
 		s.lim.zapiszPorażkę(ip)
 		slog.Warn("nieudane logowanie", "login", login, "ip", ip)
 		w.WriteHeader(http.StatusUnauthorized)
-		lang := i18n.Wybierz(r)
+		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
 			Błąd: i18n.T(lang, "zle_dane"), Login: login, Next: next,
 			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
@@ -398,7 +398,7 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
-		_ = s.st.UsuńSesję(r.Context(), c.Value)
+		_ = s.st.RemoveSession(r.Context(), c.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: ciasteczkoSesji, Value: "", Path: "/", MaxAge: -1,
@@ -409,7 +409,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // handleSetup działa wyłącznie dopóki nie ma ani jednego konta.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	n, err := s.st.LiczbaUżytkowników(r.Context())
+	n, err := s.st.UserCount(r.Context())
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -419,7 +419,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		lang := i18n.Wybierz(r)
+		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
 			Setup: true, Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
 		return
@@ -431,10 +431,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
 	hasło := r.FormValue("password")
-	u, err := s.st.DodajUżytkownika(r.Context(), login, hasło)
+	u, err := s.st.AddUser(r.Context(), login, hasło)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		lang := i18n.Wybierz(r)
+		lang := i18n.FromRequest(r)
 		komunikat := i18n.T(lang, "blad_konta")
 		if strings.Contains(err.Error(), "8 characters") {
 			komunikat = i18n.T(lang, "haslo_za_krotkie")
@@ -467,14 +467,14 @@ func BootstrapUżytkownika(ctx context.Context, st *store.Store, login, hasło s
 	if login == "" || hasło == "" {
 		return nil
 	}
-	n, err := st.LiczbaUżytkowników(ctx)
+	n, err := st.UserCount(ctx)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	if _, err := st.DodajUżytkownika(ctx, login, hasło); err != nil && !errors.Is(err, store.ErrJużIstnieje) {
+	if _, err := st.AddUser(ctx, login, hasło); err != nil && !errors.Is(err, store.ErrUserExists) {
 		return err
 	}
 	slog.Info("konto administratora utworzone z ENV", "login", login)
@@ -485,11 +485,11 @@ func BootstrapUżytkownika(ctx context.Context, st *store.Store, login, hasło s
 // zJęzykiem uzupełnia widok logowania o teksty, przełącznik języka i tło.
 func (s *Server) zJęzykiem(l i18n.Lang, w widokLogowania) widokLogowania {
 	w.Lang = string(l)
-	w.T = i18n.Mapa(l)
+	w.T = i18n.Map(l)
 	d := drugi(l)
 	w.DrugiJezyk = string(d)
-	w.DrugiJezykNazwa = d.Nazwa()
-	w.DrugiJezykKrotko = d.Krótko()
+	w.DrugiJezykNazwa = d.Name()
+	w.DrugiJezykKrotko = d.Short()
 	w.Wyglad = s.wyglądBramy()
 	return w
 }

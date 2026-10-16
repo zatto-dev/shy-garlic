@@ -71,11 +71,11 @@ func katalogTeł(s *Server) string { return s.tła.dir }
 // ciasteczkoZalogowanego zakłada konto i zwraca ciasteczko jego sesji.
 func ciasteczkoZalogowanego(t *testing.T, s *Server) *http.Cookie {
 	t.Helper()
-	u, err := s.st.DodajUżytkownika(context.Background(), "admin", "haslo12345")
+	u, err := s.st.AddUser(context.Background(), "admin", "haslo12345")
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := s.st.NowaSesja(context.Background(), u.ID)
+	token, _, err := s.st.NewSession(context.Background(), u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestWyglądPutIdzieProzezDiff(t *testing.T) {
 	if !strings.Contains(string(mustRead(t, s.path)), "# Stopka testowa: ma zostać na dole.") {
 		t.Fatal("zapis wyglądu zjadł komentarz stopki")
 	}
-	wersje, err := s.st.Wersje(context.Background(), 30)
+	wersje, err := s.st.Versions(context.Background(), 30)
 	if err != nil {
 		t.Fatal(err)
 	}

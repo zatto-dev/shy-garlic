@@ -73,7 +73,7 @@ func TestPatchUsługiUstawiaOpisITagi(t *testing.T) {
 		t.Fatalf("%+v", u)
 	}
 	// wpis w historii z opisem zmiany
-	if v, _ := s.st.Wersje(s.ctx, 1); len(v) != 1 {
+	if v, _ := s.st.Versions(s.ctx, 1); len(v) != 1 {
 		t.Error("brak wpisu w historii")
 	}
 }
@@ -218,7 +218,7 @@ func TestOpisITagiMajaTłumaczenia(t *testing.T) {
 	klucze := []string{"opis_uslugi", "opis_uslugi_placeholder", "tagi_uslugi", "tagi_placeholder",
 		"blad_opis_dlugi", "blad_opis_znaki", "blad_tagi", "blad_pole_dziedziczone"}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
-		m := i18n.Mapa(l)
+		m := i18n.Map(l)
 		for _, k := range klucze {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: brak tekstu %q", l, k)
