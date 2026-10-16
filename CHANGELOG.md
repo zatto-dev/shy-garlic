@@ -10,6 +10,8 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-16
+
 ### Added
 
 - **Edit the dashboard title in place.** In edit mode a pencil next to the title
@@ -253,6 +255,7 @@ First working version: the dashboard, the heartbeat, sign-in, and an editor
 that writes YAML back through byte-level splicing, so comments, anchors and
 formatting survive every edit made through the UI.
 
+[0.13.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.0
 [0.12.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.12.0
 [0.11.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.11.0
 [0.10.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.10.0
