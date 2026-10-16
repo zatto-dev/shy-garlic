@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -45,11 +46,29 @@ type Server struct {
 	// webhookZeŚrodowiska i instancja są ustawiane raz, w New, i nigdy potem —
 	// dlatego bez mutexu.
 	webhookZeŚrodowiska bool
+	// formatZeŚrodowiska — format wiadomości z flagi albo zmiennej; ma tę samą
+	// pierwszeństwo co adres, ale jest niezależny od niego.
+	formatZeŚrodowiska bool
 	// prógZFlagi — --fail-threshold podany jawnie. Wtedy plik go nie rusza,
 	// tak samo jak przy webhooku: to, co przyszło z zewnątrz przy starcie,
 	// jest własnością deployu.
 	prógZFlagi bool
 	instancja  []OpisOpcji
+	// Tokeny API i /metrics (SHYG-49).
+	limTokenów  *limiter     // błędne tokeny — osobno od limitu logowania
+	logiTokenów *tłumikLogów // jedna linia logu na adres na minutę
+	// metrykiCIDR — sieci, z których /metrics odpowiada bez tokenu; ustawiane
+	// raz w New, potem tylko do odczytu.
+	metrykiCIDR []netip.Prefix
+
+	muUżycie      sync.Mutex
+	użycieTokenów map[int64]time.Time // kiedy ostatnio zapisaliśmy last_used_at
+
+	muDostępności   sync.Mutex
+	dostępnościMapa map[string]store.DostępnośćUsługi
+	dostępnościDo   time.Time
+	dostępnościTTL  time.Duration
+
 	// klientProxy pobiera ikony podane pełnym adresem; osobne pole, bo test
 	// musi umieć podstawić klienta bez blokady adresów prywatnych
 	klientProxy *http.Client
@@ -59,9 +78,27 @@ type Server struct {
 	// nie mogą nadpisać się nawzajem
 	edycja sync.Mutex
 
+	// reloadMu serializuje reload(): wołają go Start, zapis z panelu (pod
+	// edycja) i watch(). Kolejność blokad zawsze edycja → reloadMu.
+	reloadMu sync.Mutex
+
+	// ostatnie — znacznik ostatniego wyniku zapisanego do bazy, per klucz.
+	// Na polu serwera (nie lokalnie w zapisujHistorię), bo zmiana klucza musi
+	// go przepiąć, inaczej ten sam wynik trafiłby do historii drugi raz.
+	muOst    sync.Mutex
+	ostatnie map[string]time.Time
+
 	mu    sync.RWMutex
 	cfg   *config.Config
 	stamp string // rozmiar+mtime pliku, do wykrycia edycji z zewnątrz
+
+	// Stan pliku: błąd (nie da się wczytać → panel działa na poprzedniej
+	// konfiguracji) i ostrzeżenia (wczytał się, ale coś w nim podejrzane).
+	// Chronione przez mu.
+	błądPliku   *config.BłądPliku
+	ostrzeżenia []config.Ostrzeżenie
+	źródłoCfg   string // "" | "poprzednia" | "historia" | "pusta" — skąd config przy błędzie
+	ostatniBłąd string // do logowania każdego błędu raz, nie co tick watch()
 
 	// drugi nadajnik SSE: zmiany wyglądu. Osobny od health.Monitor, bo tamten
 	// strumień jest nietypowany (data: bez event:) i rysuj() by się na tym
@@ -85,11 +122,15 @@ type Opcje struct {
 	PrógAwarii    int      // ile nieudanych sprawdzeń z rzędu zanim powiadomimy
 	DockerSock    string   // gniazdo Dockera do podpowiadania usług (pusty = domyślne)
 	TrustedProxy  []string // CIDR-y proxy, którym wolno mówić X-Forwarded-*
+	MetricsAllow  []string // CIDR-y, z których /metrics odpowiada bez tokenu (domyślnie: żadne)
 
 	// WebhookZeŚrodowiska — adres przyszedł z flagi albo ze zmiennej, więc
 	// panel go nie nadpisze. Deploy ma wygrywać z klikaniem: inaczej restart
 	// kontenera po cichu cofałby zmianę zrobioną w UI.
 	WebhookZeŚrodowiska bool
+	// WebhookFormat — format wiadomości podany flagą/zmienną; pusty = z bazy.
+	WebhookFormat              string
+	WebhookFormatZeŚrodowiska bool
 	// PrógZFlagi — --fail-threshold podany jawnie w linii poleceń.
 	PrógZFlagi bool
 	// Instancja — opcje startu do pokazania w panelu, wyłącznie do odczytu.
@@ -123,11 +164,21 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 		docker: dockerdisc.Nowy(o.DockerSock),
 
 		webhookZeŚrodowiska: o.WebhookZeŚrodowiska,
+		formatZeŚrodowiska:  o.WebhookFormatZeŚrodowiska && o.WebhookFormat != "",
 		prógZFlagi:          o.PrógZFlagi,
 		instancja:           o.Instancja,
 
 		klientProxy: klientIkonZewnętrznych(),
 		subWygląd:   map[chan struct{}]struct{}{},
+		ostatnie:    map[string]time.Time{},
+
+		limTokenów:     nowyLimiterZProgiem(progBłędnychTokenów),
+		logiTokenów:    &tłumikLogów{okres: time.Minute},
+		użycieTokenów:  map[int64]time.Time{},
+		dostępnościTTL: 30 * time.Second,
+	}
+	if err := s.ustawMetrykiAllow(o.MetricsAllow); err != nil {
+		return nil, err
 	}
 
 	// Adres z bazy podnosimy tylko wtedy, gdy środowisko nic nie narzuciło —
@@ -142,7 +193,89 @@ func New(path string, st *store.Store, o Opcje) (*Server, error) {
 			s.powiad.UstawWebhook(adres)
 		}
 	}
+
+	// Format: to samo pierwszeństwo — środowisko, potem baza, potem discord.
+	// Nieznany format z bazy (np. z nowszej wersji) nie może wyłączyć alertów,
+	// więc UstawFormat zamienia go na domyślny.
+	if s.formatZeŚrodowiska {
+		s.powiad.UstawFormat(notify.Format(o.WebhookFormat))
+	} else if f, err := st.Ustawienie(context.Background(), "notify.format"); err != nil {
+		return nil, fmt.Errorf("czytam format webhooka z bazy: %w", err)
+	} else if f != "" {
+		s.powiad.UstawFormat(notify.Format(f))
+	}
 	return s, nil
+}
+
+// ── baner stanu pliku ────────────────────────────────────────────────────────
+
+// banerAPI — to, co karta pokazuje nad listą usług: błąd pliku (z numerem
+// linii) i/lub ostrzeżenia. Teksty gotowe, w języku żądania.
+type banerAPI struct {
+	Stan        string   `json:"state"` // ok | error | warnings
+	Tytuł       string   `json:"title"`
+	Błąd        string   `json:"error"`
+	Ostrzeżenia []string `json:"warnings"`
+}
+
+func (s *Server) banerInstancji(l i18n.Lang) banerAPI {
+	s.mu.RLock()
+	błąd := s.błądPliku
+	ostrz := append([]config.Ostrzeżenie(nil), s.ostrzeżenia...)
+	skąd := s.źródłoCfg
+	s.mu.RUnlock()
+
+	b := banerAPI{Stan: "ok", Ostrzeżenia: []string{}}
+	if błąd != nil {
+		// ostrzeżenia dotyczą POPRZEDNIEJ wersji pliku (numery linii się
+		// rozjechały) — przy błędzie nie pokazujemy ich obok nowego
+		ostrz = nil
+	}
+	for _, o := range ostrz {
+		b.Ostrzeżenia = append(b.Ostrzeżenia, opisOstrzeżenia(l, o))
+	}
+	if len(b.Ostrzeżenia) > 0 {
+		b.Stan = "warnings"
+		b.Tytuł = i18n.T(l, "baner_ostrz_tytul")
+	}
+	if błąd != nil {
+		b.Stan = "error"
+		klucz := "baner_blad_poprzednia"
+		switch skąd {
+		case "historia":
+			klucz = "baner_blad_historia"
+		case "pusta":
+			klucz = "baner_blad_pusta"
+		}
+		b.Tytuł = i18n.T(l, klucz)
+		switch {
+		case błąd.Linia > 0 && błąd.Kolumna > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), błąd.Linia, błąd.Kolumna, błąd.Komunikat)
+		case błąd.Linia > 0:
+			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), błąd.Linia, błąd.Komunikat)
+		default:
+			b.Błąd = błąd.Komunikat
+		}
+	}
+	return b
+}
+
+func opisOstrzeżenia(l i18n.Lang, o config.Ostrzeżenie) string {
+	if o.Rodzaj == config.RodzajAdres {
+		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Usługa, o.Grupa, o.Adres)
+	}
+	gdzie := o.Ścieżka
+	if gdzie == "" {
+		gdzie = i18n.T(l, "baner_poziom_glowny")
+	}
+	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Klucz, gdzie)
+	if o.Sugestia != "" {
+		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Sugestia)
+	}
+	if o.Linia > 0 {
+		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Linia) + ": " + t
+	}
+	return t
 }
 
 // ── rozgłaszanie zmiany wyglądu ──────────────────────────────────────────────
@@ -183,7 +316,7 @@ func configBytes(path string) ([]byte, error) { return os.ReadFile(path) }
 // Start wczytuje config, uruchamia sprawdzanie i pilnuje pliku.
 func (s *Server) Start(ctx context.Context) error {
 	s.ctx = ctx
-	if err := s.reload(ctx); err != nil {
+	if err := s.wczytajPoStarcie(ctx); err != nil {
 		return err
 	}
 	go s.watch(ctx)
@@ -201,17 +334,21 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) zapisujHistorię(ctx context.Context) {
 	zmiany, odepnij := s.mon.Subscribe()
 	defer odepnij()
-	ostatnie := map[string]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-zmiany:
 			for klucz, r := range s.mon.Snapshot() {
-				if r.At.IsZero() || !r.At.After(ostatnie[klucz]) {
+				s.muOst.Lock()
+				nowy := !r.At.IsZero() && r.At.After(s.ostatnie[klucz])
+				if nowy {
+					s.ostatnie[klucz] = r.At
+				}
+				s.muOst.Unlock()
+				if !nowy {
 					continue
 				}
-				ostatnie[klucz] = r.At
 				err := s.st.ZapiszWynik(ctx, store.Wynik{
 					Klucz: klucz, Stan: string(r.State), Kod: r.Code,
 					MS: r.MS, Błąd: r.Err, Kiedy: r.At,
@@ -223,6 +360,35 @@ func (s *Server) zapisujHistorię(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// migrujKlucze przenosi wszystko, co jest zindeksowane kluczem usługi
+// (grupa/nazwa), po zmianie nazwy albo przeniesieniu do innej grupy: historię
+// w SQLite, stan monitora i stan powiadamiacza. Wołane po udanym zapisie YAML
+// i PRZED reload() — reload wyrzuca stan kluczy, których nie zna.
+//
+// ! Błąd migracji bazy jest tylko logowany: YAML już zapisany jest źródłem
+// prawdy i nie wolno go cofać dla wykresu. Najgorszy skutek to pusty pasek.
+func (s *Server) migrujKlucze(ctx context.Context, pary map[string]string) {
+	if len(pary) == 0 {
+		return
+	}
+	if err := s.st.PrzenieśKlucze(ctx, pary); err != nil {
+		slog.Error("migracja historii po zmianie klucza", "err", err, "pary", len(pary))
+	}
+	s.mon.PrzenieśKlucze(pary)
+	s.powiad.Przenieś(pary)
+	s.muOst.Lock()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if t, ok := s.ostatnie[stary]; ok {
+			s.ostatnie[nowy] = t
+			delete(s.ostatnie, stary)
+		}
+	}
+	s.muOst.Unlock()
 }
 
 // powiadom przekazuje wynik do powiadamiacza razem z opisem usługi.
@@ -276,16 +442,98 @@ func (s *Server) Close() {
 	s.tła.Zamknij()
 }
 
+// wczytajPoStarcie wczytuje config przy starcie, ale nie umiera na złym pliku.
+//
+// ! Wcześniej błąd w YAML-u kończył proces, a w Dockerze z restart: always to
+// pętla restartów bez żadnej strony, na której dałoby się przeczytać dlaczego.
+// Teraz panel wstaje, a baner pokazuje błąd z numerem linii. Zastępczy config to
+// najnowsza wersja z historii w SQLite, która się parsuje; bez niej — pusty.
+// Pliku na dysku nie ruszamy: to właśnie jego człowiek poprawia.
+func (s *Server) wczytajPoStarcie(ctx context.Context) error {
+	if err := s.reload(ctx); err == nil {
+		return nil
+	}
+	cfg, skąd := s.ostatniaDobraZHistorii(ctx)
+	s.mu.Lock()
+	s.cfg = cfg
+	s.źródłoCfg = skąd
+	s.mu.Unlock()
+	s.zastosuj(ctx, cfg)
+	slog.Warn("start mimo błędu w configu", "zastępczy", skąd)
+	return nil
+}
+
+func (s *Server) ostatniaDobraZHistorii(ctx context.Context) (*config.Config, string) {
+	if wersje, err := s.st.Wersje(ctx, 20); err == nil {
+		for _, w := range wersje {
+			pełna, err := s.st.Wersja(ctx, w.ID)
+			if err != nil {
+				continue
+			}
+			if cfg, err := config.Load([]byte(pełna.Treść)); err == nil {
+				return cfg, "historia"
+			}
+		}
+	}
+	puste, _ := config.Load([]byte("groups: []\n"))
+	return puste, "pusta"
+}
+
 func (s *Server) reload(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	// ! stempel PRZED odczytem: plik zmieniony między odczytem a stat() dałby
+	// stempel nowszy niż wczytana treść i zmiana zostałaby zgubiona na zawsze
+	stamp := s.stampOf()
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+		return s.configZepsuty(stamp, config.BłądPliku{Komunikat: "read config: " + err.Error()}, err)
 	}
 	cfg, err := config.Load(raw)
 	if err != nil {
-		return err
+		return s.configZepsuty(stamp, config.RozbierzBłąd(err), err)
 	}
 
+	ostrzeżenia := append(config.Ostrzeżenia(raw), config.OstrzeżeniaAdresów(cfg)...)
+	for _, o := range ostrzeżenia {
+		slog.Warn("config: podejrzane miejsce", "rodzaj", o.Rodzaj, "linia", o.Linia,
+			"klucz", o.Klucz, "ścieżka", o.Ścieżka, "usługa", o.Usługa)
+	}
+
+	s.mu.Lock()
+	s.cfg = cfg
+	s.stamp = stamp
+	s.błądPliku = nil
+	s.ostrzeżenia = ostrzeżenia
+	s.źródłoCfg = ""
+	s.ostatniBłąd = ""
+	s.mu.Unlock()
+
+	s.zastosuj(ctx, cfg)
+	return nil
+}
+
+// configZepsuty zapamiętuje błąd pliku. Panel zostaje przy poprzedniej
+// konfiguracji, a stempel jest ustawiany MIMO błędu — dzięki temu watch() nie
+// próbuje w kółko co 2 s tego samego pliku, tylko czeka na kolejną zmianę.
+func (s *Server) configZepsuty(stamp string, b config.BłądPliku, err error) error {
+	opis := fmt.Sprintf("%d:%d:%s", b.Linia, b.Kolumna, b.Komunikat)
+	s.mu.Lock()
+	s.stamp = stamp
+	nowy := opis != s.ostatniBłąd
+	s.ostatniBłąd = opis
+	s.błądPliku = &b
+	s.mu.Unlock()
+	if nowy { // każdy odrębny błąd raz
+		slog.Error("config niepoprawny — panel zostaje przy poprzedniej konfiguracji",
+			"linia", b.Linia, "kolumna", b.Kolumna, "err", b.Komunikat)
+	}
+	s.rozgłośWygląd()
+	return err
+}
+
+// zastosuj uruchamia monitor, powiadamiacz i karty na podanym configu.
+func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 	// ! Próg musi wjechać tutaj, nie tylko przy zapisie z panelu. Bez tego
 	// ustawienie notify.threshold w pliku i restart cicho przywracały wartość
 	// domyślną — a w tym projekcie plik jest źródłem prawdy.
@@ -306,14 +554,13 @@ func (s *Server) reload(ctx context.Context) error {
 				Timeout:  svc.Check.Timeout.Duration(),
 				Expect:   svc.Check.Expect,
 				Insecure: svc.Check.Insecure,
+
+				Path:        svc.Check.Path,
+				Contains:    svc.Check.Contains,
+				NotContains: svc.Check.NotContains,
 			})
 		}
 	}
-
-	s.mu.Lock()
-	s.cfg = cfg
-	s.stamp = s.stampOf()
-	s.mu.Unlock()
 
 	s.mon.SetTargets(ctx, targets)
 	żywe := make(map[string]bool, len(targets))
@@ -323,7 +570,6 @@ func (s *Server) reload(ctx context.Context) error {
 	s.powiad.Zapomnij(żywe)
 	s.rozgłośWygląd()
 	slog.Info("config wczytany", "usług", len(targets), "grup", len(cfg.Groups))
-	return nil
 }
 
 // watch reaguje na ręczną edycję pliku — plik jest źródłem prawdy, więc panel
@@ -336,16 +582,27 @@ func (s *Server) watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.mu.RLock()
-			stary := s.stamp
-			s.mu.RUnlock()
-			if nowy := s.stampOf(); nowy != "" && nowy != stary {
-				slog.Info("config zmieniony na dysku, przeładowuję")
-				if err := s.reload(ctx); err != nil {
-					slog.Error("przeładowanie nieudane", "err", err)
-				}
-			}
+			s.sprawdźZmianęPliku(ctx)
 		}
+	}
+}
+
+// sprawdźZmianęPliku przeładowuje config, jeśli plik zmienił się na dysku.
+//
+// ! Pod s.edycja: zapis z panelu trzyma ten mutex od Save aż po reload(), więc
+// watch nigdy nie przeładuje w połowie zapisu (między Save a historią/gitem
+// stempel jest jeszcze stary). Po wyjściu z zapisu stempel już się zgadza i
+// watch nie robi nic.
+func (s *Server) sprawdźZmianęPliku(ctx context.Context) {
+	s.edycja.Lock()
+	defer s.edycja.Unlock()
+	s.mu.RLock()
+	stary := s.stamp
+	s.mu.RUnlock()
+	if nowy := s.stampOf(); nowy != "" && nowy != stary {
+		slog.Info("config zmieniony na dysku, przeładowuję")
+		// błąd loguje i pokazuje reload() — raz na odrębny błąd
+		_ = s.reload(ctx)
 	}
 }
 
@@ -365,6 +622,10 @@ func (s *Server) Handler() http.Handler {
 	chronione.HandleFunc("GET /{$}", s.handleIndex)
 	chronione.HandleFunc("GET /api/status", s.handleStatus)
 	chronione.HandleFunc("GET /api/history", s.handleHistory)
+	chronione.HandleFunc("GET /metrics", s.handleMetrics)
+	chronione.HandleFunc("GET /api/tokens", s.handleTokensList)
+	chronione.HandleFunc("POST /api/tokens", s.handleTokenCreate)
+	chronione.HandleFunc("DELETE /api/tokens/{id}", s.handleTokenDelete)
 	chronione.HandleFunc("GET /api/service", s.handleService)
 	chronione.HandleFunc("POST /api/check", s.handleCheckNow)
 	chronione.HandleFunc("POST /api/notify/test", s.handleNotifyTest)
@@ -380,6 +641,9 @@ func (s *Server) Handler() http.Handler {
 	chronione.HandleFunc("POST /api/services", s.handleServiceCreate)
 	chronione.HandleFunc("PATCH /api/services", s.handleServiceUpdate)
 	chronione.HandleFunc("DELETE /api/services", s.handleServiceDelete)
+	chronione.HandleFunc("POST /api/services/move", s.handleServiceMove)
+	chronione.HandleFunc("POST /api/groups/move", s.handleGroupMove)
+	chronione.HandleFunc("PUT /api/title", s.handleTitlePut)
 	chronione.HandleFunc("POST /api/groups", s.handleGroupCreate)
 	chronione.HandleFunc("PATCH /api/groups", s.handleGroupUpdate)
 	chronione.HandleFunc("DELETE /api/groups", s.handleGroupDelete)
@@ -449,10 +713,24 @@ type widokUsługi struct {
 	Group    string
 	Name     string
 	URL      string
+	// Href — to samo co URL, ale tylko gdy wolno go wstawić do atrybutu href
+	// (http/https); pusty dla tcp:// i dla wszystkiego podejrzanego.
+	Href     string
 	Host     string
 	IconName string
 	Icon     iconRef
 	Rozmiar  string // "sm" | "md" | "lg" — nigdy puste
+
+	Description string
+	Tags        []string
+	// TagsJSON — te same tagi jako JSON w atrybucie data-tagi; okno edycji
+	// czyta je stamtąd, więc tag z przecinkiem nie rozpada się na dwa.
+	TagsJSON string
+}
+
+// SzukajTekst — to, co filtr w nagłówku przeszukuje: nazwa, host, opis i tagi.
+func (w widokUsługi) SzukajTekst() string {
+	return strings.TrimSpace(strings.Join(append([]string{w.Name, w.Host, w.Description}, w.Tags...), " "))
 }
 
 type widokGrupy struct {
@@ -506,6 +784,7 @@ type widokStrony struct {
 	DrugiJezykKrotko      string
 	SzukajIkonPlaceholder string
 
+	Baner      banerAPI
 	Wyglad     wyglądWidok
 	WygladJSON template.JS
 	// MoznaPisac — dziś każdy zalogowany może zapisywać. Pole istnieje po to,
@@ -613,6 +892,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	dane := widokStrony{Title: cfg.Title, Wersja: Version, LiczbaIkon: s.ikony.Liczba(), Lang: string(lang)}
 	dane.T, dane.TJSON, dane.DrugiJezyk, dane.DrugiJezykNazwa, dane.DrugiJezykKrotko = wypełnijJęzyk(lang)
 	dane.Wyglad = s.wyglądInstancji()
+	dane.Baner = s.banerInstancji(lang)
 	dane.MoznaPisac = true
 	dane.TłaLimit = LimitTłaMB
 	// ! do szablonu idzie JSON ze STRUKTURY po walidacji, nigdy surowe wejście
@@ -641,10 +921,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 				Group:    g.Name,
 				Name:     svc.Name,
 				URL:      svc.URL,
+				Href:     hrefZ(svc.URL),
 				Host:     hostZ(svc.URL),
 				IconName: svc.Icon,
 				Icon:     s.rozwiążIkonę(svc.Icon, svc.Name),
 				Rozmiar:  rozmiar,
+
+				Description: svc.Description,
+				Tags:        []string(svc.Tags),
+				TagsJSON:    tagiJSON(svc.Tags),
 			})
 		}
 		dane.Groups = append(dane.Groups, wg)
@@ -665,6 +950,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", dane); err != nil {
 		slog.Error("render", "err", err)
 	}
+}
+
+func tagiJSON(t config.Tagi) string {
+	b, err := json.Marshal(tagiDoJSON(t))
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -713,6 +1006,33 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
+	// układ i tytuł jadą tym samym wybudzeniem co wygląd: zmiana z innej karty
+	// albo z pliku ma dotrzeć do wszystkich otwartych kart
+	wyślijUkład := func() bool {
+		b, err := json.Marshal(s.układInstancji())
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: uklad\ndata: %s\n\n", b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	// baner pliku jedzie tym samym wybudzeniem — błąd pojawia się i znika na
+	// otwartych kartach bez odświeżania
+	lang := i18n.Wybierz(r)
+	wyślijBaner := func() bool {
+		b, err := json.Marshal(s.banerInstancji(lang))
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: konfig\ndata: %s\n\n", b); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
 	if !wyślij() {
 		return
 	}
@@ -728,7 +1048,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-wyglądy:
-			if !wyślijWygląd() {
+			if !wyślijWygląd() || !wyślijUkład() || !wyślijBaner() {
 				return
 			}
 		case <-keepalive.C:
@@ -738,6 +1058,47 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// układAPI — tytuł i kolejność grup/usług (same nazwy). Karta porównuje to z
+// własnym DOM-em i przeładowuje się tylko wtedy, gdy się rozjechały.
+type układAPI struct {
+	Tytuł string       `json:"title"`
+	Grupy []układGrupy `json:"groups"`
+}
+
+type układGrupy struct {
+	Nazwa  string   `json:"name"`
+	Usługi []string `json:"services"`
+}
+
+func (s *Server) układInstancji() układAPI {
+	s.mu.RLock()
+	cfg := s.cfg
+	s.mu.RUnlock()
+	u := układAPI{Tytuł: "Shy Garlic", Grupy: []układGrupy{}}
+	if cfg == nil {
+		return u
+	}
+	if cfg.Title != "" {
+		u.Tytuł = cfg.Title
+	}
+	for _, g := range cfg.Groups {
+		ug := układGrupy{Nazwa: g.Name, Usługi: []string{}}
+		for _, svc := range g.Services {
+			ug.Usługi = append(ug.Usługi, svc.Name)
+		}
+		u.Grupy = append(u.Grupy, ug)
+	}
+	return u
+}
+
+// hrefZ oddaje adres do atrybutu href albo "" — patrz config.AdresKlikalny.
+func hrefZ(raw string) string {
+	if config.AdresKlikalny(raw) {
+		return raw
+	}
+	return ""
 }
 
 func hostZ(raw string) string {

@@ -80,6 +80,17 @@ var zaufaneProxy []netip.Prefix
 
 // UstawZaufaneProxy przyjmuje listę CIDR-ów (dopuszcza też gołe adresy).
 func UstawZaufaneProxy(lista []string) error {
+	out, err := parsujPrefiksy("zaufane proxy", lista)
+	if err != nil {
+		return err
+	}
+	zaufaneProxy = out
+	return nil
+}
+
+// parsujPrefiksy zamienia listę CIDR-ów i gołych adresów na prefiksy; puste
+// wpisy i spacje są pomijane.
+func parsujPrefiksy(co string, lista []string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, s := range lista {
 		s = strings.TrimSpace(s)
@@ -90,30 +101,18 @@ func UstawZaufaneProxy(lista []string) error {
 		if err != nil {
 			a, err2 := netip.ParseAddr(s)
 			if err2 != nil {
-				return fmt.Errorf("zaufane proxy %q: %w", s, err)
+				return nil, fmt.Errorf("%s %q: %w", co, s, err)
 			}
 			p = netip.PrefixFrom(a, a.BitLen())
 		}
 		out = append(out, p)
 	}
-	zaufaneProxy = out
-	return nil
+	return out, nil
 }
 
-func odZaufanegoProxy(r *http.Request) bool {
-	if len(zaufaneProxy) == 0 {
-		return false
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	a, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
-	}
+func wPrefiksach(a netip.Addr, lista []netip.Prefix) bool {
 	a = a.Unmap()
-	for _, p := range zaufaneProxy {
+	for _, p := range lista {
 		if p.Contains(a) {
 			return true
 		}
@@ -121,19 +120,113 @@ func odZaufanegoProxy(r *http.Request) bool {
 	return false
 }
 
-// adresIP zwraca adres klienta. X-Forwarded-For honorujemy wyłącznie od proxy
-// z listy zaufanych.
-func adresIP(r *http.Request) string {
-	if odZaufanegoProxy(r) {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
-		}
-	}
+func adresPołączenia(r *http.Request) (netip.Addr, bool) {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return a.Unmap(), true
+}
+
+func odZaufanegoProxy(r *http.Request) bool {
+	if len(zaufaneProxy) == 0 {
+		return false
+	}
+	a, ok := adresPołączenia(r)
+	return ok && wPrefiksach(a, zaufaneProxy)
+}
+
+// adresKlienta ustala, kto naprawdę łączy się z panelem.
+//
+// Połączenie od niezaufanego peera: jego adres, nagłówki proxy ignorowane.
+// Od zaufanego proxy: X-Forwarded-For czytany OD PRAWEJ — każde proxy dopisuje
+// na koniec adres, od którego dostało żądanie, więc skrajnie prawy wpis, który
+// nie jest zaufanym proxy, to klient widziany przez najbardziej zewnętrzne
+// zaufane proxy. Wpisy z lewej klient potrafi wymyślić sam, więc nie mają głosu.
+//
+// ok == false: nagłówek jest nieczytelny (śmieć zamiast adresu). Wołający ma
+// wtedy odmówić, a nie zgadywać; addr zawiera adres połączenia, do limitów.
+func adresKlienta(r *http.Request) (addr netip.Addr, ok bool) {
+	peer, _ := adresPołączenia(r)
+	if !odZaufanegoProxy(r) {
+		return peer, peer.IsValid()
+	}
+	var wpisy []string
+	for _, h := range r.Header.Values("X-Forwarded-For") {
+		for _, e := range strings.Split(h, ",") {
+			if e = strings.TrimSpace(e); e != "" {
+				wpisy = append(wpisy, e)
+			}
+		}
+	}
+	if len(wpisy) == 0 {
+		return peer, peer.IsValid()
+	}
+	for i := len(wpisy) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(wpisy[i])
+		if err != nil {
+			return peer, false
+		}
+		a = a.Unmap()
+		if wPrefiksach(a, zaufaneProxy) {
+			if i == 0 {
+				return a, true // cały łańcuch to zaufane proxy — bierzemy pierwsze
+			}
+			continue
+		}
+		return a, true
+	}
+	return peer, false
+}
+
+// maWpisyXFF mówi, czy X-Forwarded-For niesie choć jeden niepusty wpis.
+func maWpisyXFF(r *http.Request) bool {
+	for _, h := range r.Header.Values("X-Forwarded-For") {
+		for _, e := range strings.Split(h, ",") {
+			if strings.TrimSpace(e) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// adresIP zwraca adres klienta jako tekst — klucz limitów i logów.
+// ! Wcześniej brał PIERWSZY wpis X-Forwarded-For, czyli ten, który klient
+// wpisuje sam — zmiana jednego nagłówka dawała „nowy adres" w limiterze.
+func adresIP(r *http.Request) string {
+	if a, ok := adresKlienta(r); ok {
+		return a.String()
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// nagłówkiProxy — ślady tego, że żądanie przeszło przez pośrednika.
+var nagłówkiProxy = []string{
+	"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-Ip",
+	"Forwarded", "Cf-Connecting-Ip", "True-Client-Ip", "X-Client-Ip",
+}
+
+// zPośrednikaBezZaufania mówi, że żądanie nosi ślady proxy, którego nie
+// wpisano na listę zaufanych. Adres połączenia to wtedy adres pośrednika, nie
+// klienta, więc nie wolno na jego podstawie niczego odblokować.
+func zPośrednikaBezZaufania(r *http.Request) bool {
+	if odZaufanegoProxy(r) {
+		return false
+	}
+	for _, h := range nagłówkiProxy {
+		if r.Header.Get(h) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // poHTTPS mówi, czy żądanie przyszło szyfrowanym kanałem — od tego zależy flaga

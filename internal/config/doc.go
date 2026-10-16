@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,9 @@ var (
 	ErrPathNotFound    = errors.New("path not found in config")
 	ErrServiceNotFound = errors.New("service not found")
 	ErrGroupNotFound   = errors.New("group not found")
+	// ErrDuplikat — nazwa już zajęta w tej samej liście (usługa w grupie, grupa).
+	// Dwie usługi o tej samej nazwie scaliłyby historię sprawdzeń pod jednym kluczem.
+	ErrDuplikat = errors.New("name already exists")
 )
 
 // Document to konfiguracja widziana jako TEKST, nie jako struktura danych.
@@ -34,10 +38,27 @@ type Document struct {
 	path string
 	hash [32]byte
 	mode os.FileMode
+
+	// crlf: plik miał WYŁĄCZNIE końce linii CRLF. src trzyma wtedy sam LF
+	// (cała nawigacja po offsetach i wstawki liczą na jeden bajt końca linii),
+	// a Bytes() przywraca CRLF. Plik z mieszanymi końcami zostaje nietknięty.
+	crlf bool
+}
+
+// normalizujKońce zamienia CRLF na LF, ale tylko gdy KAŻDY \n w pliku jest
+// poprzedzony \r — dzięki temu nietknięty round-trip jest bajt w bajt
+// identyczny, a plik z mieszanymi końcami nie jest po cichu przerabiany.
+func normalizujKońce(src []byte) ([]byte, bool) {
+	crlf := bytes.Count(src, []byte("\r\n"))
+	if crlf == 0 || crlf != bytes.Count(src, []byte("\n")) {
+		return src, false
+	}
+	return bytes.ReplaceAll(src, []byte("\r\n"), []byte("\n")), true
 }
 
 func Parse(src []byte) (*Document, error) {
-	d := &Document{src: src}
+	src, crlf := normalizujKońce(src)
+	d := &Document{src: src, crlf: crlf}
 	if err := d.reparse(); err != nil {
 		return nil, err
 	}
@@ -64,8 +85,14 @@ func (d *Document) reparse() error {
 	return nil
 }
 
-// Bytes zwraca aktualną treść pliku. To są prawdziwe bajty, nie re-print AST-a.
-func (d *Document) Bytes() []byte { return d.src }
+// Bytes zwraca aktualną treść pliku. To są prawdziwe bajty, nie re-print AST-a;
+// przy pliku CRLF końce linii wracają do CRLF.
+func (d *Document) Bytes() []byte {
+	if d.crlf {
+		return bytes.ReplaceAll(d.src, []byte("\n"), []byte("\r\n"))
+	}
+	return d.src
+}
 
 // root zwraca korzeń pierwszego dokumentu.
 func (d *Document) root() ast.Node { return d.file.Docs[0].Body }

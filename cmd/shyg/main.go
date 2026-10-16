@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/zatto-dev/shy-garlic/internal/config"
+	"github.com/zatto-dev/shy-garlic/internal/notify"
 	"github.com/zatto-dev/shy-garlic/internal/server"
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
@@ -49,6 +50,8 @@ func run() error {
 	cacheDir := fs.String("cache", envLub("SHYG_CACHE", ""), "katalog cache ikon (domyślnie obok pliku bazy)")
 	webhook := fs.String("webhook", envLub("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
 		"adres webhooka powiadomień (Discord albo dowolny przyjmujący JSON)")
+	formatWebhooka := fs.String("webhook-format", envLub("SHYG_WEBHOOK_FORMAT", ""),
+		"format wiadomości webhooka: "+strings.Join(formatyTekst(), ", ")+" (domyślnie z ustawień panelu, a tam discord; flaga bije panel)")
 	prógAwarii := fs.Int("fail-threshold", 2, "ile nieudanych sprawdzeń z rzędu zanim wyślemy powiadomienie (właściwe miejsce to notify.threshold w pliku; flaga go nadpisuje)")
 	dockerSock := fs.String("docker", envLub("SHYG_DOCKER", ""),
 		"gniazdo Dockera do podpowiadania usług (domyślnie /var/run/docker.sock, jeśli jest)")
@@ -56,9 +59,15 @@ func run() error {
 		"katalog wgranych tapet (domyślnie podkatalog bg/ obok pliku bazy)")
 	zaufaneProxy := fs.String("trusted-proxy", envLub("SHYG_TRUSTED_PROXY", ""),
 		"CIDR-y proxy, którym wolno ustawiać X-Forwarded-For i X-Forwarded-Proto (po przecinku)")
+	metricsAllow := fs.String("metrics-allow", envLub("SHYG_METRICS_ALLOW", ""),
+		"CIDR-y, z których /metrics odpowiada bez tokenu (po przecinku; domyślnie żadne — wymagany token)")
 	debug := fs.Bool("debug", false, "logi debug")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
+	}
+
+	if *formatWebhooka != "" && !notify.PoprawnyFormat(*formatWebhooka) {
+		return fmt.Errorf("--webhook-format %q: dozwolone %s", *formatWebhooka, strings.Join(formatyTekst(), ", "))
 	}
 
 	poziom := slog.LevelInfo
@@ -70,8 +79,8 @@ func run() error {
 	o := opcjeCLI{
 		cfgPath: *cfgPath, addr: *addr, dataPath: *dataPath,
 		iconsZip: *iconsZip, cacheDir: *cacheDir, tłaDir: *tłaDir,
-		webhook: *webhook, prógAwarii: *prógAwarii, dockerSock: *dockerSock,
-		zaufaneProxy: *zaufaneProxy,
+		webhook: *webhook, formatWebhooka: *formatWebhooka, prógAwarii: *prógAwarii, dockerSock: *dockerSock,
+		zaufaneProxy: *zaufaneProxy, metricsAllow: *metricsAllow,
 	}
 	o.prógZFlagi = źródło(fs, "fail-threshold", "") == "flaga"
 	o.instancja = opisInstancji(fs, o)
@@ -101,8 +110,11 @@ type opcjeCLI struct {
 	cacheDir     string
 	tłaDir       string
 	webhook      string
+	// formatWebhooka — format wiadomości z flagi/zmiennej; pusty = z bazy
+	formatWebhooka string
 	dockerSock   string
 	zaufaneProxy string
+	metricsAllow string
 	prógAwarii   int
 	prógZFlagi   bool
 	instancja    []server.OpisOpcji
@@ -139,8 +151,18 @@ func opisInstancji(fs *flag.FlagSet, o opcjeCLI) []server.OpisOpcji {
 		{Klucz: "backgrounds", Wartość: o.tłaDir, Źródło: źródło(fs, "backgrounds", "SHYG_BACKGROUNDS")},
 		{Klucz: "icons", Wartość: o.iconsZip, Źródło: źródło(fs, "icons", "SHYG_ICONS")},
 		{Klucz: "docker", Wartość: o.dockerSock, Źródło: źródło(fs, "docker", "SHYG_DOCKER")},
+		{Klucz: "webhook-format", Wartość: o.formatWebhooka, Źródło: źródło(fs, "webhook-format", "SHYG_WEBHOOK_FORMAT")},
 		{Klucz: "trusted-proxy", Wartość: o.zaufaneProxy, Źródło: źródło(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
+		{Klucz: "metrics-allow", Wartość: o.metricsAllow, Źródło: źródło(fs, "metrics-allow", "SHYG_METRICS_ALLOW")},
 	}
+}
+
+func formatyTekst() []string {
+	out := make([]string, len(notify.Formaty))
+	for i, f := range notify.Formaty {
+		out[i] = string(f)
+	}
+	return out
 }
 
 func envLub(klucz, domyślne string) string {
@@ -182,8 +204,10 @@ func serve(o opcjeCLI) error {
 		IconsZip: o.iconsZip, CacheDir: o.cacheDir, BackgroundDir: o.tłaDir,
 		Webhook: o.webhook, PrógAwarii: o.prógAwarii, DockerSock: o.dockerSock,
 		TrustedProxy: rozdziel(o.zaufaneProxy),
+		MetricsAllow: rozdziel(o.metricsAllow),
 
 		WebhookZeŚrodowiska: o.webhook != "",
+		WebhookFormat:       o.formatWebhooka, WebhookFormatZeŚrodowiska: o.formatWebhooka != "",
 		PrógZFlagi:          o.prógZFlagi,
 		Instancja:           o.instancja,
 	})

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -14,7 +15,11 @@ import (
 func Load(src []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(src, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		b := rozbierzSurowy(err)
+		if b.Linia == 0 {
+			b.Linia = lokalizuj(src, b.Komunikat)
+		}
+		return nil, &BłądWczytania{BłądPliku: b, err: fmt.Errorf("parse config: %w", err)}
 	}
 	blurPodany, dimPodany := podaneSuwaki(src)
 	applyWygląd(&cfg.Appearance, blurPodany, dimPodany)
@@ -25,6 +30,7 @@ func Load(src []byte) (*Config, error) {
 		for si := range cfg.Groups[gi].Services {
 			applyDefaults(&cfg.Groups[gi].Services[si].Check)
 			applyRozmiar(&cfg.Groups[gi].Services[si])
+			applyOpis(&cfg.Groups[gi].Services[si])
 		}
 	}
 	return &cfg, nil
@@ -40,6 +46,21 @@ func applyDefaults(c *Check) {
 	if len(c.Expect) == 0 {
 		c.Expect = append([]int(nil), DefaultExpect...)
 	}
+	// `path: health` to oczywista literówka za `path: /health` — poprawiamy
+	// zamiast kończyć „down" z niezrozumiałym powodem
+	if c.Path != "" && !strings.HasPrefix(c.Path, "/") && !strings.Contains(c.Path, "://") {
+		slog.Warn("check.path bez wiodącego /, dopisuję", "path", c.Path)
+		c.Path = "/" + c.Path
+	}
+}
+
+// applyOpis czyści opis i tagi ręcznie wpisane w plik: opis jest jedną linią
+// (blokowy skalar `|` zostaje sklejony spacjami), tagi bez pustych i duplikatów.
+// Nie zwraca błędu — to ma być czytelne, nie zakazane; surowsza walidacja jest
+// po stronie API (NormalizujOpis, NormalizujTagi).
+func applyOpis(s *Service) {
+	s.Description = strings.Join(strings.Fields(s.Description), " ")
+	s.Tags = czyśćTagi(s.Tags)
 }
 
 func applyRozmiar(s *Service) {

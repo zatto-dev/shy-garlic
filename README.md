@@ -83,7 +83,11 @@ One line changed, three added, no collateral damage.
 An editor over somebody else's file only works if they trust it. So the panel
 never writes anything you have not seen first: every action — adding a service,
 renaming a group, editing raw YAML, changing the instance appearance — shows the
-exact diff and waits for your confirmation.
+exact diff and waits for your confirmation. The two quick gestures are the
+exception: renaming the dashboard title inline and dragging things into a new
+order apply at once, because a confirmation dialog on every drop would make them
+unusable. They still go through the same engine, land in the version history,
+and are one click from being undone.
 
 Behind that there are two more safety nets:
 
@@ -127,6 +131,12 @@ tab open.
   Colour alone is not enough for colour-blind users.
 - `insecure: true` for self-signed certificates, because in a homelab they are
   everywhere and a Proxmox box is not down just because you never bought a cert.
+- **A page that answers 200 can still be wrong.** `check.contains` and
+  `check.not_contains` look inside the answer (the first 1 MiB), and
+  `check.path` asks a health endpoint instead of the front page. When the code
+  is fine but the content is not — nginx's default page instead of the app, a
+  "maintenance" banner — the service goes **amber (`degraded`)**, with the reason
+  in the details window: the server is alive, it just is not saying the right thing.
 
 ## Every service has a story
 
@@ -182,8 +192,9 @@ labels:
 
 ## When something breaks
 
-Set a Discord webhook (or anything else that accepts JSON) and you get one
-sentence when a service goes down and one when it comes back. Nothing else.
+Set a webhook — Discord, Slack, ntfy, Gotify, Telegram or any URL that accepts
+JSON — and you get one short message when a service goes down and one when it
+comes back. Nothing else.
 
 This is deliberately **not** alerting: no escalation, no schedules, no rules, no
 silence windows. If you want real alerting, run Uptime Kuma — we are not trying
@@ -200,6 +211,45 @@ Two details that matter in practice:
   Set it in Settings → Notifications, or with `SHYG_WEBHOOK` for a deployment
   that manages its own secrets — the environment wins, so restarting the
   container never quietly undoes a change made in the UI.
+- **Messages are sent in the background**, one queue per service, so a slow or
+  dead webhook never holds up the check history. A message that could not be
+  delivered (three tries) is not marked as reported and is retried on the next
+  check.
+
+### Message formats
+
+Pick the format in Settings → Notifications, or with `SHYG_WEBHOOK_FORMAT` /
+`--webhook-format` (the environment wins over the panel, exactly like the
+address). The format is stored next to the address in the database.
+
+| Format     | Address you enter                                                | What is sent                                                                 |
+| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | an embed with a coloured bar (the default)                                   |
+| `slack`    | `https://hooks.slack.com/services/…` (Mattermost, Rocket.Chat too) | `{"text": "…"}`                                                              |
+| `ntfy`     | `https://ntfy.sh/<topic>` or your own server                     | plain text body, headers `Title`, `Priority` (`high` for down), `Tags`, `Click` |
+| `gotify`   | `https://<host>/message?token=<APP_TOKEN>`                       | `{"title", "message", "priority"}` (down = 8)                                |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>` | `{"text": "…"}`, no Markdown parsing; the chat id travels in the address     |
+| `generic`  | any https URL                                                    | the JSON below                                                               |
+
+`generic` is a stable contract — fields are never renamed:
+
+```json
+{"event": "down", "service": "Jellyfin", "group": "Media", "state": "down",
+ "previous": "up", "reason": "connection refused",
+ "at": "2026-10-16T12:30:00Z", "url": "http://192.168.1.30:8096"}
+```
+
+`event` is `down`, `degraded`, `recovered` or `test`; `state` is the new state
+and `previous` the last one that was reported (`up`, `degraded` or `down`);
+`reason` is empty for `recovered`. Credentials for ntfy can sit in the address
+(`https://user:password@ntfy.example/topic`).
+
+The **Send a test message** button works in every format. Addresses are masked
+in the API and the UI (scheme and host only), and a failed test never echoes the
+address back — bot tokens live in it. The panel only accepts `https://` addresses;
+if your ntfy or Gotify runs on plain `http` inside your LAN, give the address to
+the deployment instead: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerts`
+`SHYG_WEBHOOK_FORMAT=ntfy` — there the choice belongs to whoever runs it.
 
 ## Install
 
@@ -292,7 +342,7 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
 **Plain kubectl** (kustomize, pinned to a release tag):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.12.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.0"
 ```
 
 Then reach the panel and create the administrator on the first visit (see
@@ -392,6 +442,11 @@ speaks English and Polish, switched in the header.
 | `1` `2` `3` | grid, bento, list view        |
 | `Esc`     | close, then clear the filter    |
 
+In edit mode, drag the grip on a card or a group header to reorder (mouse or
+touch; `Esc` cancels). From the keyboard, focus the grip and press
+`Alt`+`↑`/`↓` — the new position is announced to screen readers. The pencil next
+to the title edits it in place: `Enter` or leaving the field saves, `Esc` cancels.
+
 ## Configuration
 
 ```yaml
@@ -421,6 +476,8 @@ groups:
         url: http://jellyfin.home.arpa:8096
         icon: jellyfin
         size: lg      # sm | md | lg — tile size in the bento view
+        description: Movies and music   # shown under the name, and searched
+        tags: [media, family]           # a list; searched, chips in list view
         <<: *defaults
 
   - name: Infrastructure
@@ -432,7 +489,19 @@ groups:
           interval: 30s
           expect: [200, 401]
           insecure: true    # self-signed certificate, on purpose
+
+      - name: Grafana
+        url: http://grafana.home.arpa:3000
+        check:
+          path: /api/health               # asked instead of the front page
+          contains: '"database": "ok"'    # a body that says otherwise → degraded
 ```
+
+Content checks run on answers whose status is in `expect`; a wrong status is
+reported as `HTTP <code>` without reading the body. Redirects are not followed,
+so point `path` at the final address. Only the first 1 MiB is searched.
+`check.path` never changes the host: it replaces the path and query of `url`, so
+`url` stays what the card links to.
 
 | Field                          | Meaning                                                | Default                     |
 | ------------------------------ | ------------------------------------------------------ | --------------------------- |
@@ -442,6 +511,8 @@ groups:
 | `services[].url`               | address; `http://`, `https://` or `tcp://host:port`     | required                    |
 | `services[].icon`              | catalogue icon name, or a full URL                      | first letter of the name    |
 | `services[].size`              | tile size in the bento view: `sm`, `md`, `lg`           | `md`                        |
+| `services[].description`       | one line under the name; also searched (max 200 chars)  | —                           |
+| `services[].tags`              | list of labels, searched; chips in list view (max 12×32) | —                          |
 | `appearance.background.preset` | `aurora`, `nebula`, `graphite`, `dawn`, `fog`, `photo`  | `aurora`                    |
 | `appearance.background.image`  | file name from `/bg/`, only with `preset: photo`        | —                           |
 | `appearance.background.blur`   | wallpaper blur in px, `0`–`30`                          | `10`                        |
@@ -452,6 +523,9 @@ groups:
 | `check.timeout`                | how long to wait for an answer                          | `5s`                        |
 | `check.expect`                 | status codes that mean "alive"                          | `[200, 301, 302, 401, 403]` |
 | `check.insecure`               | ignore certificate errors                               | `false`                     |
+| `check.path`                   | path (and query) asked instead of the one in `url`; starts with `/`, same host | —                    |
+| `check.contains`               | text that must be in the first 1 MiB of the answer; otherwise `degraded` | —                  |
+| `check.not_contains`           | text that must not be there; otherwise `degraded`       | —                           |
 | `notify.threshold`             | failed checks in a row before we notify                 | `2`                         |
 | `discovery.docker`             | suggest services from containers                        | on when a socket is there   |
 
@@ -462,9 +536,9 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
-| The SQLite database   | webhook address, accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
+| The SQLite database   | webhook address and format, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
 
 Every flag has an `SHYG_`-prefixed environment variable (`SHYG_ADDR`,
@@ -490,16 +564,112 @@ panel does and does not defend against, and how it expects to be deployed, is
 written down in [SECURITY.md](SECURITY.md) — read it before you expose this to
 anything wider than a LAN.
 
+## Metrics and read-only API tokens
+
+Shy Garlic can feed your existing monitoring. **Settings → Instance → API
+tokens** creates a token (`shyg_…`, 256 bits of randomness) with a name of your
+choice. It is shown once, with a copy button, and stored only as a SHA-256 hash
+in the database — if you lose it, revoke it and create another.
+
+A token is **read-only by construction**: the `Authorization: Bearer shyg_…`
+header is honoured only for `GET` on three routes — `/metrics`, `/api/status`
+and `/api/history`. Everywhere else it is ignored and the route wants a session,
+so a token that leaks from your Prometheus cannot change the config, create an
+account or mint another token. Requests without a valid token get `401`, never a
+redirect to the sign-in page. Failed attempts are rate limited per address and
+logged once a minute per address.
+
+```sh
+# a quick look, token kept in a file rather than in your shell history
+curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/shyg.token)" \
+  https://garlic.home.arpa/metrics
+```
+
+### Prometheus
+
+```yaml
+scrape_configs:
+  - job_name: shy-garlic
+    scrape_interval: 30s
+    scheme: https
+    authorization:                                # Prometheus 2.26+
+      type: Bearer
+      credentials_file: /etc/prometheus/shyg.token
+    # older versions: bearer_token_file: /etc/prometheus/shyg.token
+    static_configs:
+      - targets: ["garlic.home.arpa"]
+```
+
+| Metric                                         | Meaning                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `shyg_service_up`                              | `1` when the last check succeeded, `0` when the service is degraded or down |
+| `shyg_service_degraded`                        | `1` when it answers, but with the wrong status code or content          |
+| `shyg_service_response_seconds`                | response time of the last check; absent when nothing answered           |
+| `shyg_service_availability_ratio{window="24h"}` | share of successful checks in 24 hours, `0`–`1`                          |
+| `shyg_service_last_check_timestamp_seconds`    | Unix time of the last check                                              |
+| `shyg_build_info{version}`                     | always `1`                                                               |
+
+All service metrics carry the labels `group` and `service`. A service that has
+not been checked yet (or has no address) has **no series at all** — a `0` would
+read as "down" and wake you up for nothing. An alert that fires only on a real
+outage: `shyg_service_up == 0 and shyg_service_degraded == 0`.
+
+A ready dashboard — up/degraded/down counters, a 24-hour availability table,
+response times and a state timeline per service — is in
+[`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json). In Grafana:
+Dashboards → New → Import → upload the file, and pick your Prometheus data
+source when asked.
+
+### Without a token, from your own network
+
+By default `/metrics` needs a token. If Prometheus runs on a trusted network and
+you would rather not manage a token, list that network:
+
+```sh
+shyg serve --metrics-allow 192.168.0.0/24          # or SHYG_METRICS_ALLOW=192.168.0.0/24,fd00::/8
+```
+
+This opens **only** `GET /metrics`, and only for those addresses. Behind a
+reverse proxy set `--trusted-proxy` as well: the client address is then taken
+from `X-Forwarded-For` as the right-most entry that is not a trusted proxy (the
+left-hand entries are written by the client). A request that carries proxy
+headers from a peer you did **not** list as a trusted proxy is refused —
+otherwise a proxy standing in your LAN would let the whole internet read the
+metrics. For the same reason a trusted proxy that sends **no** `X-Forwarded-For`
+at all is refused by `--metrics-allow` (every request would look like the
+proxy's own address): do not use `--metrics-allow` behind L4 forwarders or
+proxies that do not append `X-Forwarded-For` (for example nginx configured with
+only `X-Real-IP`). Use a token there; tokens keep working.
+
+### Home Assistant
+
+```yaml
+# configuration.yaml — secrets.yaml holds:  shyg_authorization: "Bearer shyg_…"
+rest:
+  - resource: https://garlic.home.arpa/api/status
+    scan_interval: 60
+    headers:
+      Authorization: !secret shyg_authorization
+    sensor:
+      - name: "Garlic: services not up"
+        value_template: "{{ value_json.values() | rejectattr('state', 'equalto', 'up') | list | length }}"
+    binary_sensor:
+      - name: "Jellyfin up"
+        device_class: connectivity
+        value_template: "{{ value_json['Media/Jellyfin'].state == 'up' }}"
+```
+
 ## API
 
-Everything sits behind the session. The dashboard uses exactly the same
-endpoints you would.
+Everything sits behind the session — except that `/api/status`, `/api/history`
+and `/metrics` also accept a [read-only token](#metrics-and-read-only-api-tokens).
+The dashboard uses exactly the same endpoints you would.
 
 | Method   | Path                             | What it does                                              |
 | -------- | -------------------------------- | --------------------------------------------------------- |
-| `GET`    | `/api/status`                    | current state of every service                             |
+| `GET`    | `/api/status`                    | current state of every service (session or API token)      |
 | `GET`    | `/events`                        | SSE stream of state changes                                |
-| `GET`    | `/api/history?key=Group/Service` | check history and 24-hour uptime                           |
+| `GET`    | `/api/history?key=Group/Service` | check history and 24-hour uptime (session or API token)    |
 | `GET`    | `/api/service?key=Group/Service` | everything about one service: stats, chart, state changes  |
 | `POST`   | `/api/check?key=Group/Service`   | check that service right now                               |
 | `GET`    | `/api/info`                      | what this instance has enabled                             |
@@ -511,6 +681,9 @@ endpoints you would.
 | `POST`   | `/api/services`                  | add a service                                              |
 | `PATCH`  | `/api/services`                  | change a service                                           |
 | `DELETE` | `/api/services?group=…&name=…`   | delete a service                                           |
+| `POST`   | `/api/services/move`             | move a service to a position, in or across groups          |
+| `POST`   | `/api/groups/move`               | move a group to a position                                 |
+| `PUT`    | `/api/title`                     | change the dashboard title                                 |
 | `POST`   | `/api/services/bulk`             | add many services as one change                            |
 | `POST`   | `/api/groups`                    | add a group                                                |
 | `PATCH`  | `/api/groups`                    | rename a group                                             |
@@ -520,12 +693,16 @@ endpoints you would.
 | `GET`    | `/api/appearance`                | the instance default look                                  |
 | `PUT`    | `/api/appearance`                | change it (goes through the diff, like any edit)           |
 | `GET`    | `/api/notify`                    | notification settings, without the address                 |
-| `PUT`    | `/api/notify`                    | set the webhook address                                    |
+| `PUT`    | `/api/notify`                    | set the webhook address, message format and threshold       |
 | `POST`   | `/api/notify/test`               | send a test message                                        |
 | `POST`   | `/api/background`                | upload a wallpaper (multipart `file`)                      |
 | `GET`    | `/api/background`                | list uploaded wallpapers                                   |
 | `DELETE` | `/api/background/{name}`         | delete one (`409` while it is in use)                      |
 | `GET`    | `/bg/{name}`                     | serve a wallpaper — signed-in only                         |
+| `GET`    | `/metrics`                       | Prometheus metrics — session or API token                  |
+| `GET`    | `/api/tokens`                    | list API tokens (never the secret itself)                  |
+| `POST`   | `/api/tokens`                    | create a token; the secret is in this one response only    |
+| `DELETE` | `/api/tokens/{id}`               | revoke a token                                             |
 | `GET`    | `/healthz`                       | liveness, the one route that needs no session              |
 
 Account management (`/api/users`, `/api/password`) follows the same rules.

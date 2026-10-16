@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,10 @@ import (
 )
 
 const ciasteczkoSesji = "shyg_session"
+
+// limitFormularza — formularze logowania/setupu/języka to kilka pól; reszta to
+// próba zapchania pamięci.
+const limitFormularza = 64 << 10
 
 type kluczKontekstu string
 
@@ -30,40 +36,207 @@ func UżytkownikZŻądania(r *http.Request) *store.Użytkownik {
 type limiter struct {
 	mu    sync.Mutex
 	próby map[string][]time.Time
+	próg  int
+
+	// maksGlobalnie: ile nieudanych prób na minutę przyjmujemy łącznie ze
+	// WSZYSTKICH adresów, zanim wstrzymamy kolejne (0 = bez limitu globalnego).
+	// To bezpiecznik na rozproszone zgadywanie z wielu adresów (rotacja /64,
+	// botnet); blokada jest chwilowa — wygasa, gdy okno minuty się przesunie.
+	maksGlobalnie int
+	globalnie     []time.Time
+
+	maksKluczy int              // twarda granica pamięci
+	teraz      func() time.Time // wstrzykiwane w testach
 }
 
-func nowyLimiter() *limiter { return &limiter{próby: map[string][]time.Time{}} }
+func nowyLimiter() *limiter {
+	l := nowyLimiterZProgiem(5)
+	l.maksGlobalnie = maksPorażekLogowaniaNaMinutę
+	return l
+}
 
-// wolno zwraca false, gdy z tego adresu było już 5 nieudanych prób w 5 minut.
+func nowyLimiterZProgiem(próg int) *limiter {
+	return &limiter{próby: map[string][]time.Time{}, próg: próg,
+		maksKluczy: maksAdresówWLimiterze, teraz: time.Now}
+}
+
+// maksAdresówWLimiterze — twarda górna granica pamięci: mapa rośnie o adres
+// przy każdym pierwszym błędzie, a /metrics może stać w internecie.
+const maksAdresówWLimiterze = 10000
+
+// maksPorażekLogowaniaNaMinutę — globalny bezpiecznik logowania (wszystkie adresy razem).
+const maksPorażekLogowaniaNaMinutę = 30
+
+const (
+	oknoLimitera         = 5 * time.Minute
+	oknoLimituGlobalnego = time.Minute
+)
+
+// kluczLimitera: IPv6 liczymy po prefiksie /64 (jedna sieć domowa dostaje
+// 2^64 adresów, więc limit per pełny adres nic nie dawał), IPv4 po pełnym adresie.
+func kluczLimitera(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		if p, err := a.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return a.String()
+}
+
+// wolno zwraca false, gdy z tego adresu było już `próg` nieudanych prób w 5 minut
+// albo gdy globalny limit porażek na minutę jest wyczerpany.
 func (l *limiter) wolno(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	próg := time.Now().Add(-5 * time.Minute)
-	świeże := l.próby[ip][:0]
-	for _, t := range l.próby[ip] {
+	teraz := l.teraz()
+	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) >= l.maksGlobalnie {
+		return false
+	}
+	klucz := kluczLimitera(ip)
+	próg := teraz.Add(-oknoLimitera)
+	świeże := l.próby[klucz][:0]
+	for _, t := range l.próby[klucz] {
 		if t.After(próg) {
 			świeże = append(świeże, t)
 		}
 	}
-	l.próby[ip] = świeże
-	return len(świeże) < 5
+	if len(świeże) == 0 {
+		delete(l.próby, klucz)
+	} else {
+		l.próby[klucz] = świeże
+	}
+	return len(świeże) < l.próg
+}
+
+func (l *limiter) świeżeGlobalnie(teraz time.Time) []time.Time {
+	od := teraz.Add(-oknoLimituGlobalnego)
+	i := 0
+	for i < len(l.globalnie) && !l.globalnie[i].After(od) {
+		i++
+	}
+	l.globalnie = l.globalnie[i:]
+	return l.globalnie
 }
 
 func (l *limiter) zapiszPorażkę(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.próby[ip] = append(l.próby[ip], time.Now())
+	teraz := l.teraz()
+	klucz := kluczLimitera(ip)
+	if _, znany := l.próby[klucz]; !znany && len(l.próby) >= l.maksKluczy {
+		l.zwolnijMiejsce(teraz)
+	}
+	l.próby[klucz] = append(l.próby[klucz], teraz)
+	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) < l.maksGlobalnie {
+		l.globalnie = append(l.globalnie, teraz)
+	}
+}
+
+// zwolnijMiejsce robi miejsce na nowy klucz, nie zapominając wszystkich naraz:
+// najpierw wygasłe wpisy, a jeśli to za mało — jeden, najdawniej używany.
+func (l *limiter) zwolnijMiejsce(teraz time.Time) {
+	próg := teraz.Add(-oknoLimitera)
+	for k, ts := range l.próby {
+		if len(ts) == 0 || !ts[len(ts)-1].After(próg) {
+			delete(l.próby, k)
+		}
+	}
+	if len(l.próby) < l.maksKluczy {
+		return
+	}
+	var najstarszy string
+	var kiedy time.Time
+	for k, ts := range l.próby {
+		if o := ts[len(ts)-1]; najstarszy == "" || o.Before(kiedy) {
+			najstarszy, kiedy = k, o
+		}
+	}
+	delete(l.próby, najstarszy)
 }
 
 // adresIP i poHTTPS mieszkają w csrf.go — obie zależą od listy zaufanych proxy.
+
+// bezpiecznyCel zwraca `next` tylko wtedy, gdy jest ścieżką wewnątrz panelu;
+// w każdym innym przypadku "/". Jedyne miejsce prawdy dla przekierowań po
+// logowaniu i po zmianie języka.
+//
+// ! Sam test `HasPrefix("/") && !HasPrefix("//")` przepuszczał `/\evil.com`:
+// przeglądarki traktują `\` jak `/`, więc Location: /\evil.com to adres
+// zewnętrzny. Odrzucamy backslash (także zakodowany), znaki sterujące i
+// wszystko, co url.Parse widzi jako schemat albo host.
+func bezpiecznyCel(next string) string {
+	const domyślny = "/"
+	if next == "" || next[0] != '/' || strings.HasPrefix(next, "//") {
+		return domyślny
+	}
+	for _, r := range next {
+		if r == '\\' || r < 0x20 || r == 0x7f {
+			return domyślny
+		}
+	}
+	// zakodowany backslash albo znak sterujący: dekodujemy i sprawdzamy jeszcze raz
+	if dek, err := url.PathUnescape(next); err != nil {
+		return domyślny
+	} else {
+		for _, r := range dek {
+			if r == '\\' || r < 0x20 || r == 0x7f {
+				return domyślny
+			}
+		}
+		if strings.HasPrefix(dek, "//") {
+			return domyślny
+		}
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || !strings.HasPrefix(u.Path, "/") {
+		return domyślny
+	}
+	return next
+}
+
+// celZReferera — powrót na stronę, z której przyszło żądanie, ale tylko jeśli
+// Referer wskazuje TEN SAM host. GET /lang nie jest chroniony przez
+// wymagajSameOrigin, więc obcy Referer to był otwarty redirect.
+func celZReferera(r *http.Request) string {
+	ref := r.Header.Get("Referer")
+	if ref == "" {
+		return "/"
+	}
+	u, err := url.Parse(ref)
+	if err != nil || !strings.EqualFold(u.Host, r.Host) {
+		return "/"
+	}
+	return bezpiecznyCel(u.RequestURI())
+}
 
 // ── middleware ───────────────────────────────────────────────────────────────
 
 // wymagajLogowania przepuszcza tylko z ważną sesją. Gdy w bazie nie ma jeszcze
 // żadnego konta, przekierowuje na /setup — panel nie może stać otworem.
+//
+// Poza sesją są dwa wąskie wyjątki, oba tylko dla GET (patrz tokeny.go):
+// token API na trzech trasach tylko-do-odczytu i nieuwierzytelnione /metrics
+// dla sieci z --metrics-allow. Trasy tokenowe i /api/* nigdy nie odsyłają na
+// /login — klient maszynowy dostaje 401.
 func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/metrics" && s.metrykiZCIDR(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		_, maBearer := bearerZNagłówka(r)
+		maszynowa := trasaTokenowa(r) && (maBearer || r.URL.Path == "/metrics")
+
 		if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
+			if maszynowa {
+				odmówBezSesji(w, r)
+				return
+			}
 			http.Redirect(w, r, "/setup", http.StatusSeeOther)
 			return
 		}
@@ -76,13 +249,21 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 			}
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.Header.Get("Accept") == "text/event-stream" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if trasaTokenowa(r) && maBearer {
+			if s.uwierzytelnijToken(w, r) {
+				next.ServeHTTP(w, r)
+			}
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" ||
+			r.Header.Get("Accept") == "text/event-stream" {
+			odmówBezSesji(w, r)
 			return
 		}
 		cel := "/login"
 		if r.URL.Path != "/" {
-			cel += "?next=" + r.URL.Path
+			cel += "?next=" + url.QueryEscape(r.URL.Path)
 		}
 		http.Redirect(w, r, cel, http.StatusSeeOther)
 	})
@@ -137,6 +318,7 @@ type widokLogowania struct {
 // (bramki SSO, WAF-y) potrafią zjeść POST-a, a przełącznik języka ma działać
 // wszędzie, także w przeglądarce bez JavaScriptu.
 func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	_ = r.ParseForm()
 	l := i18n.Rozpoznaj(r.FormValue("lang"))
 	if l == "" {
@@ -150,12 +332,10 @@ func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
 		MaxAge: 365 * 24 * 3600, HttpOnly: false,
 		Secure: poHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
-	cel := r.FormValue("next")
-	if cel == "" || !strings.HasPrefix(cel, "/") || strings.HasPrefix(cel, "//") {
-		cel = r.Header.Get("Referer")
-	}
-	if cel == "" {
-		cel = "/"
+	next := r.FormValue("next")
+	cel := bezpiecznyCel(next)
+	if cel == "/" && next != "/" { // brak albo zły next → wracamy skąd przyszło
+		cel = celZReferera(r)
 	}
 	http.Redirect(w, r, cel, http.StatusSeeOther)
 }
@@ -177,16 +357,14 @@ func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
 	hasło := r.FormValue("password")
-	next := r.FormValue("next")
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
-	}
+	next := bezpiecznyCel(r.FormValue("next"))
 
 	ip := adresIP(r)
 	if !s.lim.wolno(ip) {
@@ -246,6 +424,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			Setup: true, Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return

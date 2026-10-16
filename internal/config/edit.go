@@ -1,11 +1,14 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/ast"
 )
@@ -134,20 +137,40 @@ func renderService(svc Service, dashIndent int) string {
 	if svc.Size != "" {
 		fmt.Fprintf(&b, "%ssize: %s\n", key, quoteLike(nil, svc.Size))
 	}
-	if svc.Check.Interval != 0 || svc.Check.Timeout != 0 || len(svc.Check.Expect) > 0 {
+	if svc.Description != "" {
+		fmt.Fprintf(&b, "%sdescription: %s\n", key, quoteLike(nil, svc.Description))
+	}
+	if len(svc.Tags) > 0 {
+		fmt.Fprintf(&b, "%stags: %s\n", key, renderTagiFlow(svc.Tags))
+	}
+	c := svc.Check
+	if c.Interval != 0 || c.Timeout != 0 || len(c.Expect) > 0 || c.Insecure ||
+		c.Path != "" || c.Contains != "" || c.NotContains != "" {
 		fmt.Fprintf(&b, "%scheck:\n", key)
-		if svc.Check.Interval != 0 {
-			fmt.Fprintf(&b, "%s  interval: %s\n", key, svc.Check.Interval)
+		if c.Interval != 0 {
+			fmt.Fprintf(&b, "%s  interval: %s\n", key, c.Interval)
 		}
-		if svc.Check.Timeout != 0 {
-			fmt.Fprintf(&b, "%s  timeout: %s\n", key, svc.Check.Timeout)
+		if c.Timeout != 0 {
+			fmt.Fprintf(&b, "%s  timeout: %s\n", key, c.Timeout)
 		}
-		if len(svc.Check.Expect) > 0 {
-			kody := make([]string, len(svc.Check.Expect))
-			for i, k := range svc.Check.Expect {
+		if len(c.Expect) > 0 {
+			kody := make([]string, len(c.Expect))
+			for i, k := range c.Expect {
 				kody[i] = strconv.Itoa(k)
 			}
 			fmt.Fprintf(&b, "%s  expect: [%s]\n", key, strings.Join(kody, ", "))
+		}
+		if c.Insecure {
+			fmt.Fprintf(&b, "%s  insecure: true\n", key)
+		}
+		if c.Path != "" {
+			fmt.Fprintf(&b, "%s  path: %s\n", key, quoteLike(nil, c.Path))
+		}
+		if c.Contains != "" {
+			fmt.Fprintf(&b, "%s  contains: %s\n", key, quoteLike(nil, c.Contains))
+		}
+		if c.NotContains != "" {
+			fmt.Fprintf(&b, "%s  not_contains: %s\n", key, quoteLike(nil, c.NotContains))
 		}
 	}
 	return b.String()
@@ -234,6 +257,11 @@ func (d *Document) SetServiceField(group, service, field, value string) error {
 	if err != nil {
 		return err
 	}
+	if field == "name" && value != service {
+		if _, _, err := d.findService(group, value); err == nil {
+			return fmt.Errorf("%w: service %q in group %q", ErrDuplikat, value, group)
+		}
+	}
 	start, end, err := d.valueRange("groups", gi, "services", si, field)
 	if errors.Is(err, ErrPathNotFound) {
 		return d.wstawKlucz(field, quoteLike(nil, value), "groups", gi, "services", si)
@@ -267,20 +295,8 @@ func (d *Document) RemoveService(group, service string) error {
 		return err
 	}
 	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
+	start := d.początekZKomentarzem(off, dashIndent) // tylko komentarz w kolumnie myślnika
 	end := d.blockEnd(off, dashIndent)
-
-	// wciągnij komentarz przyklejony nad wpisem
-	for start > 0 {
-		poprzedniKoniec := start - 1
-		poprzedniStart := d.lineStart(poprzedniKoniec)
-		linia := strings.TrimSpace(string(d.src[poprzedniStart:poprzedniKoniec]))
-		if strings.HasPrefix(linia, "#") {
-			start = poprzedniStart
-			continue
-		}
-		break
-	}
 
 	// jeśli usuwamy ostatni wpis, zostaw pustą listę zamiast wiszącego klucza
 	if len(seq.Values) == 1 {
@@ -372,17 +388,8 @@ func (d *Document) RemoveGroup(name string) error {
 		return err
 	}
 	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
+	start := d.początekZKomentarzem(off, dashIndent)
 	end := d.blockEnd(off, dashIndent)
-	for start > 0 {
-		pk := start - 1
-		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") {
-			start = ps
-			continue
-		}
-		break
-	}
 	for end < len(d.src) {
 		kl := d.lineEnd(end)
 		if strings.TrimSpace(string(d.src[end:kl])) != "" {
@@ -396,7 +403,23 @@ func (d *Document) RemoveGroup(name string) error {
 // ReplaceAll podmienia całą treść pliku — używane przez edytor „surowy YAML".
 // Zmiana jest odrzucana, jeśli nowa treść się nie parsuje.
 func (d *Document) ReplaceAll(nowa []byte) error {
-	return d.replaceRange(0, len(d.src), nowa)
+	// treść z samymi CRLF (np. z textarea) zapisujemy jako CRLF; treść z LF
+	// dostaje styl pliku, który był.
+	nowa, crlf := normalizujKońce(nowa)
+	if !crlf && d.crlf {
+		// mieszane końce w pliku CRLF — Bytes() dołoży \r do każdej linii,
+		// więc istniejące \r\n dałyby \r\r\n
+		nowa = bytes.ReplaceAll(nowa, []byte("\r\n"), []byte("\n"))
+	}
+	stary := d.crlf
+	if crlf {
+		d.crlf = true
+	}
+	if err := d.replaceRange(0, len(d.src), nowa); err != nil {
+		d.crlf = stary
+		return err
+	}
+	return nil
 }
 
 // RenameGroup zmienia nazwę grupy, nie ruszając jej zawartości.
@@ -408,7 +431,7 @@ func (d *Document) RenameGroup(stara, nowa string) error {
 		return nil
 	}
 	if _, err := d.findGroup(nowa); err == nil {
-		return fmt.Errorf("group %q already exists", nowa)
+		return fmt.Errorf("%w: group %q", ErrDuplikat, nowa)
 	}
 	gi, err := d.findGroup(stara)
 	if err != nil {
@@ -421,108 +444,22 @@ func (d *Document) RenameGroup(stara, nowa string) error {
 	return d.replaceRange(start, end, []byte(quoteLike(d.src[start:end], nowa)))
 }
 
-// MoveService przenosi usługę do innej grupy razem z jej blokiem tekstu —
+// MoveService przenosi usługę na koniec innej grupy razem z jej blokiem tekstu —
 // komentarze i pola, których panel nie zna, jadą z nią. Wcięcie jest
-// przeliczane pod grupę docelową.
+// przeliczane pod grupę docelową. Konkretną pozycję daje MoveServiceTo.
 func (d *Document) MoveService(zGrupy, usługa, doGrupy string) error {
 	if zGrupy == doGrupy {
 		return nil
 	}
-	if _, err := d.findGroup(doGrupy); err != nil {
-		return err
-	}
-	if _, _, err := d.findService(doGrupy, usługa); err == nil {
-		return fmt.Errorf("service %q already exists in group %q", usługa, doGrupy)
-	}
-
-	blok, err := d.blokUsługi(zGrupy, usługa)
+	ti, err := d.findGroup(doGrupy)
 	if err != nil {
 		return err
 	}
-	if err := d.RemoveService(zGrupy, usługa); err != nil {
-		return err
+	n := 0
+	if seq, ok := d.sekwencja("groups", ti, "services"); ok {
+		n = len(seq.Values)
 	}
-	return d.wstawBlok(doGrupy, blok)
-}
-
-// blokUsługi zwraca surowe linie wpisu (z komentarzem nad nim), zdjęte z wcięcia.
-func (d *Document) blokUsługi(grupa, usługa string) ([]string, error) {
-	gi, si, err := d.findService(grupa, usługa)
-	if err != nil {
-		return nil, err
-	}
-	svcs, err := d.node("groups", gi, "services")
-	if err != nil {
-		return nil, err
-	}
-	seq, ok := unwrap(svcs).(*ast.SequenceNode)
-	if !ok {
-		return nil, fmt.Errorf("%w: services nie jest listą", ErrPathNotFound)
-	}
-	off, err := d.offsetOf(seq.Values[si])
-	if err != nil {
-		return nil, err
-	}
-	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
-	end := d.blockEnd(off, dashIndent)
-	for start > 0 {
-		pk := start - 1
-		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") {
-			start = ps
-			continue
-		}
-		break
-	}
-
-	var linie []string
-	for _, l := range strings.Split(strings.TrimRight(string(d.src[start:end]), "\n"), "\n") {
-		if len(l) >= dashIndent {
-			l = l[dashIndent:]
-		} else {
-			l = strings.TrimLeft(l, " ")
-		}
-		linie = append(linie, l)
-	}
-	return linie, nil
-}
-
-// wstawBlok dokłada gotowe linie wpisu na koniec grupy, z jej wcięciem.
-func (d *Document) wstawBlok(grupa string, linie []string) error {
-	gi, err := d.findGroup(grupa)
-	if err != nil {
-		return err
-	}
-	svcs, err := d.node("groups", gi, "services")
-	if err != nil {
-		return d.wstawBlokDoPustej(gi, linie)
-	}
-	seq, ok := unwrap(svcs).(*ast.SequenceNode)
-	if !ok || len(seq.Values) == 0 {
-		return d.wstawBlokDoPustej(gi, linie)
-	}
-
-	off, err := d.offsetOf(seq.Values[len(seq.Values)-1])
-	if err != nil {
-		return err
-	}
-	dashIndent := d.dashIndentOf(off)
-	wstaw := d.blockEnd(off, dashIndent)
-
-	ind := strings.Repeat(" ", dashIndent)
-	var b strings.Builder
-	if d.poprzedzaPustaLinia(off) {
-		b.WriteString("\n")
-	}
-	for _, l := range linie {
-		if strings.TrimSpace(l) == "" {
-			b.WriteString("\n")
-			continue
-		}
-		b.WriteString(ind + l + "\n")
-	}
-	return d.replaceRange(wstaw, wstaw, []byte(b.String()))
+	return d.MoveServiceTo(zGrupy, usługa, doGrupy, n)
 }
 
 func (d *Document) wstawBlokDoPustej(gi int, linie []string) error {
@@ -566,13 +503,27 @@ func (d *Document) wstawBlokDoPustej(gi int, linie []string) error {
 // bierze z klucza, który już tam stoi — plik dyktuje styl, nie my.
 // wartość musi być już sformatowana (quoteLike albo sprawdzona liczba).
 func (d *Document) wstawKlucz(klucz, wartość string, ścieżka ...any) error {
-	n, err := d.node(ścieżka...)
+	kolumna, wstaw, err := d.miejsceWstawienia(ścieżka...)
 	if err != nil {
 		return err
 	}
+	blok := strings.Repeat(" ", kolumna) + klucz + ": " + wartość + "\n"
+	if wstaw > 0 && wstaw <= len(d.src) && d.src[wstaw-1] != '\n' {
+		blok = "\n" + blok // plik bez końcowego \n — nie sklejaj linii
+	}
+	return d.replaceRange(wstaw, wstaw, []byte(blok))
+}
+
+// miejsceWstawienia zwraca kolumnę nowego klucza i offset, pod którym ma
+// wylądować jego linia — tuż za ostatnim wpisem mapy spod ścieżki.
+func (d *Document) miejsceWstawienia(ścieżka ...any) (kolumna, wstaw int, err error) {
+	n, err := d.node(ścieżka...)
+	if err != nil {
+		return 0, 0, err
+	}
 	m := asMapping(n)
 	if m == nil || len(m.Values) == 0 {
-		return fmt.Errorf("%w: %v nie jest mapą z wpisami", ErrPathNotFound, ścieżka)
+		return 0, 0, fmt.Errorf("%w: %v nie jest mapą z wpisami", ErrPathNotFound, ścieżka)
 	}
 	// od końca, bo szukamy ostatniego wpisu — a przy okazji przeskakujemy
 	// węzeł bez pozycji, gdyby taki się trafił (parser bywa oszczędny przy
@@ -585,16 +536,10 @@ func (d *Document) wstawKlucz(klucz, wartość string, ścieżka ...any) error {
 		}
 	}
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	kolumna, próg := d.zakresWpisu(off)
-	wstaw := d.blockEnd(off, próg)
-
-	blok := strings.Repeat(" ", kolumna) + klucz + ": " + wartość + "\n"
-	if wstaw > 0 && wstaw <= len(d.src) && d.src[wstaw-1] != '\n' {
-		blok = "\n" + blok // plik bez końcowego \n — nie sklejaj linii
-	}
-	return d.replaceRange(wstaw, wstaw, []byte(blok))
+	return kolumna, d.blockEnd(off, próg), nil
 }
 
 // usuńKlucz kasuje linię (albo blok) danego klucza w mapie spod ścieżki.
@@ -839,4 +784,45 @@ func (d *Document) UsuńWygląd() error {
 		end = koniecLinii + 1
 	}
 	return d.replaceRange(start, end, nil)
+}
+
+// MaksTytułu — limit długości tytułu panelu (w znakach, nie bajtach).
+const MaksTytułu = 80
+
+var (
+	ErrTytułPusty = errors.New("title is empty")
+	ErrTytułDługi = errors.New("title is too long")
+	ErrTytułZnaki = errors.New("title contains control characters")
+)
+
+// NormalizujTytuł przycina i sprawdza tytuł. Zwraca to, co wolno zapisać do
+// pliku — jedna linia, bez znaków sterujących.
+func NormalizujTytuł(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", ErrTytułPusty
+	}
+	if utf8.RuneCountInString(v) > MaksTytułu {
+		return "", ErrTytułDługi
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+			return "", ErrTytułZnaki
+		}
+	}
+	return v, nil
+}
+
+// UstawTytuł zapisuje top-level `title`. Gdy klucza nie ma, powstaje przed
+// `groups:`, jak blok wyglądu. Styl cytowania z pliku wygrywa (SetPath).
+func (d *Document) UstawTytuł(tytuł string) error {
+	tytuł, err := NormalizujTytuł(tytuł)
+	if err != nil {
+		return err
+	}
+	err = d.SetPath(tytuł, "title")
+	if !errors.Is(err, ErrPathNotFound) {
+		return err
+	}
+	return d.wstawBlokNajwyższegoPoziomu("title: " + quoteLike(nil, tytuł) + "\n")
 }
