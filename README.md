@@ -342,7 +342,7 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
 **Plain kubectl** (kustomize, pinned to a release tag):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.1"
 ```
 
 Then reach the panel and create the administrator on the first visit (see
@@ -614,11 +614,24 @@ not been checked yet (or has no address) has **no series at all** — a `0` woul
 read as "down" and wake you up for nothing. An alert that fires only on a real
 outage: `shyg_service_up == 0 and shyg_service_degraded == 0`.
 
-A ready dashboard — up/degraded/down counters, a 24-hour availability table,
-response times and a state timeline per service — is in
-[`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json). In Grafana:
-Dashboards → New → Import → upload the file, and pick your Prometheus data
-source when asked.
+### Grafana dashboard
+
+Up/degraded/down counters, what is broken right now and since when, every
+service with its 24-hour availability, response times and a state timeline per
+service:
+
+![Shy Garlic dashboard in Grafana](docs/img/grafana-dashboard.png)
+
+1. In Grafana: **Dashboards → New → Import**.
+2. Upload [`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json)
+   or paste its contents.
+3. Pick your Prometheus data source, and in **Prometheus job** enter the
+   `job_name` of your scrape config if it is not `shy-garlic` (the one in the
+   example above). To change it later: dashboard **Settings → Variables →
+   job**.
+
+It uses only built-in panels (stat, table, bar gauge, state timeline, time
+series, text) — no plugins to install. Needs Grafana 11.0 or newer.
 
 ### Without a token, from your own network
 
