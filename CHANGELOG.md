@@ -28,6 +28,12 @@ the entries below say when it does.
   the card back. Other open tabs reload when the order changes.
   New endpoints: `POST /api/services/move`, `POST /api/groups/move`,
   `PUT /api/title`. Like any edit they appear in the version history.
+  You can grab the whole card (or the whole group header), not only the grip:
+  with a mouse after ~6 px of movement, with a finger after a 300 ms long press
+  so the page still scrolls normally. A plain click still opens the service, and
+  the click that ends a drag is swallowed. The drop position follows the pointer:
+  left half of a card = before it, right half = after it. Keyboard focus rings
+  no longer stay on a card after a mouse or touch interaction.
 - **A broken config no longer takes the panel down.** If the file has a YAML
   error at start the panel now comes up anyway (no more restart loop in Docker)
   and shows a banner with the message, line and column. It runs on the newest

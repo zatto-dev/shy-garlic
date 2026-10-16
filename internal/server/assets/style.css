@@ -746,7 +746,9 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   background: var(--glass2);
   border-color: var(--edge2);
 }
-.karta:focus-within {
+/* :has(:focus-visible), nie :focus-within — kliknięcie myszą/palcem nie
+   zostawia obwódki na karcie, klawiatura nadal ją pokazuje. */
+.karta:has(:focus-visible) {
   border-color: var(--acc);
   box-shadow: inset 0 1px 0 var(--shine), 0 0 0 3px var(--acc-32);
 }
@@ -1012,7 +1014,7 @@ body[data-widok="list"] .karta {
 }
 body[data-widok="list"] .karta:first-child { border-top-color: transparent; }
 body[data-widok="list"] .karta:hover { transform: none; background: var(--glass2); }
-body[data-widok="list"] .karta:focus-within {
+body[data-widok="list"] .karta:has(:focus-visible) {
   box-shadow: inset 0 0 0 2px var(--acc-32); border-color: var(--edge);
 }
 /* Wiersz listy jest jednowierszowy — wszystkie dzieci wracają do rzędu 1. */
@@ -2003,6 +2005,19 @@ body.edycja .brand #tytul-edytuj { display: inline-flex; }
 .btn.uchwyt { cursor: grab; touch-action: none; }
 .btn.uchwyt:active { cursor: grabbing; }
 
+/* Cała karta i nagłówek grupy to powierzchnia przeciągania — tylko w trybie
+   edycji (tak jak uchwyt). touch-action zostaje domyślne: palec przewija stronę,
+   a przeciąganie zaczyna się dopiero po długim przytrzymaniu (app.js). */
+body.edycja .karta,
+body.edycja .grupa > h2 {
+  cursor: grab;
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+body.edycja .karta a, body.edycja .karta img { -webkit-user-drag: none; }
+body.edycja .karta button, body.edycja .grupa > h2 button { cursor: pointer; }
+body.edycja .karta .uchwyt, body.edycja .grupa > h2 .uchwyt { cursor: grab; }
+
 body.przeciaganie, body.przeciaganie * { cursor: grabbing !important; }
 body.przeciaganie { user-select: none; -webkit-user-select: none; }
 
@@ -2034,10 +2049,12 @@ body[data-widok] .duch {
   animation: none; transform: none;
 }
 body[data-widok] .duch.karta { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.duch--dotyk { box-shadow: 0 22px 48px -10px rgba(0,0,0,.6); }
 .duch.grupa { padding: 8px 10px; border-radius: var(--r-duza); }
 .duch.grupa > :not(h2) { display: none; }
 @media (prefers-reduced-motion: no-preference) {
   .duch { scale: 1.02; }
+  .duch--dotyk { scale: 1.05; }
 }
 
 /* ── baner stanu pliku (błąd YAML / nieznane klucze) ────────────────────── */

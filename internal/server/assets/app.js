@@ -2026,6 +2026,8 @@
   // a cofnięcie to jedno insertBefore.
   const PROG_RUCHU = 6;     // px; poniżej tego puszczenie przycisku to zwykłe kliknięcie
   const STREFA_SCROLLA = 80; // px od krawędzi okna
+  const DOTYK_TRZYMANIE_MS = 300; // palec na karcie: tyle trzeba przytrzymać, zanim zacznie się przeciąganie
+  const DOTYK_TOLERANCJA = 8;     // px; większy ruch przed upływem czasu = zwykłe przewijanie strony
   const ogloszenia = $("#ogloszenia");
   const fmt = (tekst, ...arg) => { let i = 0; return String(tekst).replace(/%[ds]/g, () => arg[i++]); };
 
@@ -2133,31 +2135,54 @@
     return najlepsza;
   }
 
+  // Miejsce karty wynika z tego, NAD CZYM jest kursor, a nie z tego, która karta
+  // jest najbliżej: karta przeciągana zostaje w DOM-ie jako znacznik, więc po
+  // każdym przesunięciu układ się zmienia, a wybór „najbliższego środka" potrafił
+  // wtedy skakać między dwoma stabilnymi pozycjami zależnie od drogi kursora.
+  //  - kursor nad znacznikiem albo w szczelinie między kartami → bez zmian,
+  //  - nad inną kartą: lewa połowa = przed nią, prawa = za nią (w widoku listy
+  //    górna/dolna połowa); po zamianie kursor ląduje nad znacznikiem, więc jest stabilnie,
+  //  - poza kartami: w wierszu z kartami przed pierwszą/za ostatnią, nad
+  //    pierwszym wierszem na początek, pod ostatnim na koniec.
   function polozKarte(karta, x, y) {
     const sekcja = grupaPodKursorem(y);
     if (!sekcja) return;
     const ul = $(":scope > .siatka", sekcja);
-    const inne = kartyGrupy(ul).filter((k) => k !== karta && !k.hidden);
-    let przed = null; // element, przed którym ląduje karta; null = na koniec
-    if (inne.length) {
-      const rr = inne.map((k) => k.getBoundingClientRect());
-      // lista (jedna kolumna) vs siatka: w liście wszystkie karty mają ten sam lewy brzeg
-      const pionowo = rr.every((r) => Math.abs(r.left - rr[0].left) < 2);
-      let n = 0, odl = Infinity;
-      rr.forEach((r, i) => {
-        const s = srodek(r);
-        const d = (s.x - x) ** 2 + (s.y - y) ** 2;
-        if (d < odl) { odl = d; n = i; }
-      });
-      const r = rr[n], s = srodek(r);
-      const wczesniej = pionowo ? y < s.y
-        : y < r.top ? true : y > r.bottom ? false : x < s.x;
-      const nast = wczesniej ? inne[n] : inne[n + 1];
-      przed = nast || null;
+    const wszystkie = kartyGrupy(ul).filter((k) => !k.hidden);
+    const inne = wszystkie.filter((k) => k !== karta);
+    const wstaw = (przed) => {
+      const cel = przed || $(":scope > .kafel-dodaj", ul);
+      if (karta.parentElement === ul && karta.nextElementSibling === cel) return;
+      ul.insertBefore(karta, cel);
+    };
+    if (!inne.length) { wstaw(null); return; }
+
+    const rr = new Map(wszystkie.map((k) => [k, k.getBoundingClientRect()]));
+    const w = (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    const nad = wszystkie.find((k) => w(rr.get(k)));
+    if (nad === karta) return;
+    if (nad) {
+      const r = rr.get(nad), s = srodek(r);
+      const lista = [...rr.values()].every((q) => Math.abs(q.left - r.left) < 2);
+      const wczesniej = lista ? y < s.y : x < s.x;
+      wstaw(wczesniej ? nad : (inne[inne.indexOf(nad) + 1] || null));
+      return;
     }
-    const cel = przed || $(":scope > .kafel-dodaj", ul);
-    if (karta.parentElement === ul && karta.nextElementSibling === cel) return;
-    ul.insertBefore(karta, cel);
+    // kursor poza kartami
+    const wRzedzie = inne.filter((k) => y >= rr.get(k).top && y <= rr.get(k).bottom);
+    if (wRzedzie.length) {
+      if (x > rr.get(wRzedzie[wRzedzie.length - 1]).right) {
+        wstaw(inne[inne.indexOf(wRzedzie[wRzedzie.length - 1]) + 1] || null);
+      } else if (x < rr.get(wRzedzie[0]).left) {
+        wstaw(wRzedzie[0]);
+      }
+      return;
+    }
+    const gora = Math.min(...inne.map((k) => rr.get(k).top));
+    const dol = Math.max(...inne.map((k) => rr.get(k).bottom));
+    if (y < gora) wstaw(inne[0]);
+    else if (y > dol) wstaw(null);
+    else if (karta.parentElement !== ul) wstaw(null); // szczelina między wierszami w obcej grupie
   }
 
   function polozGrupe(sekcja, y) {
@@ -2192,6 +2217,7 @@
     p.dx = p.x0 - r.left;
     p.dy = p.y0 - r.top;
     p.aktywne = true;
+    if (p.dotyk) duch.classList.add("duch--dotyk");
     document.body.classList.add("przeciaganie");
     el.classList.add("przeciagana");
     ruchDucha(p);
@@ -2219,7 +2245,10 @@
     document.removeEventListener("pointerup", naPuszczeniu, true);
     document.removeEventListener("pointercancel", naPrzerwaniu, true);
     document.removeEventListener("keydown", naKlawiszuPodczas, true);
+    document.removeEventListener("touchmove", naDotykuRuch);
+    document.removeEventListener("contextmenu", naMenuKontekstowym, true);
     window.removeEventListener("blur", naPrzerwaniu);
+    clearTimeout(p.czasDotyku);
     if (p.duch) p.duch.remove();
     document.body.classList.remove("przeciaganie");
     p.el.classList.remove("przeciagana");
@@ -2229,6 +2258,11 @@
     const p = przeciaganie;
     if (!p || e.pointerId !== p.id) return;
     p.x = e.clientX; p.y = e.clientY;
+    if (p.oczekuje) {
+      // palec ruszył się przed końcem przytrzymania — to przewijanie, oddajemy je przeglądarce
+      if (Math.hypot(p.x - p.x0, p.y - p.y0) > DOTYK_TOLERANCJA) sprzatnijPrzeciaganie();
+      return;
+    }
     if (!p.aktywne) {
       if (Math.hypot(p.x - p.x0, p.y - p.y0) < PROG_RUCHU) return;
       startPrzeciagania(p);
@@ -2243,10 +2277,12 @@
     if (!p || e.pointerId !== p.id) return;
     const { el, typ, miejsce, aktywne, uchwyt } = p;
     sprzatnijPrzeciaganie();
-    if (!aktywne) return; // nie przekroczono progu — zwykłe kliknięcie
+    if (!aktywne) return; // nie przekroczono progu (albo za krótkie przytrzymanie) — zwykłe kliknięcie
+    stlumKlik(); // po prawdziwym przeciągnięciu przeglądarka i tak wyśle click — nie otwieramy linku
     if (typ === "grupa") await zakonczRuchGrupy(el, miejsce);
     else await zakonczRuchKarty(el, miejsce);
-    uchwyt.focus({ preventScroll: true });
+    // fokus wraca na uchwyt tylko, gdy to jego użyto; po złapaniu za kartę nie zostawiamy obwódki
+    if (uchwyt) uchwyt.focus({ preventScroll: true });
   }
 
   function naPrzerwaniu() {
@@ -2281,25 +2317,82 @@
     requestAnimationFrame(petlaScrolla);
   }
 
+  // Click po prawdziwym przeciągnięciu (puszczenie nad tym samym linkiem) wycinamy.
+  let klikStlumionyDo = 0;
+  function stlumKlik() { klikStlumionyDo = performance.now() + 400; }
+  document.addEventListener("click", (e) => {
+    if (performance.now() > klikStlumionyDo) return;
+    klikStlumionyDo = 0;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  // Natywne przeciąganie linku/obrazka z karty przejęłoby gest i anulowało
+  // pointer events. Dotyczy tylko kart i nagłówków grup — dokumentowe
+  // dragover/drop od wgrywania tapet (wyżej) zostaje nietknięte.
+  document.addEventListener("dragstart", (e) => {
+    if (e.target.closest && e.target.closest(".karta, .grupa > h2")) e.preventDefault();
+  }, true);
+
+  function naDotykuRuch(e) {
+    if (przeciaganie && przeciaganie.aktywne && e.cancelable) e.preventDefault(); // stop przewijania
+  }
+  function naMenuKontekstowym(e) { e.preventDefault(); } // długie przytrzymanie linku na Androidzie
+
+  // Co użytkownik złapał: uchwyt (zawsze) albo powierzchnię karty / nagłówka grupy.
+  function zrodloPrzeciagania(e) {
+    const cel = e.target.closest && e.target;
+    if (!cel) return null;
+    const uchwyt = cel.closest('[data-akcja="uchwyt"]');
+    if (uchwyt) {
+      const typ = uchwyt.dataset.typ;
+      const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
+      return el ? { typ, el, uchwyt, powierzchnia: false } : null;
+    }
+    // przyciski i pola w karcie robią swoje; modyfikatory = otwarcie w nowej karcie
+    if (cel.closest("button, input, select, textarea, label, summary, [data-akcja]")) return null;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return null;
+    const karta = cel.closest(".karta");
+    if (karta) return { typ: "usluga", el: karta, uchwyt: null, powierzchnia: true };
+    const naglowek = cel.closest(".grupa > h2");
+    if (naglowek) return { typ: "grupa", el: naglowek.parentElement, uchwyt: null, powierzchnia: true };
+    return null;
+  }
+
   document.addEventListener("pointerdown", (e) => {
-    const uchwyt = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
-    if (!uchwyt || przeciaganie || zapisujeRuch) return;
+    if (przeciaganie || zapisujeRuch) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (!document.body.classList.contains("edycja")) return;
+    const z = zrodloPrzeciagania(e);
+    if (!z) return;
     if (filtrAktywny()) { powiadom(tr("przenosz_filtr"), "ostrzezenie"); return; }
-    const typ = uchwyt.dataset.typ;
-    const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
-    if (!el) return;
+    const dotykNaKarcie = z.powierzchnia && e.pointerType === "touch";
     przeciaganie = {
-      typ, el, uchwyt, id: e.pointerId, aktywne: false,
+      typ: z.typ, el: z.el, uchwyt: z.uchwyt, id: e.pointerId, aktywne: false,
+      oczekuje: dotykNaKarcie,
       x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
-      miejsce: zapamietajMiejsce(el),
+      miejsce: zapamietajMiejsce(z.el),
     };
+    const p = przeciaganie;
     document.addEventListener("pointermove", naRuchu, true);
     document.addEventListener("pointerup", naPuszczeniu, true);
     document.addEventListener("pointercancel", naPrzerwaniu, true);
     document.addEventListener("keydown", naKlawiszuPodczas, true);
     window.addEventListener("blur", naPrzerwaniu);
+    if (e.pointerType === "touch") {
+      document.addEventListener("touchmove", naDotykuRuch, { passive: false });
+      document.addEventListener("contextmenu", naMenuKontekstowym, true);
+    }
+    if (dotykNaKarcie) {
+      p.czasDotyku = setTimeout(() => {
+        if (przeciaganie !== p || !p.oczekuje) return;
+        p.oczekuje = false;
+        p.x0 = p.x; p.y0 = p.y;
+        p.dotyk = true;
+        startPrzeciagania(p);
+        if (navigator.vibrate) navigator.vibrate(10);
+      }, DOTYK_TRZYMANIE_MS);
+    }
   });
 
   // Klawiatura: Alt + strzałki na uchwycie. Góra/lewo = wcześniej, dół/prawo = później.
