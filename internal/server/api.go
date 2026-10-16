@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -99,11 +100,14 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 	}
 	if err := fn(d); err != nil {
 		kod := http.StatusBadRequest
+		komunikat := err.Error()
 		switch {
 		case errors.Is(err, config.ErrServiceNotFound), errors.Is(err, config.ErrGroupNotFound):
 			kod = http.StatusNotFound
+		case errors.Is(err, config.ErrPoleDziedziczone):
+			komunikat = i18n.T(i18n.Wybierz(r), "blad_pole_dziedziczone")
 		}
-		jsonBłąd(w, kod, err.Error())
+		jsonBłąd(w, kod, komunikat)
 		return false
 	}
 	if _, err := config.Load(d.Bytes()); err != nil {
@@ -182,6 +186,61 @@ type żądanieUsługi struct {
 	Expect   []int  `json:"expect,omitempty"`
 	Insecure bool   `json:"insecure,omitempty"`
 	Rozmiar  string `json:"size,omitempty"`
+	// Opis i Tagi to wskaźniki: nieobecne pole znaczy „nie ruszaj", obecne a
+	// puste — „usuń z pliku".
+	Opis *string   `json:"description,omitempty"`
+	Tagi *[]string `json:"tags,omitempty"`
+}
+
+// opisITagi sprawdza opcjonalny opis i tagi z żądania. Zwraca wartości po
+// normalizacji (nil = pole nie przyszło) albo klucz tekstu błędu.
+func (ż żądanieUsługi) opisITagi() (opis *string, tagi *[]string, błąd string) {
+	if ż.Opis != nil {
+		v, err := config.NormalizujOpis(*ż.Opis)
+		switch {
+		case errors.Is(err, config.ErrOpisDługi):
+			return nil, nil, "blad_opis_dlugi"
+		case err != nil:
+			return nil, nil, "blad_opis_znaki"
+		}
+		opis = &v
+	}
+	if ż.Tagi != nil {
+		v, err := config.NormalizujTagi(*ż.Tagi)
+		if err != nil {
+			return nil, nil, "blad_tagi"
+		}
+		tagi = &v
+	}
+	return opis, tagi, ""
+}
+
+// tagiDoJSON — pusta lista jako [], nie null; JS iteruje po niej bez sprawdzania.
+func tagiDoJSON(t config.Tagi) []string {
+	if len(t) == 0 {
+		return []string{}
+	}
+	return []string(t)
+}
+
+// usługaZConfigu zwraca usługę ze stanu w pamięci.
+func (s *Server) usługaZConfigu(grupa, nazwa string) (config.Service, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cfg == nil {
+		return config.Service{}, false
+	}
+	for _, g := range s.cfg.Groups {
+		if g.Name != grupa {
+			continue
+		}
+		for _, u := range g.Services {
+			if u.Name == nazwa {
+				return u, true
+			}
+		}
+	}
+	return config.Service{}, false
 }
 
 // rozmiarZŻądania przepuszcza wyłącznie allowlistę; puste zostaje puste, żeby
@@ -221,7 +280,18 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
 		return
 	}
+	nowyOpis, noweTagi, błąd := ż.opisITagi()
+	if błąd != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+		return
+	}
 	svc := config.Service{Name: ż.Nazwa, URL: ż.URL, Icon: ż.Ikona, Size: rozmiarZŻądania(ż.Rozmiar)}
+	if nowyOpis != nil {
+		svc.Description = *nowyOpis
+	}
+	if noweTagi != nil {
+		svc.Tags = config.Tagi(*noweTagi)
+	}
 	svc.Check = przeliczCheck(ż)
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_usluge"), ż.Nazwa, ż.Grupa)
@@ -262,6 +332,21 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
 		return
 	}
+	nowyOpis, noweTagi, kluczBłędu := ż.opisITagi()
+	if kluczBłędu != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, kluczBłędu))
+		return
+	}
+	// wartość równa obecnej nie jest zmianą — nie ma co jej zapisywać, a przy
+	// polu odziedziczonym z merge-key zapis byłby niemożliwy
+	if bieżąca, ok := s.usługaZConfigu(ż.Grupa, ż.Nazwa); ok {
+		if nowyOpis != nil && *nowyOpis == bieżąca.Description {
+			nowyOpis = nil
+		}
+		if noweTagi != nil && slices.Equal(*noweTagi, []string(bieżąca.Tags)) {
+			noweTagi = nil
+		}
+	}
 	opis := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_usluge"), ż.Nazwa)
 	if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
 		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.NowaGrupa)
@@ -300,6 +385,16 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		if rozmiar := rozmiarZŻądania(ż.Rozmiar); rozmiar != "" {
 			if err := d.SetServiceField(ż.Grupa, ż.Nazwa, "size", rozmiar); err != nil &&
 				!errors.Is(err, config.ErrPathNotFound) {
+				return err
+			}
+		}
+		if nowyOpis != nil {
+			if err := d.UstawOpisUsługi(ż.Grupa, ż.Nazwa, *nowyOpis); err != nil {
+				return err
+			}
+		}
+		if noweTagi != nil {
+			if err := d.UstawTagiUsługi(ż.Grupa, ż.Nazwa, *noweTagi); err != nil {
 				return err
 			}
 		}
@@ -806,7 +901,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	jsonOdp(w, http.StatusOK, map[string]any{
 		"key": klucz, "name": svc.Name, "group": grupa, "url": svc.URL, "icon": svc.Icon,
 		"iconSrc": ikona.Src, "iconWariantCiemny": ikona.WariantCiemny, "iconWariantJasny": ikona.WariantJasny,
-		"size": svc.Size,
+		"size": svc.Size, "description": svc.Description, "tags": tagiDoJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
 		"expect": svc.Check.Expect, "insecure": svc.Check.Insecure,
 		"now":     s.mon.Snapshot()[klucz],
@@ -1235,6 +1330,10 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
 			return
 		}
+		if _, _, błąd := u.opisITagi(); błąd != "" {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+			return
+		}
 	}
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)
@@ -1246,6 +1345,13 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			}
 			svc := config.Service{Name: u.Nazwa, URL: u.URL, Icon: u.Ikona,
 				Size: rozmiarZŻądania(u.Rozmiar)}
+			opis, tagi, _ := u.opisITagi() // błędy sprawdzone wyżej
+			if opis != nil {
+				svc.Description = *opis
+			}
+			if tagi != nil {
+				svc.Tags = config.Tagi(*tagi)
+			}
 			svc.Check = przeliczCheck(u)
 			if err := d.AddService(grupa, svc); err != nil {
 				return fmt.Errorf("%s: %w", u.Nazwa, err)

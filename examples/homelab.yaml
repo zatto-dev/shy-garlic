@@ -49,6 +49,10 @@ groups:
       - name: Proxmox
         url: https://192.168.1.10:8006
         icon: proxmox
+        # description and tags are optional: a line under the name, and labels.
+        # Both are searched by the filter box; tags show as chips in list view.
+        description: Hypervisor, three nodes
+        tags: [infra, virtualization]
         check:
           interval: 30s
           timeout: 6s
@@ -70,6 +74,8 @@ groups:
       - name: Home Assistant
         url: http://192.168.1.20:8123
         icon: home-assistant
+        description: Lights, heating, sensors
+        tags: [home, automation]
         <<: *defaults
 
   - name: Media
@@ -77,12 +83,16 @@ groups:
       - name: Jellyfin
         url: http://192.168.1.30:8096
         icon: jellyfin
+        description: Movies and music
+        tags: [media, family]
         size: lg          # sm | md | lg — rozmiar kafla w widoku bento
         <<: *defaults
 
       - name: Immich
         url: https://photos.home.arpa
         icon: immich
+        description: Family photo library
+        tags: [media, family, backup]
         <<: *defaults
 
   - name: Tools
@@ -90,6 +100,8 @@ groups:
       - name: Vaultwarden
         url: https://vault.home.arpa
         icon: vaultwarden
+        description: Passwords for the household
+        tags: [security]
         <<: *defaults
 
       - name: Gitea

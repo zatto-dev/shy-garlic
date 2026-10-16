@@ -597,14 +597,20 @@
   const pusto = $("#pusto");
   let tylkoProblemy = false;
 
+  // Wyszukiwanie ignoruje wielkość liter i ogonki („zdjecia" znajdzie „zdjęcia").
+  // ł/Ł nie rozkładają się w NFD, więc idą osobno.
+  function uproszczony(t) {
+    return String(t || "").toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+
   function filtruj() {
-    const q = filtr.value.trim().toLowerCase();
+    const q = uproszczony(filtr.value.trim());
     let widoczne = 0;
     $$(".grupa").forEach((grupa) => {
       let wGrupie = 0;
       $$(".karta", grupa).forEach((k) => {
         const stan = $(".stan", k).dataset.stan;
-        const pasuje = (!q || k.dataset.szukaj.toLowerCase().includes(q)) &&
+        const pasuje = (!q || uproszczony(k.dataset.szukaj).includes(q)) &&
           (!tylkoProblemy || stan === "down" || stan === "degraded");
         k.hidden = !pasuje;
         if (pasuje) wGrupie++;
@@ -859,6 +865,18 @@
     }
   }
 
+  // chipy tagów — textContent, nigdy innerHTML: tagi są z pliku użytkownika
+  function wypelnijTagi(el, tagi) {
+    el.textContent = "";
+    for (const t of tagi || []) {
+      const c = document.createElement("span");
+      c.className = "tag";
+      c.textContent = t;
+      el.append(c);
+    }
+    el.hidden = !(tagi && tagi.length);
+  }
+
   async function otworzDetale(klucz) {
     aktualnyKlucz = klucz;
     try {
@@ -874,6 +892,11 @@
         if (href) a.href = href; else a.removeAttribute("href");
       }
       otworz.hidden = !href;
+
+      const opisD = $("#detale-opis");
+      opisD.textContent = d.description || "";
+      opisD.hidden = !d.description;
+      wypelnijTagi($("#detale-tagi"), d.tags);
 
       const ikona = $("#detale-ikona");
       ikona.textContent = "";
@@ -1017,6 +1040,17 @@
   const bladUslugi = $("#blad-uslugi");
   let edytowana = null; // {grupa, nazwa} albo null przy dodawaniu
   let rozmiarUslugi = "md";
+  // wartości pól opis/tagi w chwili otwarcia — wysyłamy tylko to, co się zmieniło
+  let poczatkowyOpis = "";
+  let poczatkoweTagi = "";
+
+  function tagiZKarty(karta) {
+    try {
+      const t = JSON.parse(karta.dataset.tagi || "[]");
+      return Array.isArray(t) ? t.map(String) : [];
+    } catch (_) { return []; }
+  }
+  const tagiZPola = (v) => v.split(",").map((x) => x.trim()).filter(Boolean);
 
   function grupy() {
     return $$(".grupa").map((g) => g.dataset.grupa);
@@ -1054,12 +1088,16 @@
       wybor.disabled = false; // zmiana grupy = przeniesienie usługi
       ustawIkonaZWariantem(karta.dataset.ikona || "");
       ustawRozmiar(karta.dataset.rozmiar);
+      formaUslugi.description.value = karta.dataset.opis || "";
+      formaUslugi.tags.value = tagiZKarty(karta).join(", ");
     } else {
       wybor.disabled = false;
       if (domyslnaGrupa) wybor.value = domyslnaGrupa;
       ustawIkone("");
       ustawRozmiar("md");
     }
+    poczatkowyOpis = formaUslugi.description.value;
+    poczatkoweTagi = formaUslugi.tags.value;
     szukajIkon("");
     okno.showModal();
     formaUslugi.name.focus();
@@ -1164,6 +1202,10 @@
       expect: kody.length ? kody : undefined,
       insecure: f.insecure.checked,
     };
+    // Opis i tagi wysyłamy tylko po zmianie: pole odziedziczone z `<<: *defaults`
+    // nie da się zapisać lokalnie, a niezmienione nie powinno nic dopisywać.
+    if (f.description.value !== poczatkowyOpis) dane.description = f.description.value.trim();
+    if (f.tags.value !== poczatkoweTagi) dane.tags = tagiZPola(f.tags.value);
     try {
       const zapisano = await zmien(edytowana ? "PATCH" : "POST", "/api/services", dane);
       okno.close();

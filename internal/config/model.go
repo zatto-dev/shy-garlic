@@ -142,8 +142,13 @@ type Service struct {
 	URL  string `yaml:"url"`
 	Icon string `yaml:"icon"`
 	// Size — rozmiar kafla w widoku bento; puste znaczy DomyślnyRozmiar.
-	Size  string `yaml:"size"`
-	Check Check  `yaml:"check"`
+	Size string `yaml:"size"`
+	// Description — jedna linia pod nazwą kafla (opcjonalna). Dziedziczy się
+	// przez merge-key jak każde inne pole.
+	Description string `yaml:"description"`
+	// Tags — etykiety do wyszukiwania i filtrowania; małe chipy w widoku listy.
+	Tags  Tagi  `yaml:"tags"`
+	Check Check `yaml:"check"`
 }
 
 // Check — semantyka heartbeatu pojedynczej usługi.

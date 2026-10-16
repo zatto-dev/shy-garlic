@@ -430,6 +430,8 @@ groups:
         url: http://jellyfin.home.arpa:8096
         icon: jellyfin
         size: lg      # sm | md | lg — tile size in the bento view
+        description: Movies and music   # shown under the name, and searched
+        tags: [media, family]           # a list; searched, chips in list view
         <<: *defaults
 
   - name: Infrastructure
@@ -451,6 +453,8 @@ groups:
 | `services[].url`               | address; `http://`, `https://` or `tcp://host:port`     | required                    |
 | `services[].icon`              | catalogue icon name, or a full URL                      | first letter of the name    |
 | `services[].size`              | tile size in the bento view: `sm`, `md`, `lg`           | `md`                        |
+| `services[].description`       | one line under the name; also searched (max 200 chars)  | —                           |
+| `services[].tags`              | list of labels, searched; chips in list view (max 12×32) | —                          |
 | `appearance.background.preset` | `aurora`, `nebula`, `graphite`, `dawn`, `fog`, `photo`  | `aurora`                    |
 | `appearance.background.image`  | file name from `/bg/`, only with `preset: photo`        | —                           |
 | `appearance.background.blur`   | wallpaper blur in px, `0`–`30`                          | `10`                        |

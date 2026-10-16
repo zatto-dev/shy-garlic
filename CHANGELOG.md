@@ -43,6 +43,20 @@ the entries below say when it does.
   and `x-*` top-level keys (anchor holders), anchors and `<<:` merge keys are
   understood. Service addresses that cannot be used are listed too.
 - `./x race` runs the tests with the race detector.
+- **Description and tags on a service.** Two optional keys, `description:` (one
+  line, up to 200 characters) and `tags:` (a list, up to 12 tags of 32
+  characters; a single `tags: media` is accepted too). The description shows as
+  a subtle line under the host on every card (truncated, full text in the
+  tooltip); tags are small chips in list view, on large bento tiles and in the
+  details window — grid cards stay uncluttered. The filter box searches both,
+  and now ignores diacritics ("zdjecia" finds "zdjęcia"). Both are editable in
+  the service dialog; the edit is a splice that adds, replaces or removes only
+  those lines, keeping the quoting style, trailing comments and the file's own
+  tag style (`[a, b]` or a block list). A value inherited through
+  `<<: *defaults` cannot be overridden locally (the YAML parser rejects a
+  duplicate key), so the dialog says so instead of writing a broken file.
+  `POST`/`PATCH /api/services` take `description` and `tags`; an absent field
+  is left alone, an empty one removes it.
 
 ### Fixed
 

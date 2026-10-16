@@ -136,6 +136,12 @@ func renderService(svc Service, dashIndent int) string {
 	if svc.Size != "" {
 		fmt.Fprintf(&b, "%ssize: %s\n", key, quoteLike(nil, svc.Size))
 	}
+	if svc.Description != "" {
+		fmt.Fprintf(&b, "%sdescription: %s\n", key, quoteLike(nil, svc.Description))
+	}
+	if len(svc.Tags) > 0 {
+		fmt.Fprintf(&b, "%stags: %s\n", key, renderTagiFlow(svc.Tags))
+	}
 	if svc.Check.Interval != 0 || svc.Check.Timeout != 0 || len(svc.Check.Expect) > 0 {
 		fmt.Fprintf(&b, "%scheck:\n", key)
 		if svc.Check.Interval != 0 {
@@ -482,13 +488,27 @@ func (d *Document) wstawBlokDoPustej(gi int, linie []string) error {
 // bierze z klucza, który już tam stoi — plik dyktuje styl, nie my.
 // wartość musi być już sformatowana (quoteLike albo sprawdzona liczba).
 func (d *Document) wstawKlucz(klucz, wartość string, ścieżka ...any) error {
-	n, err := d.node(ścieżka...)
+	kolumna, wstaw, err := d.miejsceWstawienia(ścieżka...)
 	if err != nil {
 		return err
 	}
+	blok := strings.Repeat(" ", kolumna) + klucz + ": " + wartość + "\n"
+	if wstaw > 0 && wstaw <= len(d.src) && d.src[wstaw-1] != '\n' {
+		blok = "\n" + blok // plik bez końcowego \n — nie sklejaj linii
+	}
+	return d.replaceRange(wstaw, wstaw, []byte(blok))
+}
+
+// miejsceWstawienia zwraca kolumnę nowego klucza i offset, pod którym ma
+// wylądować jego linia — tuż za ostatnim wpisem mapy spod ścieżki.
+func (d *Document) miejsceWstawienia(ścieżka ...any) (kolumna, wstaw int, err error) {
+	n, err := d.node(ścieżka...)
+	if err != nil {
+		return 0, 0, err
+	}
 	m := asMapping(n)
 	if m == nil || len(m.Values) == 0 {
-		return fmt.Errorf("%w: %v nie jest mapą z wpisami", ErrPathNotFound, ścieżka)
+		return 0, 0, fmt.Errorf("%w: %v nie jest mapą z wpisami", ErrPathNotFound, ścieżka)
 	}
 	// od końca, bo szukamy ostatniego wpisu — a przy okazji przeskakujemy
 	// węzeł bez pozycji, gdyby taki się trafił (parser bywa oszczędny przy
@@ -501,16 +521,10 @@ func (d *Document) wstawKlucz(klucz, wartość string, ścieżka ...any) error {
 		}
 	}
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	kolumna, próg := d.zakresWpisu(off)
-	wstaw := d.blockEnd(off, próg)
-
-	blok := strings.Repeat(" ", kolumna) + klucz + ": " + wartość + "\n"
-	if wstaw > 0 && wstaw <= len(d.src) && d.src[wstaw-1] != '\n' {
-		blok = "\n" + blok // plik bez końcowego \n — nie sklejaj linii
-	}
-	return d.replaceRange(wstaw, wstaw, []byte(blok))
+	return kolumna, d.blockEnd(off, próg), nil
 }
 
 // usuńKlucz kasuje linię (albo blok) danego klucza w mapie spod ścieżki.

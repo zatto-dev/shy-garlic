@@ -281,6 +281,15 @@ var teksty = map[string]map[Lang]string{
 	// błędy API pokazywane userowi
 	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
 	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
+	// opis i tagi usługi (SHYG-47)
+	"opis_uslugi":             {EN: "Description", PL: "Opis"},
+	"opis_uslugi_placeholder": {EN: "A short line shown under the name", PL: "Krótka linia pod nazwą"},
+	"tagi_uslugi":             {EN: "Tags", PL: "Tagi"},
+	"tagi_placeholder":        {EN: "media, 4k, family", PL: "media, 4k, rodzina"},
+	"blad_opis_dlugi":         {EN: "The description is too long (200 characters at most).", PL: "Opis jest za długi (najwyżej 200 znaków)."},
+	"blad_opis_znaki":         {EN: "The description must be a single line without control characters.", PL: "Opis musi być jedną linią, bez znaków sterujących."},
+	"blad_tagi":               {EN: "Tags: at most 12, each up to 32 characters, without control characters.", PL: "Tagi: najwyżej 12, każdy do 32 znaków, bez znaków sterujących."},
+	"blad_pole_dziedziczone":  {EN: "This value is inherited from a shared block (<<: *defaults), so it cannot be changed here. Edit it in the file.", PL: "Ta wartość jest dziedziczona ze wspólnego bloku (<<: *defaults), więc nie da się jej zmienić tutaj. Zmień ją w pliku."},
 	"blad_tytul_znaki":  {EN: "The title must be a single line without control characters.", PL: "Tytuł musi być jedną linią, bez znaków sterujących."},
 	"blad_adres_uslugi": {EN: "Invalid address: use http://, https:// or tcp://host:port.", PL: "Zły adres: użyj http://, https:// albo tcp://host:port."},
 	"baner_blad_poprzednia": {EN: "The config file has an error. The panel keeps running on the last working configuration until it is fixed.", PL: "Plik konfiguracji ma błąd. Panel działa dalej na ostatniej działającej konfiguracji, dopóki go nie poprawisz."},

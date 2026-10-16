@@ -430,6 +430,8 @@ groups:
         url: http://jellyfin.home.arpa:8096
         icon: jellyfin
         size: lg      # sm | md | lg — rozmiar kafla w widoku bento
+        description: Filmy i muzyka     # pod nazwą, też wyszukiwany
+        tags: [media, rodzina]          # lista; wyszukiwana, chipy w widoku listy
         <<: *defaults
 
   - name: Zarządzanie
@@ -451,6 +453,8 @@ groups:
 | `services[].url`               | adres; `http://`, `https://` albo `tcp://host:port`     | wymagane                     |
 | `services[].icon`              | nazwa z katalogu ikon albo pełny adres URL              | litera z nazwy               |
 | `services[].size`              | rozmiar kafla w widoku bento: `sm`, `md`, `lg`          | `md`                         |
+| `services[].description`       | jedna linia pod nazwą; też wyszukiwana (maks. 200 znaków) | —                          |
+| `services[].tags`              | lista etykiet, wyszukiwana; chipy w widoku listy (maks. 12×32) | —                     |
 | `appearance.background.preset` | `aurora`, `nebula`, `graphite`, `dawn`, `fog`, `photo`  | `aurora`                     |
 | `appearance.background.image`  | nazwa pliku z `/bg/`, tylko przy `preset: photo`        | —                            |
 | `appearance.background.blur`   | rozmycie tapety w px, `0`–`30`                          | `10`                         |

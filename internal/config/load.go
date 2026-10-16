@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -29,6 +30,7 @@ func Load(src []byte) (*Config, error) {
 		for si := range cfg.Groups[gi].Services {
 			applyDefaults(&cfg.Groups[gi].Services[si].Check)
 			applyRozmiar(&cfg.Groups[gi].Services[si])
+			applyOpis(&cfg.Groups[gi].Services[si])
 		}
 	}
 	return &cfg, nil
@@ -44,6 +46,15 @@ func applyDefaults(c *Check) {
 	if len(c.Expect) == 0 {
 		c.Expect = append([]int(nil), DefaultExpect...)
 	}
+}
+
+// applyOpis czyści opis i tagi ręcznie wpisane w plik: opis jest jedną linią
+// (blokowy skalar `|` zostaje sklejony spacjami), tagi bez pustych i duplikatów.
+// Nie zwraca błędu — to ma być czytelne, nie zakazane; surowsza walidacja jest
+// po stronie API (NormalizujOpis, NormalizujTagi).
+func applyOpis(s *Service) {
+	s.Description = strings.Join(strings.Fields(s.Description), " ")
+	s.Tags = czyśćTagi(s.Tags)
 }
 
 func applyRozmiar(s *Service) {

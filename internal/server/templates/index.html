@@ -225,8 +225,9 @@
     {{range .Services}}
       <li class="karta" data-rozmiar="{{.Rozmiar}}" data-key="{{.Key}}" data-grupa="{{.Group}}"
           data-nazwa="{{.Name}}" data-adres="{{.URL}}" data-ikona="{{.IconName}}"
-          data-szukaj="{{.Name}} {{.Host}}">
-        <a class="glowna"{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{end}}>
+          data-opis="{{.Description}}" data-tagi="{{.TagsJSON}}"
+          data-szukaj="{{.SzukajTekst}}">
+        <a class="glowna"{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{end}}{{if .Description}} title="{{.Description}}"{{end}}>
           <span class="ikona">
             {{if .Icon.WariantCiemny}}<span class="ikona-motyw ikona-motyw--ciemny"><img src="{{.Icon.WariantCiemny}}" alt="" loading="lazy" width="28" height="28"></span><span class="ikona-motyw ikona-motyw--jasny"><img src="{{.Icon.WariantJasny}}" alt="" loading="lazy" width="28" height="28"></span>
             {{else if .Icon.Src}}<img src="{{.Icon.Src}}" alt="" loading="lazy" width="28" height="28">
@@ -235,6 +236,12 @@
           <span class="opis">
             <span class="nazwa">{{.Name}}</span>
             <span class="host">{{.Host}}</span>
+            {{- if .Description}}
+            <span class="opis-uslugi">{{.Description}}</span>
+            {{- end}}
+            {{- if .Tags}}
+            <span class="tagi">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</span>
+            {{- end}}
           </span>
         </a>
         <button class="szczegoly" type="button" data-akcja="szczegoly"
@@ -314,6 +321,12 @@
     <label><span>{{.T.grupa}}</span>
       <select name="group" id="wybor-grupy"></select></label>
 
+    <label><span>{{.T.opis_uslugi}}</span>
+      <input name="description" maxlength="200" autocomplete="off" placeholder="{{.T.opis_uslugi_placeholder}}"></label>
+
+    <label><span>{{.T.tagi_uslugi}}</span>
+      <input name="tags" autocomplete="off" placeholder="{{.T.tagi_placeholder}}"></label>
+
     <div class="pole-rozmiaru">
       <span class="etykieta-pola">{{.T.rozmiar}}</span>
       <button id="rozmiar-sm" class="btn btn--quiet btn--sm" type="button" aria-pressed="false">{{.T.rozmiar_sm}}</button>
@@ -379,6 +392,8 @@
       <div>
         <h3 id="detale-nazwa"></h3>
         <a id="detale-url" class="detale-url" target="_blank" rel="noopener noreferrer"></a>
+        <p class="detale-opis" id="detale-opis" hidden></p>
+        <span class="tagi" id="detale-tagi" hidden></span>
       </div>
       <span class="stan" id="detale-stan" data-stan="unknown">
         <span class="kropka" aria-hidden="true"></span>

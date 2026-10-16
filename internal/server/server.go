@@ -669,6 +669,17 @@ type widokUsługi struct {
 	IconName string
 	Icon     iconRef
 	Rozmiar  string // "sm" | "md" | "lg" — nigdy puste
+
+	Description string
+	Tags        []string
+	// TagsJSON — te same tagi jako JSON w atrybucie data-tagi; okno edycji
+	// czyta je stamtąd, więc tag z przecinkiem nie rozpada się na dwa.
+	TagsJSON string
+}
+
+// SzukajTekst — to, co filtr w nagłówku przeszukuje: nazwa, host, opis i tagi.
+func (w widokUsługi) SzukajTekst() string {
+	return strings.TrimSpace(strings.Join(append([]string{w.Name, w.Host, w.Description}, w.Tags...), " "))
 }
 
 type widokGrupy struct {
@@ -864,6 +875,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 				IconName: svc.Icon,
 				Icon:     s.rozwiążIkonę(svc.Icon, svc.Name),
 				Rozmiar:  rozmiar,
+
+				Description: svc.Description,
+				Tags:        []string(svc.Tags),
+				TagsJSON:    tagiJSON(svc.Tags),
 			})
 		}
 		dane.Groups = append(dane.Groups, wg)
@@ -884,6 +899,14 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", dane); err != nil {
 		slog.Error("render", "err", err)
 	}
+}
+
+func tagiJSON(t config.Tagi) string {
+	b, err := json.Marshal(tagiDoJSON(t))
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

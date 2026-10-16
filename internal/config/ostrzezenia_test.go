@@ -193,6 +193,8 @@ groups:
         url: http://s
         icon: i
         size: md
+        description: d
+        tags: [a]
         check: {interval: 5s, timeout: 2s, expect: [200], insecure: true}
 `
 	if w := Ostrzeżenia([]byte(src)); len(w) != 0 {
