@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,5 +132,69 @@ func TestMigracjaPrzepinaStanPowiadamiaczaIZapisu(t *testing.T) {
 	}
 	if _, ma := s.ostatnie["Media/Sonarr"]; ma {
 		t.Error("stary klucz został w ostatnie")
+	}
+}
+
+// ── SHYG-44: serializacja przeładowań ────────────────────────────────────────
+
+// watch() nie może przeładować configu w trakcie zapisu z panelu: stempel jest
+// ustawiany dopiero w reload(), a między Save a reload są jeszcze historia i git.
+func TestWatchCzekaNaZapisZPanelu(t *testing.T) {
+	s, _, _ := serwerKolejność(t)
+	s.edycja.Lock() // „trwa zapis z panelu"
+	if err := os.WriteFile(s.path, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zrobione := make(chan struct{})
+	go func() {
+		s.sprawdźZmianęPliku(s.ctx)
+		close(zrobione)
+	}()
+	select {
+	case <-zrobione:
+		t.Fatal("watch przeładował config, choć zapis z panelu trwa")
+	case <-time.After(150 * time.Millisecond):
+	}
+	s.edycja.Unlock()
+	select {
+	case <-zrobione:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watch nie wznowił po zakończeniu zapisu")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.cfg.Groups) != 0 {
+		t.Errorf("zmiana z dysku nie została wczytana: %d grup", len(s.cfg.Groups))
+	}
+}
+
+// Zmiana z zewnątrz i zapisy z panelu naraz; pod -race nie wolno nic wykryć,
+// a stan końcowy ma być spójny z plikiem.
+func TestReloadRównolegleZEdycją(t *testing.T) {
+	s, h, c := serwerKolejność(t)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 15; i++ {
+			s.sprawdźZmianęPliku(s.ctx)
+			_ = s.reload(s.ctx)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 15; i++ {
+			wyślij(h, c, "POST", "/api/services/move", `{"group":"Media","name":"Sonarr","toGroup":"Sieć","index":0}`)
+			wyślij(h, c, "POST", "/api/services/move", `{"group":"Sieć","name":"Sonarr","toGroup":"Media","index":0}`)
+		}
+	}()
+	wg.Wait()
+	if err := s.reload(s.ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if got := s.stamp; got != s.stampOf() {
+		t.Errorf("stempel %q ≠ plik %q", got, s.stampOf())
 	}
 }

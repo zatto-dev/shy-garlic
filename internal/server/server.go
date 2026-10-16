@@ -59,6 +59,10 @@ type Server struct {
 	// nie mogą nadpisać się nawzajem
 	edycja sync.Mutex
 
+	// reloadMu serializuje reload(): wołają go Start, zapis z panelu (pod
+	// edycja) i watch(). Kolejność blokad zawsze edycja → reloadMu.
+	reloadMu sync.Mutex
+
 	// ostatnie — znacznik ostatniego wyniku zapisanego do bazy, per klucz.
 	// Na polu serwera (nie lokalnie w zapisujHistorię), bo zmiana klucza musi
 	// go przepiąć, inaczej ten sam wynik trafiłby do historii drugi raz.
@@ -317,6 +321,11 @@ func (s *Server) Close() {
 }
 
 func (s *Server) reload(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	// ! stempel PRZED odczytem: plik zmieniony między odczytem a stat() dałby
+	// stempel nowszy niż wczytana treść i zmiana zostałaby zgubiona na zawsze
+	stamp := s.stampOf()
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
 		return fmt.Errorf("read config: %w", err)
@@ -352,7 +361,7 @@ func (s *Server) reload(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.cfg = cfg
-	s.stamp = s.stampOf()
+	s.stamp = stamp
 	s.mu.Unlock()
 
 	s.mon.SetTargets(ctx, targets)
@@ -376,15 +385,27 @@ func (s *Server) watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.mu.RLock()
-			stary := s.stamp
-			s.mu.RUnlock()
-			if nowy := s.stampOf(); nowy != "" && nowy != stary {
-				slog.Info("config zmieniony na dysku, przeładowuję")
-				if err := s.reload(ctx); err != nil {
-					slog.Error("przeładowanie nieudane", "err", err)
-				}
-			}
+			s.sprawdźZmianęPliku(ctx)
+		}
+	}
+}
+
+// sprawdźZmianęPliku przeładowuje config, jeśli plik zmienił się na dysku.
+//
+// ! Pod s.edycja: zapis z panelu trzyma ten mutex od Save aż po reload(), więc
+// watch nigdy nie przeładuje w połowie zapisu (między Save a historią/gitem
+// stempel jest jeszcze stary). Po wyjściu z zapisu stempel już się zgadza i
+// watch nie robi nic.
+func (s *Server) sprawdźZmianęPliku(ctx context.Context) {
+	s.edycja.Lock()
+	defer s.edycja.Unlock()
+	s.mu.RLock()
+	stary := s.stamp
+	s.mu.RUnlock()
+	if nowy := s.stampOf(); nowy != "" && nowy != stary {
+		slog.Info("config zmieniony na dysku, przeładowuję")
+		if err := s.reload(ctx); err != nil {
+			slog.Error("przeładowanie nieudane", "err", err)
 		}
 	}
 }

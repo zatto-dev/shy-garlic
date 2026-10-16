@@ -68,8 +68,14 @@ type Monitor struct {
 
 	client   *http.Client
 	insecure *http.Client
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+
+	// ctl serializuje SetTargets i Close. cancel i wg to stan cyklu życia pętli,
+	// a SetTargets woła się równolegle (watch() i zapis z panelu). Bez tego dwa
+	// wywołania nadpisywały cancel — jedna grupa pętli zostawała bez możliwości
+	// zatrzymania — i robiły wg.Add równolegle z wg.Wait.
+	ctl    sync.Mutex
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 func New() *Monitor {
@@ -95,6 +101,8 @@ func New() *Monitor {
 // Wyniki dla celów, które przetrwały podmianę, zostają — po edycji configu
 // panel nie ma migać na "unknown".
 func (m *Monitor) SetTargets(ctx context.Context, targets []Target) {
+	m.ctl.Lock()
+	defer m.ctl.Unlock()
 	m.stop()
 
 	m.mu.Lock()
@@ -144,6 +152,7 @@ func (m *Monitor) PrzenieśKlucze(pary map[string]string) {
 	}
 }
 
+// stop zakłada, że wołający trzyma m.ctl.
 func (m *Monitor) stop() {
 	if m.cancel != nil {
 		m.cancel()
@@ -152,7 +161,11 @@ func (m *Monitor) stop() {
 	}
 }
 
-func (m *Monitor) Close() { m.stop() }
+func (m *Monitor) Close() {
+	m.ctl.Lock()
+	defer m.ctl.Unlock()
+	m.stop()
+}
 
 func (m *Monitor) loop(ctx context.Context, t Target) {
 	defer m.wg.Done()

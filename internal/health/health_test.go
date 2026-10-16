@@ -1,6 +1,7 @@
 package health
 
 import (
+	"sync"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -154,4 +155,36 @@ func TestPrzenieśKluczeZachowujeStanIWykres(t *testing.T) {
 	if got := m.Snapshot()["B/x"].State; got == StateUnknown || got == "" {
 		t.Errorf("SetTargets zgubił stan: %q", got)
 	}
+}
+
+// SHYG-44: SetTargets wołane równolegle (reload z watch() i z zapisu z panelu)
+// pisało m.cancel bez muteksu — osierocone pętle i wyścig na WaitGroup.
+// Test ma sens pod -race; bez niego sprawdza przynajmniej brak paniki i wycieku.
+func TestSetTargetsRównolegle(t *testing.T) {
+	m := New()
+	cele := []Target{
+		{Key: "A/a", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: 100 * time.Millisecond},
+		{Key: "A/b", URL: "http://127.0.0.1:1", Interval: time.Hour, Timeout: 100 * time.Millisecond},
+	}
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 20; i++ {
+				m.SetTargets(context.Background(), cele)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// po wszystkim działa dokładnie jeden komplet pętli i Close je kończy
+	done := make(chan struct{})
+	go func() { m.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close wisi — zostały osierocone pętle")
+	}
+	m.wg.Wait() // nic nie może zostać po Close
 }
