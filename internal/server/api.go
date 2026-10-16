@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -127,6 +128,12 @@ func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis 
 			"dry": true, "diff": diff, "added": dodane, "removed": usunięte, "summary": opis,
 		})
 		return false
+	}
+
+	// nic się nie zmieniło (np. ruch w miejsce, w którym element już stoi):
+	// ani zapisu, ani wpisu w historii, ani commita
+	if bytes.Equal(przed, d.Bytes()) {
+		return true
 	}
 
 	if err := d.Save(); err != nil {

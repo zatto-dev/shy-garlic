@@ -257,3 +257,30 @@ func TestNoweTrasyWymagająSameOriginIZalogowania(t *testing.T) {
 		}
 	}
 }
+
+// Ruch w miejsce, w którym element już stoi, jest sukcesem bez śladu: plik
+// nietknięty, żadnej nowej wersji w historii.
+func TestRuchWToSamoMiejsceNieTworzyWersji(t *testing.T) {
+	s, h, c := serwerKolejność(t)
+	przed := string(s.plikConfigu(t))
+	wersjePrzed, err := s.st.Wersje(s.ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for nazwa, p := range map[string]struct{ ścieżka, ciało string }{
+		"usługa": {"/api/services/move", `{"group":"Media","name":"Jellyfin","toGroup":"Media","index":0}`},
+		"grupa":  {"/api/groups/move", `{"name":"Media","index":0}`},
+	} {
+		w := wyślij(h, c, "POST", p.ścieżka, p.ciało)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: kod %d: %s", nazwa, w.Code, w.Body)
+		}
+	}
+	if po := string(s.plikConfigu(t)); po != przed {
+		t.Error("plik się zmienił przy ruchu w to samo miejsce")
+	}
+	wersjePo, _ := s.st.Wersje(s.ctx, 100)
+	if len(wersjePo) != len(wersjePrzed) {
+		t.Errorf("wersji w historii: %d -> %d, chcę bez zmiany", len(wersjePrzed), len(wersjePo))
+	}
+}
