@@ -289,20 +289,8 @@ func (d *Document) RemoveService(group, service string) error {
 		return err
 	}
 	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
+	start := d.początekZKomentarzem(off, dashIndent) // tylko komentarz w kolumnie myślnika
 	end := d.blockEnd(off, dashIndent)
-
-	// wciągnij komentarz przyklejony nad wpisem
-	for start > 0 {
-		poprzedniKoniec := start - 1
-		poprzedniStart := d.lineStart(poprzedniKoniec)
-		linia := strings.TrimSpace(string(d.src[poprzedniStart:poprzedniKoniec]))
-		if strings.HasPrefix(linia, "#") {
-			start = poprzedniStart
-			continue
-		}
-		break
-	}
 
 	// jeśli usuwamy ostatni wpis, zostaw pustą listę zamiast wiszącego klucza
 	if len(seq.Values) == 1 {
@@ -394,17 +382,8 @@ func (d *Document) RemoveGroup(name string) error {
 		return err
 	}
 	dashIndent := d.dashIndentOf(off)
-	start := d.lineStart(off)
+	start := d.początekZKomentarzem(off, dashIndent)
 	end := d.blockEnd(off, dashIndent)
-	for start > 0 {
-		pk := start - 1
-		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") {
-			start = ps
-			continue
-		}
-		break
-	}
 	for end < len(d.src) {
 		kl := d.lineEnd(end)
 		if strings.TrimSpace(string(d.src[end:kl])) != "" {

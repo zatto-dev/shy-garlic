@@ -395,3 +395,75 @@ func TestUstawTytułWalidacja(t *testing.T) {
 		t.Errorf("80 znaków: %v", err)
 	}
 }
+
+// ogon poprzedniego wpisu (zakomentowana usługa wcięta głębiej niż myślnik
+// następnego elementu) nie może wędrować razem z następnym elementem.
+const ruchOgonSrc = `groups:
+  - name: G
+    services:
+      - name: B
+        url: http://b
+      # - name: Wyłączona
+      #   url: http://old
+  # komentarz H
+  - name: H
+    services:
+      - name: X
+        url: http://x
+        # - ogon X
+      - name: Y
+        url: http://y
+`
+
+func TestMoveGroupOgonPoprzedniejGrupyZostaje(t *testing.T) {
+	d, err := Parse([]byte(ruchOgonSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MoveGroup("H", 0); err != nil {
+		t.Fatal(err)
+	}
+	got := string(d.Bytes())
+	iH := strings.Index(got, "  # komentarz H\n  - name: H")
+	iG := strings.Index(got, "  - name: G")
+	iOgon := strings.Index(got, "      # - name: Wyłączona")
+	if iH < 0 || iH > iG {
+		t.Fatalf("komentarz H nie stoi nad H, przed G:\n%s", got)
+	}
+	if iOgon < iG {
+		t.Fatalf("ogon grupy G uciekł nad H:\n%s", got)
+	}
+}
+
+func TestMoveServiceOgonPoprzedniejUsługiZostaje(t *testing.T) {
+	d, err := Parse([]byte(ruchOgonSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MoveServiceTo("H", "Y", "H", 0); err != nil {
+		t.Fatal(err)
+	}
+	got := string(d.Bytes())
+	iY := strings.Index(got, "- name: Y")
+	iX := strings.Index(got, "- name: X")
+	iOgon := strings.Index(got, "# - ogon X")
+	if iY > iX {
+		t.Fatalf("Y nie jest pierwsze:\n%s", got)
+	}
+	if iOgon < iX {
+		t.Fatalf("ogon X poszedł razem z Y:\n%s", got)
+	}
+}
+
+func TestRemoveServiceNieZabieraOgonaPoprzedniej(t *testing.T) {
+	d, err := Parse([]byte(ruchOgonSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RemoveService("H", "Y"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(d.Bytes()), "# - ogon X") {
+		t.Fatalf("ogon X zniknął razem z Y:\n%s", d.Bytes())
+	}
+}

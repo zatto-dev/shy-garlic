@@ -22,12 +22,16 @@ type elementListy struct {
 
 // początekZKomentarzem cofa początek linii o komentarze stojące bezpośrednio
 // nad wpisem — te same, które zabiera RemoveService.
-func (d *Document) początekZKomentarzem(off int) int {
+//
+// ! Do wpisu należy tylko komentarz stojący w kolumnie jego myślnika. Komentarz
+// wcięty głębiej to ogon POPRZEDNIEGO wpisu (np. zakomentowana usługa pod
+// ostatnią usługą grupy) i musi zostać na swoim miejscu.
+func (d *Document) początekZKomentarzem(off, dash int) int {
 	start := d.lineStart(off)
 	for start > 0 {
 		pk := start - 1
 		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") {
+		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") && d.lineIndent(ps) == dash {
 			start = ps
 			continue
 		}
@@ -44,7 +48,7 @@ func (d *Document) elementyListy(seq *ast.SequenceNode) ([]elementListy, error) 
 			return nil, err
 		}
 		dash := d.dashIndentOf(off)
-		out = append(out, elementListy{d.początekZKomentarzem(off), d.blockEnd(off, dash), dash})
+		out = append(out, elementListy{d.początekZKomentarzem(off, dash), d.blockEnd(off, dash), dash})
 	}
 	return out, nil
 }
