@@ -511,6 +511,10 @@ func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 				Timeout:  svc.Check.Timeout.Duration(),
 				Expect:   svc.Check.Expect,
 				Insecure: svc.Check.Insecure,
+
+				Path:        svc.Check.Path,
+				Contains:    svc.Check.Contains,
+				NotContains: svc.Check.NotContains,
 			})
 		}
 	}

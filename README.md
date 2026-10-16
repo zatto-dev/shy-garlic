@@ -131,6 +131,12 @@ tab open.
   Colour alone is not enough for colour-blind users.
 - `insecure: true` for self-signed certificates, because in a homelab they are
   everywhere and a Proxmox box is not down just because you never bought a cert.
+- **A page that answers 200 can still be wrong.** `check.contains` and
+  `check.not_contains` look inside the answer (the first 1 MiB), and
+  `check.path` asks a health endpoint instead of the front page. When the code
+  is fine but the content is not — nginx's default page instead of the app, a
+  "maintenance" banner — the service goes **amber (`degraded`)**, with the reason
+  in the details window: the server is alive, it just is not saying the right thing.
 
 ## Every service has a story
 
@@ -443,7 +449,19 @@ groups:
           interval: 30s
           expect: [200, 401]
           insecure: true    # self-signed certificate, on purpose
+
+      - name: Grafana
+        url: http://grafana.home.arpa:3000
+        check:
+          path: /api/health               # asked instead of the front page
+          contains: '"database": "ok"'    # a body that says otherwise → degraded
 ```
+
+Content checks run on answers whose status is in `expect`; a wrong status is
+reported as `HTTP <code>` without reading the body. Redirects are not followed,
+so point `path` at the final address. Only the first 1 MiB is searched.
+`check.path` never changes the host: it replaces the path and query of `url`, so
+`url` stays what the card links to.
 
 | Field                          | Meaning                                                | Default                     |
 | ------------------------------ | ------------------------------------------------------ | --------------------------- |
@@ -465,6 +483,9 @@ groups:
 | `check.timeout`                | how long to wait for an answer                          | `5s`                        |
 | `check.expect`                 | status codes that mean "alive"                          | `[200, 301, 302, 401, 403]` |
 | `check.insecure`               | ignore certificate errors                               | `false`                     |
+| `check.path`                   | path (and query) asked instead of the one in `url`; starts with `/`, same host | —                    |
+| `check.contains`               | text that must be in the first 1 MiB of the answer; otherwise `degraded` | —                  |
+| `check.not_contains`           | text that must not be there; otherwise `degraded`       | —                           |
 | `notify.threshold`             | failed checks in a row before we notify                 | `2`                         |
 | `discovery.docker`             | suggest services from containers                        | on when a socket is there   |
 

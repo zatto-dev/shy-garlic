@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
@@ -57,7 +58,22 @@ type Target struct {
 	Timeout  time.Duration
 	Expect   []int
 	Insecure bool // homelab bywa na samopodpisanym certyfikacie
+
+	// Kontrola treści (SHYG-48) — dotyczy tylko http(s).
+	Path        string // ścieżka (+ query) zamiast ścieżki z URL; zawsze na tym samym hoście
+	Contains    string // tekst, który MUSI być w ciele odpowiedzi
+	NotContains string // tekst, którego NIE może być w ciele
 }
+
+// PrefiksTreści — początek Result.Err, gdy serwer odpowiedział poprawnym
+// kodem, ale treść nie przeszła kontroli. UI po nim rozpoznaje ten rodzaj
+// „degraded" (kod HTTP jest wtedy dobry, więc „HTTP 200" byłoby mylące).
+const PrefiksTreści = "content: "
+
+// maksCiała — ile bajtów odpowiedzi czytamy przy kontroli treści. Strona
+// większa niż 1 MiB i tak nie jest endpointem zdrowia, a bez limitu jeden
+// kafel mógłby ściągać gigabajty co 30 s.
+const maksCiała = 1 << 20
 
 type Monitor struct {
 	mu      sync.RWMutex
@@ -301,8 +317,35 @@ func Check(ctx context.Context, client *http.Client, t Target) Result {
 	return res
 }
 
+// adresSprawdzania składa adres, który naprawdę odpytujemy: URL usługi, a gdy
+// jest Path — z jego ścieżką i query podmienionymi. Schemat, host, port i dane
+// logowania zostają z URL, więc Path nie wyprowadzi sprawdzania na inny serwer.
+func (t Target) adresSprawdzania() (string, error) {
+	if t.Path == "" {
+		return t.URL, nil
+	}
+	if !strings.HasPrefix(t.Path, "/") || strings.HasPrefix(t.Path, "//") {
+		return "", errors.New("invalid check.path: it has to start with a single /")
+	}
+	ref, err := url.Parse(t.Path)
+	if err != nil || ref.Scheme != "" || ref.Host != "" {
+		return "", errors.New("invalid check.path")
+	}
+	u, err := url.Parse(t.URL)
+	if err != nil {
+		return "", err
+	}
+	u.Path, u.RawPath, u.RawQuery, u.Fragment = ref.Path, ref.RawPath, ref.RawQuery, ""
+	return u.String(), nil
+}
+
 func checkHTTP(ctx context.Context, client *http.Client, t Target, res Result) Result {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
+	adres, err := t.adresSprawdzania()
+	if err != nil {
+		res.State, res.Err = StateDown, err.Error()
+		return res
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, adres, nil)
 	if err != nil {
 		res.State, res.Err = StateDown, err.Error()
 		return res
@@ -323,14 +366,65 @@ func checkHTTP(ctx context.Context, client *http.Client, t Target, res Result) R
 		expect = []int{200, 301, 302, 401, 403}
 	}
 	if slices.Contains(expect, resp.StatusCode) {
-		res.State = StateUp
-		return res
+		if t.Contains == "" && t.NotContains == "" {
+			res.State = StateUp
+			return res
+		}
+		return sprawdźTreść(resp.Body, t, res)
 	}
 	// ! Serwer odpowiedział, tylko nie tym, czego oczekujemy. To NIE jest to samo
 	// co "nie da się połączyć" — użytkownik ma widzieć różnicę.
 	res.State = StateDegraded
 	res.Err = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	return res
+}
+
+// sprawdźTreść czyta początek ciała (do maksCiała) i porównuje z regułami.
+//
+// ! Niezgodność to degraded, nie down: serwer żyje i odpowiada akceptowanym
+// kodem — tylko treść jest nie ta (strona domyślna nginxa zamiast aplikacji,
+// komunikat o konserwacji). Tak samo traktujemy zły kod HTTP.
+// Nieudane CZYTANIE ciała (timeout, urwane połączenie) to już down.
+func sprawdźTreść(r io.Reader, t Target, res Result) Result {
+	b, err := io.ReadAll(io.LimitReader(r, maksCiała+1))
+	if err != nil {
+		res.State, res.Err = StateDown, krótkiBłąd(err)
+		return res
+	}
+	obcięte := len(b) > maksCiała
+	if obcięte {
+		b = b[:maksCiała]
+	}
+	ciało := string(b)
+
+	switch {
+	case t.Contains != "" && !strings.Contains(ciało, t.Contains):
+		res.State = StateDegraded
+		res.Err = PrefiksTreści + `missing "` + skrócony(t.Contains) + `"`
+		if obcięte {
+			res.Err += " (first 1 MiB checked)"
+		}
+	case t.NotContains != "" && strings.Contains(ciało, t.NotContains):
+		res.State = StateDegraded
+		res.Err = PrefiksTreści + `found "` + skrócony(t.NotContains) + `"`
+	default:
+		res.State = StateUp
+	}
+	return res
+}
+
+// skrócony przycina szukany tekst do rozmiaru, który mieści się w kafelku.
+func skrócony(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	if r := []rune(s); len(r) > 40 {
+		return string(r[:40]) + "…"
+	}
+	return s
 }
 
 func checkTCP(ctx context.Context, host string, res Result) Result {

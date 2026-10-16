@@ -132,6 +132,12 @@ gdy nikt nie ma otwartej karty w przeglądarce.
   Dla daltonistów sam kolor to za mało.
 - `insecure: true` dla samopodpisanych certyfikatów, bo w homelabie stoją
   wszędzie, a Proxmox nie jest martwy tylko dlatego, że nikt nie kupił mu certu.
+- **Strona, która odpowiada 200, nadal może być zła.** `check.contains` i
+  `check.not_contains` zaglądają do odpowiedzi (pierwszy 1 MiB), a `check.path`
+  pyta endpoint zdrowia zamiast strony głównej. Gdy kod jest dobry, a treść nie
+  — domyślna strona nginxa zamiast aplikacji, baner „prace serwisowe" — usługa
+  robi się **pomarańczowa (`degraded`)**, z powodem w oknie szczegółów: serwer
+  żyje, tylko nie mówi tego, co trzeba.
 
 ## Każda usługa ma swoją historię
 
@@ -443,7 +449,19 @@ groups:
           interval: 30s
           expect: [200, 401]
           insecure: true    # samopodpisany certyfikat, tak ma być
+
+      - name: Grafana
+        url: http://grafana.home.arpa:3000
+        check:
+          path: /api/health               # pytane zamiast strony głównej
+          contains: '"database": "ok"'    # inna treść → degraded
 ```
+
+Kontrola treści działa na odpowiedziach, których kod jest w `expect`; zły kod to
+`HTTP <kod>` bez czytania ciała. Przekierowania nie są śledzone, więc wskaż w
+`path` adres docelowy. Przeszukiwany jest tylko pierwszy 1 MiB. `check.path` nigdy
+nie zmienia hosta: podmienia ścieżkę i query z `url`, a `url` zostaje tym, do
+czego prowadzi karta.
 
 | Pole                           | Znaczenie                                              | Domyślnie                    |
 | ------------------------------ | ------------------------------------------------------ | ---------------------------- |
@@ -465,6 +483,9 @@ groups:
 | `check.timeout`                | ile czekać na odpowiedź                                 | `5s`                         |
 | `check.expect`                 | kody uznawane za „żyje"                                 | `[200, 301, 302, 401, 403]`  |
 | `check.insecure`               | ignoruj błędy certyfikatu                               | `false`                      |
+| `check.path`                   | ścieżka (i query) pytana zamiast tej z `url`; zaczyna się od `/`, ten sam host | —                    |
+| `check.contains`               | tekst, który musi być w pierwszym 1 MiB odpowiedzi; inaczej `degraded` | —                   |
+| `check.not_contains`           | tekst, którego nie może tam być; inaczej `degraded`     | —                            |
 | `notify.threshold`             | ile nieudanych sprawdzeń z rzędu, zanim powiadomimy     | `2`                          |
 | `discovery.docker`             | podpowiadaj usługi z kontenerów                         | włączone, jeśli jest gniazdo |
 

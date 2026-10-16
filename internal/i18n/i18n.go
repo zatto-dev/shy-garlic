@@ -281,6 +281,12 @@ var teksty = map[string]map[Lang]string{
 	// błędy API pokazywane userowi
 	"blad_tytul_pusty":  {EN: "The title cannot be empty.", PL: "Tytuł nie może być pusty."},
 	"blad_tytul_dlugi":  {EN: "The title is too long (max 80 characters).", PL: "Tytuł jest za długi (maks. 80 znaków)."},
+	// kontrola treści (SHYG-48)
+	"chip_tresc":           {EN: "wrong content", PL: "zła treść"},
+	"powod_stanu":          {EN: "Reason", PL: "Powód"},
+	"kontrola_get":         {EN: "GET %s", PL: "GET %s"},
+	"kontrola_zawiera":     {EN: "must contain “%s”", PL: "musi zawierać „%s”"},
+	"kontrola_nie_zawiera": {EN: "must not contain “%s”", PL: "nie może zawierać „%s”"},
 	// opis i tagi usługi (SHYG-47)
 	"opis_uslugi":             {EN: "Description", PL: "Opis"},
 	"opis_uslugi_placeholder": {EN: "A short line shown under the name", PL: "Krótka linia pod nazwą"},

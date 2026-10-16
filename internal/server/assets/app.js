@@ -401,9 +401,16 @@
   });
 
   // ── stan usług ──────────────────────────────────────────────────────────
+  // Serwer oznacza prefiksem „content: " powód degraded, gdy kod HTTP był dobry,
+  // a nie przeszła kontrola treści (check.contains / not_contains).
+  const czyTresc = (err) => typeof err === "string" && err.startsWith("content: ");
+
   function etykietaStanu(s, r) {
     if (s === "up" && typeof r.ms === "number") return r.ms + " ms";
-    if (s === "degraded") return r.code ? podstaw(tr("powod_http"), r.code) : tr("chip_degraded");
+    if (s === "degraded") {
+      if (czyTresc(r.err)) return tr("chip_tresc");
+      return r.code ? podstaw(tr("powod_http"), r.code) : tr("chip_degraded");
+    }
     if (s === "down") return tr("chip_down");
     return "—";
   }
@@ -842,17 +849,27 @@
       const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
       t.textContent = `${new Date(p.at).toLocaleString(LANG)} · ${OPISY[p.state] || p.state}` +
         (p.state === "up" ? ` · ${p.ms} ms`
-          : p.code ? ` · ${podstaw(tr("powod_http"), p.code)}`
-            : p.err ? ` · ${p.err}` : "");
+          : p.err ? ` · ${p.err}`
+            : p.code ? ` · ${podstaw(tr("powod_http"), p.code)}` : "");
       r.append(t);
       svg.append(r);
     });
   }
 
+  // err przed code: przy zniezgodnej treści kod to 200, a powód siedzi w err
   function powodZmiany(z) {
-    if (z.code) return podstaw(tr("powod_http"), z.code);
     if (z.err) return z.err;
+    if (z.code) return podstaw(tr("powod_http"), z.code);
     return tr("brak_powodu");
+  }
+
+  // regułę kontroli składamy z kawałków, bez innerHTML
+  function opisKontroli(d) {
+    const czesci = [];
+    if (d.path) czesci.push(podstaw(tr("kontrola_get"), d.path));
+    if (d.contains) czesci.push(podstaw(tr("kontrola_zawiera"), d.contains));
+    if (d.notContains) czesci.push(podstaw(tr("kontrola_nie_zawiera"), d.notContains));
+    return czesci.join(" · ");
   }
 
   // zwraca adres tylko dla http(s); wszystko inne (javascript:, data:, tcp://…) → ""
@@ -906,6 +923,16 @@
       const box = $("#detale-stan");
       box.dataset.stan = stan;
       $("#detale-stan .etykieta").textContent = etykietaStanu(stan, d.now || {});
+
+      // powód bieżącego stanu (np. „content: missing …") — tylko gdy coś nie gra
+      const powod = $("#detale-powod");
+      const nieGra = (stan === "degraded" || stan === "down") && d.now && d.now.err;
+      powod.textContent = nieGra ? `${tr("powod_stanu")}: ${d.now.err}` : "";
+      powod.dataset.stan = stan;
+      powod.hidden = !nieGra;
+      const kontrola = $("#detale-kontrola");
+      kontrola.textContent = opisKontroli(d);
+      kontrola.hidden = !kontrola.textContent;
 
       const staty = $("#detale-staty");
       staty.textContent = "";

@@ -42,6 +42,17 @@ the entries below say when it does.
   line number and a "did you mean" hint, and the file still loads. `defaults:`
   and `x-*` top-level keys (anchor holders), anchors and `<<:` merge keys are
   understood. Service addresses that cannot be used are listed too.
+- **Content checks.** `check.contains` and `check.not_contains` look for text in
+  the first 1 MiB of the answer, and `check.path` asks another path (and query)
+  of the same host instead of the one in `url` — e.g. `/api/health` rather than
+  the front page. A content mismatch makes the service `degraded` (amber), not
+  `down`: the server answers with an accepted status, only the content is wrong.
+  The reason (`content: missing "…"` / `content: found "…"`) appears on the
+  card tooltip and in the details window, which also shows the rule. A status
+  that is not in `expect` still wins and is reported as `HTTP <code>` without
+  reading the body. Redirects are not followed. `path` can never change the
+  host, and `path: health` (no leading slash) is corrected with a log line.
+  Config-only for now: the service dialog does not edit these keys.
 - `./x race` runs the tests with the race detector.
 - **Description and tags on a service.** Two optional keys, `description:` (one
   line, up to 200 characters) and `tags:` (a list, up to 12 tags of 32

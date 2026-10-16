@@ -46,6 +46,12 @@ func applyDefaults(c *Check) {
 	if len(c.Expect) == 0 {
 		c.Expect = append([]int(nil), DefaultExpect...)
 	}
+	// `path: health` to oczywista literówka za `path: /health` — poprawiamy
+	// zamiast kończyć „down" z niezrozumiałym powodem
+	if c.Path != "" && !strings.HasPrefix(c.Path, "/") && !strings.Contains(c.Path, "://") {
+		slog.Warn("check.path bez wiodącego /, dopisuję", "path", c.Path)
+		c.Path = "/" + c.Path
+	}
 }
 
 // applyOpis czyści opis i tagi ręcznie wpisane w plik: opis jest jedną linią

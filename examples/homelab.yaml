@@ -127,6 +127,13 @@ groups:
       - name: Grafana
         url: http://192.168.1.40:3000
         icon: grafana
-        <<: *defaults
+        check:
+          <<: *check
+          # Content check: ask /api/health instead of the front page, and call the
+          # service "degraded" (not "down") when the answer is not what we expect.
+          # The body is read up to 1 MiB; a redirect is not followed.
+          path: /api/health        # replaces the path of `url` for the check only
+          contains: '"database": "ok"'
+          # not_contains: maintenance
 
 # Adding a service? Copy a block above and change three fields.

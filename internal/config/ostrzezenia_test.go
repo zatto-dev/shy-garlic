@@ -195,7 +195,7 @@ groups:
         size: md
         description: d
         tags: [a]
-        check: {interval: 5s, timeout: 2s, expect: [200], insecure: true}
+        check: {interval: 5s, timeout: 2s, expect: [200], insecure: true, path: /h, contains: ok, not_contains: err}
 `
 	if w := Ostrzeżenia([]byte(src)); len(w) != 0 {
 		t.Fatalf("poprawne klucze zgłoszone jako nieznane: %s", klucze(w))

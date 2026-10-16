@@ -904,6 +904,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 		"size": svc.Size, "description": svc.Description, "tags": tagiDoJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
 		"expect": svc.Check.Expect, "insecure": svc.Check.Insecure,
+		"path": svc.Check.Path, "contains": svc.Check.Contains, "notContains": svc.Check.NotContains,
 		"now":     s.mon.Snapshot()[klucz],
 		"day":     statyJSON(doba),
 		"week":    statyJSON(tydzień),

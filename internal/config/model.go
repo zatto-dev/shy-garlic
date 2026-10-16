@@ -159,4 +159,16 @@ type Check struct {
 	// Insecure — homelab często stoi na samopodpisanym certyfikacie
 	// (Proxmox, iDRAC, NAS-y). Bez tego panel pokazywałby fałszywe "down".
 	Insecure bool `yaml:"insecure"`
+
+	// Kontrola treści (SHYG-48), tylko http(s).
+	//
+	// Path zastępuje ścieżkę (i query) z `url` TYLKO na czas sprawdzania —
+	// schemat, host i port zostają. Odpowiednik „użyj /healthz zamiast strony
+	// głównej". Musi zaczynać się od `/`.
+	Path string `yaml:"path"`
+	// Contains — tekst, który musi być w pierwszym 1 MiB odpowiedzi; Not… —
+	// którego nie może być. Niezgodność to stan `degraded` (serwer żyje, ale
+	// odpowiada czymś innym), nie `down`.
+	Contains    string `yaml:"contains"`
+	NotContains string `yaml:"not_contains"`
 }

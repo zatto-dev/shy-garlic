@@ -833,6 +833,10 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
 body[data-widok="list"] .karta .tagi,
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .tagi { display: flex; }
 body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none; }
+.detale-powod { margin: 10px 0 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.detale-powod[data-stan="degraded"] { color: var(--degraded-ink); }
+.detale-powod[data-stan="down"] { color: var(--down-tekst); }
+.detale-kontrola { margin: 6px 0 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
 .detale-opis { margin: 4px 0 0; font-size: 13px; color: var(--ink2); }
 #detale-tagi { margin-top: 6px; }
 

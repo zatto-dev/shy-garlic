@@ -65,6 +65,7 @@ var schematConfigu = obiekt(map[string]*schemat{
 			"description": liść, "tags": liść,
 			"check": obiekt(map[string]*schemat{
 				"interval": liść, "timeout": liść, "expect": liść, "insecure": liść,
+				"path": liść, "contains": liść, "not_contains": liść,
 			}),
 		})},
 	})},
