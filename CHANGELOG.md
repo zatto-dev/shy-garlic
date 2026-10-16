@@ -10,6 +10,8 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-10-16
+
 ### Fixed
 
 - **A malformed config no longer crashes the server.** One line such as
@@ -305,6 +307,7 @@ First working version: the dashboard, the heartbeat, sign-in, and an editor
 that writes YAML back through byte-level splicing, so comments, anchors and
 formatting survive every edit made through the UI.
 
+[0.13.2]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.2
 [0.13.1]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.1
 [0.13.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.0
 [0.12.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.12.0
