@@ -341,6 +341,11 @@ var teksty = map[string]map[Lang]string{
 	"baner_ostrz_adres":     {EN: `service "%s" in group "%s" has an address that cannot be used: %s (use http://, https:// or tcp://host:port)`, PL: `usługa „%s” w grupie „%s” ma adres, którego nie da się użyć: %s (użyj http://, https:// albo tcp://host:port)`},
 	"baner_poziom_glowny":   {EN: "top level", PL: "poziom główny"},
 	"blad_przenoszenie": {EN: "Could not move: invalid group, name or position.", PL: "Nie można przenieść: zła grupa, nazwa albo pozycja."},
+
+	// edycja sekcji „Sprawdzanie" (GH #6)
+	"blad_czas_sprawdzania": {EN: "Interval and timeout take a duration of at least 1s, such as 30s, 2m or 1h.", PL: "Co ile i timeout przyjmują czas od 1s w górę, np. 30s, 2m albo 1h."},
+	"blad_kody_http":        {EN: "Accepted codes: HTTP status codes from 100 to 599, separated by commas.", PL: "Akceptowane kody: kody HTTP od 100 do 599, oddzielone przecinkami."},
+
 	"konflikt_pliku": {
 		EN: "the file changed on disk since it was loaded — refresh the page and repeat the change",
 		PL: "plik zmienił się na dysku od czasu wczytania — odśwież stronę i powtórz zmianę"},
