@@ -1072,6 +1072,43 @@
   // wartości pól opis/tagi w chwili otwarcia — wysyłamy tylko to, co się zmieniło
   let poczatkowyOpis = "";
   let poczatkoweTagi = "";
+  // Sekcja „Sprawdzanie" przy edycji: karta tych pól nie niesie, więc
+  // dociągamy je z /api/service. Dopóki nie przyjdą (null), pola są
+  // zablokowane, a zapis ich nie wysyła — puste pola skasowałyby ustawienia
+  // z pliku (GH #6).
+  let poczatkoweSprawdzanie = null;
+  let numerSprawdzania = 0;
+  const POLA_SPRAWDZANIA = ["interval", "timeout", "expect", "insecure"];
+
+  function polaSprawdzania() {
+    const f = formaUslugi;
+    return { interval: f.interval.value.trim(), timeout: f.timeout.value.trim(),
+      expect: f.expect.value.trim(), insecure: f.insecure.checked };
+  }
+
+  function zablokujSprawdzanie(tak) {
+    for (const k of POLA_SPRAWDZANIA) formaUslugi[k].disabled = tak;
+  }
+
+  async function wczytajSprawdzanie(klucz) {
+    const numer = ++numerSprawdzania;
+    poczatkoweSprawdzanie = null;
+    zablokujSprawdzanie(true);
+    let d;
+    try {
+      d = await api("GET", `/api/service?key=${encodeURIComponent(klucz)}&n=1`);
+    } catch (_) { return; } // pola zostają zablokowane — reszta edycji działa
+    if (numer !== numerSprawdzania) return; // okno otwarto już dla innej usługi
+    const f = formaUslugi;
+    // wartość domyślna = placeholder; pokazujemy ją jako puste pole
+    const bezDomyslnej = (v, pole) => (v === pole.placeholder ? "" : v);
+    f.interval.value = bezDomyslnej(d.interval || "", f.interval);
+    f.timeout.value = bezDomyslnej(d.timeout || "", f.timeout);
+    f.expect.value = bezDomyslnej((d.expect || []).join(", "), f.expect);
+    f.insecure.checked = !!d.insecure;
+    poczatkoweSprawdzanie = polaSprawdzania();
+    zablokujSprawdzanie(false);
+  }
 
   function tagiZKarty(karta) {
     try {
@@ -1119,7 +1156,11 @@
       ustawRozmiar(karta.dataset.rozmiar);
       formaUslugi.description.value = karta.dataset.opis || "";
       formaUslugi.tags.value = tagiZKarty(karta).join(", ");
+      wczytajSprawdzanie(karta.dataset.key);
     } else {
+      numerSprawdzania++;
+      poczatkoweSprawdzanie = null;
+      zablokujSprawdzanie(false);
       wybor.disabled = false;
       if (domyslnaGrupa) wybor.value = domyslnaGrupa;
       ustawIkone("");
@@ -1217,7 +1258,14 @@
   formaUslugi.addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = formaUslugi;
-    const kody = (f.expect.value || "").split(",").map((x) => parseInt(x.trim(), 10)).filter((x) => !isNaN(x));
+    const tokeny = (f.expect.value || "").split(",").map((x) => x.trim()).filter(Boolean);
+    // literówka nie może po cichu skasować kodów (puste = domyślne)
+    if (!f.expect.disabled && tokeny.some((x) => !/^[1-5]\d\d$/.test(x))) {
+      bladUslugi.textContent = tr("blad_kody_http");
+      bladUslugi.hidden = false;
+      return;
+    }
+    const kody = tokeny.map((x) => parseInt(x, 10));
     const dane = {
       group: edytowana ? edytowana.grupa : f.group.value,
       newGroup: edytowana ? f.group.value : undefined,
@@ -1226,11 +1274,15 @@
       url: f.url.value.trim(),
       icon: $("#pole-ikony").value,
       size: rozmiarUslugi,
-      interval: f.interval.value.trim(),
-      timeout: f.timeout.value.trim(),
-      expect: kody.length ? kody : undefined,
-      insecure: f.insecure.checked,
     };
+    // Sprawdzanie: przy dodawaniu całe, przy edycji tylko pola zmienione od
+    // otwarcia okna. Puste pole przy edycji = wróć do wartości domyślnej.
+    const spr = polaSprawdzania();
+    for (const k of POLA_SPRAWDZANIA) {
+      if (!edytowana || (poczatkoweSprawdzanie && spr[k] !== poczatkoweSprawdzanie[k])) {
+        dane[k] = k === "expect" ? kody : spr[k];
+      }
+    }
     // Opis i tagi wysyłamy tylko po zmianie: pole odziedziczone z `<<: *defaults`
     // nie da się zapisać lokalnie, a niezmienione nie powinno nic dopisywać.
     if (f.description.value !== poczatkowyOpis) dane.description = f.description.value.trim();

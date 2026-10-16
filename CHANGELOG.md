@@ -10,6 +10,24 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Editing a service now saves the "Checking" section** (#6). Ticking "Ignore
+  certificate errors", changing accepted codes, interval or timeout on an
+  existing service was dropped and the preview said nothing would change; the
+  only way out was deleting and re-adding the service. The edit form now loads
+  the current values, sends only the fields you changed, and the file gets
+  exactly those keys: set in place, added, or removed when you go back to the
+  default (an emptied `check:` block disappears). Comments in the block stay.
+  A `check` block inherited through `<<: *defaults` is refused with a message,
+  as for description and tags. `PATCH /api/services` without these fields
+  leaves them untouched; invalid durations, durations under 1s and codes
+  outside 100–599 return `400`, and the form rejects a mistyped code instead
+  of silently falling back to the defaults. Saving the dialog no longer adds
+  `size: md` to a service whose size you did not change.
+- **Durations with a trailing comment** such as `interval: 1m  # slow box` were
+  read as `1s`. They now read as written.
+
 ## [0.13.1] — 2026-10-16
 
 ### Changed

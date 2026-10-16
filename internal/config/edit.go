@@ -143,36 +143,7 @@ func renderService(svc Service, dashIndent int) string {
 	if len(svc.Tags) > 0 {
 		fmt.Fprintf(&b, "%stags: %s\n", key, renderTagiFlow(svc.Tags))
 	}
-	c := svc.Check
-	if c.Interval != 0 || c.Timeout != 0 || len(c.Expect) > 0 || c.Insecure ||
-		c.Path != "" || c.Contains != "" || c.NotContains != "" {
-		fmt.Fprintf(&b, "%scheck:\n", key)
-		if c.Interval != 0 {
-			fmt.Fprintf(&b, "%s  interval: %s\n", key, c.Interval)
-		}
-		if c.Timeout != 0 {
-			fmt.Fprintf(&b, "%s  timeout: %s\n", key, c.Timeout)
-		}
-		if len(c.Expect) > 0 {
-			kody := make([]string, len(c.Expect))
-			for i, k := range c.Expect {
-				kody[i] = strconv.Itoa(k)
-			}
-			fmt.Fprintf(&b, "%s  expect: [%s]\n", key, strings.Join(kody, ", "))
-		}
-		if c.Insecure {
-			fmt.Fprintf(&b, "%s  insecure: true\n", key)
-		}
-		if c.Path != "" {
-			fmt.Fprintf(&b, "%s  path: %s\n", key, quoteLike(nil, c.Path))
-		}
-		if c.Contains != "" {
-			fmt.Fprintf(&b, "%s  contains: %s\n", key, quoteLike(nil, c.Contains))
-		}
-		if c.NotContains != "" {
-			fmt.Fprintf(&b, "%s  not_contains: %s\n", key, quoteLike(nil, c.NotContains))
-		}
-	}
+	b.WriteString(renderCheck(svc.Check, len(key)))
 	return b.String()
 }
 
