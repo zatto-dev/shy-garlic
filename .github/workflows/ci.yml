@@ -19,6 +19,13 @@ jobs:
           check-latest: true
       - run: go vet ./...
       - run: go test -race ./...
+      # Short fuzz pass over the YAML editor: a goccy/go-yaml update that
+      # shifts AST positions must not reach users as a corrupted file (SHYG-20).
+      - name: fuzz config editor
+        run: |
+          for f in FuzzLoadParse FuzzEdit FuzzEditValue; do
+            go test ./internal/config -run '^$' -fuzz "^${f}\$" -fuzztime 20s
+          done
 
   build:
     runs-on: ubuntu-latest

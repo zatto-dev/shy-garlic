@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -66,7 +67,9 @@ func NormalizujOpis(v string) (string, error) {
 			return "", ErrOpisZnaki
 		}
 	}
-	return v, nil
+	// collapse runs of spaces the same way Load does, so what is written is
+	// exactly what reads back
+	return strings.Join(strings.Fields(v), " "), nil
 }
 
 // czyśćTagi usuwa puste i powtórzone (bez względu na wielkość liter) tagi,
@@ -119,10 +122,16 @@ func (d *Document) UstawOpisUsługi(grupa, usługa, opis string) error {
 	if err := d.odmówGdyDziedziczone(grupa, usługa, "description", maOpis); err != nil {
 		return err
 	}
+	prev := d.src
 	if opis != "" {
-		return d.SetServiceField(grupa, usługa, "description", opis)
+		err = d.SetServiceField(grupa, usługa, "description", opis)
+	} else {
+		err = d.usuńPoleUsługi(grupa, usługa, "description")
 	}
-	return d.usuńPoleUsługi(grupa, usługa, "description")
+	if err != nil {
+		return err
+	}
+	return d.verifyService(prev, grupa, usługa, func(s Service) bool { return s.Description == opis })
 }
 
 // UstawTagiUsługi ustawia, podmienia albo (pusta lista) usuwa `tags`.
@@ -131,6 +140,17 @@ func (d *Document) UstawOpisUsługi(grupa, usługa, opis string) error {
 // lista blokowa); nowy dostaje styl, w jakim plik już pisze tagi, a gdy ich
 // jeszcze nie ma — flow.
 func (d *Document) UstawTagiUsługi(grupa, usługa string, tagi []string) error {
+	prev := d.src
+	if err := d.setServiceTags(grupa, usługa, tagi); err != nil {
+		return err
+	}
+	want, _ := NormalizujTagi(tagi) // validated by setServiceTags
+	return d.verifyService(prev, grupa, usługa, func(s Service) bool {
+		return slices.Equal([]string(s.Tags), want)
+	})
+}
+
+func (d *Document) setServiceTags(grupa, usługa string, tagi []string) error {
 	tagi, err := NormalizujTagi(tagi)
 	if err != nil {
 		return err

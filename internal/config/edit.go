@@ -150,6 +150,16 @@ func renderService(svc Service, dashIndent int) string {
 // AddService dopisuje usługę na koniec grupy. Wcięcie bierze z ostatniej usługi
 // w tej grupie, a nie z założeń — plik użytkownika dyktuje styl.
 func (d *Document) AddService(group string, svc Service) error {
+	prev := d.src
+	if err := d.addService(group, svc); err != nil {
+		return err
+	}
+	return d.verifyLoads(prev, func(cfg *Config) bool {
+		return findLoaded(cfg, group, svc.Name, func(Service) bool { return true })
+	})
+}
+
+func (d *Document) addService(group string, svc Service) error {
 	if svc.Name == "" {
 		return errors.New("service name is required")
 	}
@@ -224,6 +234,24 @@ func (d *Document) addServiceDoPustejGrupy(gi int, svc Service) error {
 // klucz jest dopisywany na koniec jej bloku. Bez tego pierwsze ustawienie
 // ikony albo rozmiaru z UI cicho przepadało.
 func (d *Document) SetServiceField(group, service, field, value string) error {
+	prev := d.src
+	if err := d.setServiceField(group, service, field, value); err != nil {
+		return err
+	}
+	if field == "name" {
+		return d.verifyRename(prev, group, service, value)
+	}
+	name, ok := service, func(Service) bool { return true }
+	switch field {
+	case "url":
+		ok = func(s Service) bool { return s.URL == value }
+	case "icon":
+		ok = func(s Service) bool { return s.Icon == value }
+	}
+	return d.verifyService(prev, group, name, ok)
+}
+
+func (d *Document) setServiceField(group, service, field, value string) error {
 	gi, si, err := d.findService(group, service)
 	if err != nil {
 		return err
@@ -248,6 +276,14 @@ func (d *Document) SetServiceField(group, service, field, value string) error {
 // stoi bezpośrednio nad wpisem). Komentarz odsunięty pustą linią należy do
 // pliku, nie do usługi, i zostaje.
 func (d *Document) RemoveService(group, service string) error {
+	prev := d.src
+	if err := d.removeService(group, service); err != nil {
+		return err
+	}
+	return d.verifyLoads(prev, func(*Config) bool { return true })
+}
+
+func (d *Document) removeService(group, service string) error {
 	gi, si, err := d.findService(group, service)
 	if err != nil {
 		return err
@@ -395,6 +431,14 @@ func (d *Document) ReplaceAll(nowa []byte) error {
 
 // RenameGroup zmienia nazwę grupy, nie ruszając jej zawartości.
 func (d *Document) RenameGroup(stara, nowa string) error {
+	prev := d.src
+	if err := d.renameGroup(stara, nowa); err != nil {
+		return err
+	}
+	return d.verifyLoads(prev, func(cfg *Config) bool { return hasGroup(cfg, nowa) })
+}
+
+func (d *Document) renameGroup(stara, nowa string) error {
 	if nowa == "" {
 		return errors.New("group name is required")
 	}

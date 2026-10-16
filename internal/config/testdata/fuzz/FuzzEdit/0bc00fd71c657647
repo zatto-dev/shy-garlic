@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("         #\r\ngroups: #\r\n  - name: 0\n    services:\n      - name: 0\n        A: 000\n      - ")

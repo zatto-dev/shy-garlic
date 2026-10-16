@@ -57,6 +57,9 @@ func normalizujKońce(src []byte) ([]byte, bool) {
 }
 
 func Parse(src []byte) (*Document, error) {
+	if hasLoneCR(src) {
+		return nil, errLoneCR
+	}
 	src, crlf := normalizujKońce(src)
 	d := &Document{src: src, crlf: crlf}
 	if err := d.reparse(); err != nil {
@@ -67,7 +70,7 @@ func Parse(src []byte) (*Document, error) {
 
 // reparse odświeża AST i indeks linii po zmianie src.
 func (d *Document) reparse() error {
-	f, err := parser.ParseBytes(d.src, parser.ParseComments)
+	f, err := safeParseBytes(d.src, parser.ParseComments)
 	if err != nil {
 		return fmt.Errorf("parse yaml: %w", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 )
 
@@ -35,13 +34,24 @@ type ZmianaSprawdzania struct {
 // lokalny `check` obok merge'a zastąpiłby cały dziedziczony blok (merge jest
 // płytki), a nie tylko zmienione pole.
 func (d *Document) UstawSprawdzanie(grupa, usługa string, z ZmianaSprawdzania) error {
+	prev := d.src
+	want, err := d.setCheck(grupa, usługa, z)
+	if err != nil || want == nil {
+		return err
+	}
+	return d.verifyService(prev, grupa, usługa, func(s Service) bool { return checkMatches(s.Check, *want) })
+}
+
+// setCheck applies the change and returns the check block it meant to write
+// (nil when nothing changed).
+func (d *Document) setCheck(grupa, usługa string, z ZmianaSprawdzania) (*Check, error) {
 	gi, si, err := d.findService(grupa, usługa)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	stary, err := d.surowySprawdzania(gi, si)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	nowy := stary
@@ -63,7 +73,7 @@ func (d *Document) UstawSprawdzanie(grupa, usługa string, z ZmianaSprawdzania) 
 		zmiany = append(zmiany, "insecure")
 	}
 	if len(zmiany) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	usł := []any{"groups", gi, "services", si}
@@ -72,52 +82,52 @@ func (d *Document) UstawSprawdzanie(grupa, usługa string, z ZmianaSprawdzania) 
 	switch {
 	case errors.Is(err, ErrPathNotFound):
 		if !pustySprawdzania(stary) {
-			return ErrPoleDziedziczone
+			return nil, ErrPoleDziedziczone
 		}
-		return d.wstawBlokUsługi(renderCheck(nowy, 0), usł...)
+		return &nowy, d.wstawBlokUsługi(renderCheck(nowy, 0), usł...)
 	case err != nil:
-		return err
+		return nil, err
 	}
 
 	if !d.blokowaMapa(n, "check", usł...) {
 		// `check: {interval: 1m}` albo puste `check:` — przepisujemy cały blok
 		if err := d.usuńPoleWpisu("check", usł...); err != nil {
-			return err
+			return nil, err
 		}
 		if pustySprawdzania(nowy) {
-			return nil
+			return &nowy, nil
 		}
-		return d.wstawBlokUsługi(renderCheck(nowy, 0), usł...)
+		return &nowy, d.wstawBlokUsługi(renderCheck(nowy, 0), usł...)
 	}
 
 	// najpierw zapisy, potem kasowanie — blok nie może po drodze zostać pusty
 	for _, klucz := range zmiany {
 		if wartość := wartośćSprawdzania(nowy, klucz); wartość != "" {
 			if err := d.ustawKluczSprawdzania(klucz, wartość, ścieżka...); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	for _, klucz := range zmiany {
 		if wartośćSprawdzania(nowy, klucz) == "" {
 			if err := d.usuńPoleWpisu(klucz, ścieżka...); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if n, err := d.node(ścieżka...); err == nil {
 		if m := asMapping(n); m == nil || len(m.Values) == 0 {
-			return d.usuńPoleWpisu("check", usł...)
+			return &nowy, d.usuńPoleWpisu("check", usł...)
 		}
 	}
-	return nil
+	return &nowy, nil
 }
 
 // surowySprawdzania zwraca blok `check` usługi tak, jak stoi w pliku: z
 // rozwiniętymi merge-keyami, ale BEZ domyślnych, które dokłada Load.
 func (d *Document) surowySprawdzania(gi, si int) (Check, error) {
 	var cfg Config
-	if err := yaml.Unmarshal(d.src, &cfg); err != nil {
+	if err := safeUnmarshal(d.src, &cfg); err != nil {
 		return Check{}, fmt.Errorf("parse config: %w", err)
 	}
 	if gi >= len(cfg.Groups) || si >= len(cfg.Groups[gi].Services) {
