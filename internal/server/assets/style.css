@@ -746,7 +746,9 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   background: var(--glass2);
   border-color: var(--edge2);
 }
-.karta:focus-within {
+/* :has(:focus-visible), nie :focus-within — kliknięcie myszą/palcem nie
+   zostawia obwódki na karcie, klawiatura nadal ją pokazuje. */
+.karta:has(:focus-visible) {
   border-color: var(--acc);
   box-shadow: inset 0 1px 0 var(--shine), 0 0 0 3px var(--acc-32);
 }
@@ -813,6 +815,32 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   font: 400 12px/1.2 var(--font-mono); color: var(--ink3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* Opis i tagi usługi (SHYG-47). Opis to jedna przycięta linia pod hostem; tagi
+   to małe chipy, które na zwartej karcie (siatka, bento sm/md) zostają
+   schowane — widać je w liście, w dużym kaflu bento i w oknie szczegółów. */
+.opis-uslugi {
+  font-size: 12px; line-height: 1.3; color: var(--ink2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tagi { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.tag {
+  font: 500 10.5px/1 var(--font-mono); letter-spacing: .02em;
+  padding: 3px 7px; border-radius: 999px;
+  background: var(--chip); box-shadow: inset 0 0 0 1px var(--edge);
+  color: var(--ink2); max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.karta .tagi { display: none; margin-top: 2px; }
+body[data-widok="list"] .karta .tagi,
+body[data-widok="bento"] .karta[data-rozmiar="lg"] .tagi { display: flex; }
+body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none; }
+.detale-powod { margin: 10px 0 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.detale-powod[data-stan="degraded"] { color: var(--degraded-ink); }
+.detale-powod[data-stan="down"] { color: var(--down-tekst); }
+.detale-kontrola { margin: 6px 0 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.detale-opis { margin: 4px 0 0; font-size: 13px; color: var(--ink2); }
+#detale-tagi { margin-top: 6px; }
 
 /* Dolny pasek karty: uptime · ago. Trzyma wysokość, żeby akcje na hover
    nie przesuwały treści. */
@@ -986,7 +1014,7 @@ body[data-widok="list"] .karta {
 }
 body[data-widok="list"] .karta:first-child { border-top-color: transparent; }
 body[data-widok="list"] .karta:hover { transform: none; background: var(--glass2); }
-body[data-widok="list"] .karta:focus-within {
+body[data-widok="list"] .karta:has(:focus-visible) {
   box-shadow: inset 0 0 0 2px var(--acc-32); border-color: var(--edge);
 }
 /* Wiersz listy jest jednowierszowy — wszystkie dzieci wracają do rzędu 1. */
@@ -1290,6 +1318,13 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 .lista-kont button:hover { color: var(--down-tekst); }
 .lista-kont button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
 
+.lista-tokenow li > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.token-meta { font: 400 12px/1.2 var(--font-mono); color: var(--ink3); overflow-wrap: anywhere; }
+.nowy-token {
+  margin-top: 10px; padding: 12px; border-radius: var(--r-duza);
+  border: 1px solid var(--acc); background: var(--chip);
+}
+.nowy-token input { font-family: var(--font-mono); font-size: 12px; }
 .wiersz-formy { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .wiersz-formy input { flex: 1; min-width: 120px; }
 
@@ -1815,7 +1850,7 @@ body.brama {
 .pole-formy { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink2); }
 .pole-formy input { width: 100%; }
 .pole-formy input[type="number"] { width: 5.5rem; }
-.pole-formy input:disabled { opacity: .55; cursor: not-allowed; }
+.pole-formy input:disabled, .pole-formy select:disabled { opacity: .55; cursor: not-allowed; }
 
 .tabela-instancji { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tabela-instancji th {
@@ -1932,3 +1967,105 @@ body.brama {
 /* Plik poza limitem kolorowania — wracamy do gołego pola. */
 .edytor-yaml.bez-kolorow .podswietlenie { display: none; }
 .edytor-yaml.bez-kolorow textarea { color: var(--ink); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Edycja tytułu i zmiana kolejności (SHYG-39, SHYG-40).
+   Dopisane PO systemie .btn, a selektory mają dwie klasy — baza .btn ma
+   display/height/padding i przy jednej klasie wygrywałaby kolejnością.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── tytuł ────────────────────────────────────────────────────────────── */
+
+.brand { position: relative; }
+/* ołówek tylko w trybie edycji — ten sam wzorzec co przyciski nagłówka grupy */
+.brand #tytul-edytuj { display: none; }
+body.edycja .brand #tytul-edytuj { display: inline-flex; }
+
+.tytul-pole {
+  min-width: 0; width: min(28ch, 52vw);
+  height: 32px; padding: 0 10px;
+  border: 1px solid var(--acc-55); border-radius: var(--r-mala);
+  background: var(--field); color: var(--ink);
+  font: inherit; letter-spacing: inherit;
+}
+.tytul-pole:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
+.tytul-pole[aria-invalid="true"] { border-color: var(--down); }
+
+/* komunikat przy polu — pod nagłówkiem, nie w przepływie (nagłówek jest sticky) */
+.blad-pola {
+  position: absolute; left: 40px; top: calc(100% + 8px); z-index: 60;
+  margin: 0; padding: 8px 12px; max-width: min(420px, 90vw);
+  border: 1px solid var(--down-obwodka); border-radius: var(--r-mala);
+  background: var(--panel-krycie); color: var(--down-ink);
+  font-size: 13px; box-shadow: var(--shadow);
+}
+
+/* ── przeciąganie ─────────────────────────────────────────────────────── */
+
+.btn.uchwyt { cursor: grab; touch-action: none; }
+.btn.uchwyt:active { cursor: grabbing; }
+
+/* Cała karta i nagłówek grupy to powierzchnia przeciągania — tylko w trybie
+   edycji (tak jak uchwyt). touch-action zostaje domyślne: palec przewija stronę,
+   a przeciąganie zaczyna się dopiero po długim przytrzymaniu (app.js). */
+body.edycja .karta,
+body.edycja .grupa > h2 {
+  cursor: grab;
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+body.edycja .karta a, body.edycja .karta img { -webkit-user-drag: none; }
+body.edycja .karta button, body.edycja .grupa > h2 button { cursor: pointer; }
+body.edycja .karta .uchwyt, body.edycja .grupa > h2 .uchwyt { cursor: grab; }
+
+body.przeciaganie, body.przeciaganie * { cursor: grabbing !important; }
+body.przeciaganie { user-select: none; -webkit-user-select: none; }
+
+/* oryginał zostaje w DOM-ie i robi za znacznik miejsca upuszczenia */
+body .karta.przeciagana, body .karta.przeciagana:hover {
+  transform: none; animation: none;
+  background: var(--acc-12); border: 1px dashed var(--acc-55);
+  box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body .karta.przeciagana > * { visibility: hidden; }
+
+.grupa.przeciagana > .siatka { display: none; }
+.grupa.przeciagana > h2 {
+  padding: 8px 10px; border: 1px dashed var(--acc-55);
+  border-radius: var(--r-duza); background: var(--acc-12);
+}
+.grupa.przeciagana > h2 > * { visibility: hidden; }
+.grupa.przeciagana > h2::after { display: none; }
+
+/* duch pod palcem/kursorem — nieprzezroczysty, jak każdy element nad treścią */
+/* `body` na początku: widoki listy i bento dają .karta własne tło i ramkę
+   selektorem o dwóch klasach, a duch ma być nieprzezroczysty w każdym z nich. */
+body[data-widok] .duch {
+  position: fixed; left: 0; top: 0; z-index: 90; margin: 0;
+  pointer-events: none; will-change: transform;
+  background: var(--panel-krycie);
+  border: 1px solid var(--acc-55); border-radius: calc(var(--r) - 2px);
+  box-shadow: 0 18px 40px -12px rgba(0,0,0,.55);
+  animation: none; transform: none;
+}
+body[data-widok] .duch.karta { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.duch--dotyk { box-shadow: 0 22px 48px -10px rgba(0,0,0,.6); }
+.duch.grupa { padding: 8px 10px; border-radius: var(--r-duza); }
+.duch.grupa > :not(h2) { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .duch { scale: 1.02; }
+  .duch--dotyk { scale: 1.05; }
+}
+
+/* ── baner stanu pliku (błąd YAML / nieznane klucze) ────────────────────── */
+.baner-config {
+  margin: 12px clamp(12px, 3vw, 28px); padding: 10px 14px;
+  border: 1px solid var(--edge2); border-radius: var(--r-duza);
+  background: var(--panel-krycie); color: var(--ink); font-size: 14px; line-height: 1.45;
+  box-shadow: var(--shadow);
+}
+.baner-config[data-stan="error"]    { border-color: var(--down-obwodka); border-left: 4px solid var(--down); }
+.baner-config[data-stan="warnings"] { border-left: 4px solid var(--degraded); }
+.baner-config strong { display: block; font-weight: 600; }
+.baner-config p { margin: 4px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--down-ink); overflow-wrap: anywhere; }
+.baner-config ul { margin: 6px 0 0; padding-left: 20px; color: var(--ink2); overflow-wrap: anywhere; }

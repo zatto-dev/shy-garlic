@@ -34,7 +34,13 @@
 <header class="top">
   <div class="brand">
     <img src="/assets/logo.png" alt="" width="28" height="28" class="logo">
-    <h1>{{.Title}}</h1>
+    <h1 id="tytul-panelu">{{.Title}}</h1>
+    <button id="tytul-edytuj" class="btn btn--icon btn--sm" type="button"
+            title="{{.T.zmien_tytul}}" aria-label="{{.T.zmien_tytul}}">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4Z"></path><path d="M13 7l4 4"></path></svg>
+    </button>
+    <p class="blad-pola" id="blad-tytulu" role="alert" hidden></p>
   </div>
 
   <span class="chip chip-dziala" id="chip-dziala">
@@ -191,12 +197,22 @@
   <input id="plik-tapety" type="file" accept="image/*" hidden>
 </header>
 
+<div class="baner-config" id="baner-config" data-stan="{{.Baner.Stan}}" role="alert"{{if eq .Baner.Stan "ok"}} hidden{{end}}>
+  <strong id="baner-tytul">{{.Baner.Tytuł}}</strong>
+  <p id="baner-blad"{{if not .Baner.Błąd}} hidden{{end}}>{{.Baner.Błąd}}</p>
+  <ul id="baner-lista"{{if not .Baner.Ostrzeżenia}} hidden{{end}}>{{range .Baner.Ostrzeżenia}}<li>{{.}}</li>{{end}}</ul>
+</div>
+
 <div class="sr-only" id="podsumowanie" role="status" aria-live="polite"></div>
+<div class="sr-only" id="ogloszenia" role="status" aria-live="polite"></div>
 
 <main id="tresc">
 {{range .Groups}}
   <section class="grupa" data-grupa="{{.Name}}">
     <h2>
+      <button class="btn btn--icon btn--sm uchwyt" type="button" data-akcja="uchwyt" data-typ="grupa"
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="{{$.T.uchwyt_grupa}}"
+              aria-label="{{$.T.uchwyt_grupa}}: {{.Name}}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="9" cy="6" r="1.6"></circle><circle cx="15" cy="6" r="1.6"></circle><circle cx="9" cy="12" r="1.6"></circle><circle cx="15" cy="12" r="1.6"></circle><circle cx="9" cy="18" r="1.6"></circle><circle cx="15" cy="18" r="1.6"></circle></svg></button>
       <span class="nazwa-grupy">{{.Name}}</span>
       <button class="btn btn--icon btn--sm" type="button" data-akcja="dodaj-do" data-grupa="{{.Name}}"
               title="{{$.T.dodaj_do_grupy}}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></button>
@@ -208,9 +224,10 @@
     <ul class="siatka">
     {{range .Services}}
       <li class="karta" data-rozmiar="{{.Rozmiar}}" data-key="{{.Key}}" data-grupa="{{.Group}}"
-          data-nazwa="{{.Name}}" data-url="{{.URL}}" data-ikona="{{.IconName}}"
-          data-szukaj="{{.Name}} {{.Host}}">
-        <a class="glowna" href="{{.URL}}" target="_blank" rel="noopener noreferrer">
+          data-nazwa="{{.Name}}" data-adres="{{.URL}}" data-ikona="{{.IconName}}"
+          data-opis="{{.Description}}" data-tagi="{{.TagsJSON}}"
+          data-szukaj="{{.SzukajTekst}}">
+        <a class="glowna"{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{end}}{{if .Description}} title="{{.Description}}"{{end}}>
           <span class="ikona">
             {{if .Icon.WariantCiemny}}<span class="ikona-motyw ikona-motyw--ciemny"><img src="{{.Icon.WariantCiemny}}" alt="" loading="lazy" width="28" height="28"></span><span class="ikona-motyw ikona-motyw--jasny"><img src="{{.Icon.WariantJasny}}" alt="" loading="lazy" width="28" height="28"></span>
             {{else if .Icon.Src}}<img src="{{.Icon.Src}}" alt="" loading="lazy" width="28" height="28">
@@ -219,6 +236,12 @@
           <span class="opis">
             <span class="nazwa">{{.Name}}</span>
             <span class="host">{{.Host}}</span>
+            {{- if .Description}}
+            <span class="opis-uslugi">{{.Description}}</span>
+            {{- end}}
+            {{- if .Tags}}
+            <span class="tagi">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</span>
+            {{- end}}
           </span>
         </a>
         <button class="szczegoly" type="button" data-akcja="szczegoly"
@@ -233,7 +256,7 @@
         </button>
         <span class="karta-meta"><b></b><span></span></span>
         <span class="karta-akcje">
-          <a href="{{.URL}}" class="btn btn--icon btn--sm" target="_blank" rel="noopener noreferrer" data-akcja="otworz"
+          <a{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{else}} hidden{{end}} class="btn btn--icon btn--sm" data-akcja="otworz"
              title="{{$.T.otworz}}" aria-label="{{$.T.otworz}} {{.Name}}">
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"
                  stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5M19 5l-8 8M10 6H6v12h12v-4"></path></svg>
@@ -248,6 +271,9 @@
           </button>
         </span>
         <span class="edycja-akcje">
+          <button type="button" class="btn btn--icon btn--sm uchwyt" data-akcja="uchwyt" data-typ="usluga"
+                  aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="{{$.T.uchwyt_usluga}}"
+                  aria-label="{{$.T.uchwyt_usluga}}: {{.Name}}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="9" cy="6" r="1.6"></circle><circle cx="15" cy="6" r="1.6"></circle><circle cx="9" cy="12" r="1.6"></circle><circle cx="15" cy="12" r="1.6"></circle><circle cx="9" cy="18" r="1.6"></circle><circle cx="15" cy="18" r="1.6"></circle></svg></button>
           <button type="button" class="btn btn--icon btn--sm" data-akcja="edytuj" title="{{$.T.edytuj}}" aria-label="{{$.T.edytuj}} {{.Name}}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L20 8l-4-4L4 16v4Z" fill="currentColor"/></svg>
           </button>
@@ -294,6 +320,12 @@
 
     <label><span>{{.T.grupa}}</span>
       <select name="group" id="wybor-grupy"></select></label>
+
+    <label><span>{{.T.opis_uslugi}}</span>
+      <input name="description" maxlength="200" autocomplete="off" placeholder="{{.T.opis_uslugi_placeholder}}"></label>
+
+    <label><span>{{.T.tagi_uslugi}}</span>
+      <input name="tags" autocomplete="off" placeholder="{{.T.tagi_placeholder}}"></label>
 
     <div class="pole-rozmiaru">
       <span class="etykieta-pola">{{.T.rozmiar}}</span>
@@ -360,12 +392,17 @@
       <div>
         <h3 id="detale-nazwa"></h3>
         <a id="detale-url" class="detale-url" target="_blank" rel="noopener noreferrer"></a>
+        <p class="detale-opis" id="detale-opis" hidden></p>
+        <span class="tagi" id="detale-tagi" hidden></span>
       </div>
       <span class="stan" id="detale-stan" data-stan="unknown">
         <span class="kropka" aria-hidden="true"></span>
         <span class="etykieta">—</span>
       </span>
     </div>
+
+    <p class="detale-powod" id="detale-powod" hidden></p>
+    <p class="drobne detale-kontrola" id="detale-kontrola" hidden></p>
 
     <div class="staty" id="detale-staty"></div>
 
@@ -490,6 +527,18 @@
     <section id="panel-powiadomienia" role="tabpanel" hidden>
       <p class="drobne">{{.T.powiadomienia_opis}}</p>
       <label class="pole-formy">
+        <span>{{.T.format_webhooka}}</span>
+        <select id="webhook-format">
+          <option value="discord">Discord</option>
+          <option value="slack">Slack / Mattermost</option>
+          <option value="ntfy">ntfy</option>
+          <option value="gotify">Gotify</option>
+          <option value="telegram">Telegram</option>
+          <option value="generic">{{.T.format_generic}}</option>
+        </select>
+      </label>
+      <p class="drobne" id="webhook-format-podpowiedz"></p>
+      <label class="pole-formy">
         <span>{{.T.webhook_adres}}</span>
         <input id="webhook-adres" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">
       </label>
@@ -563,6 +612,22 @@
         </thead>
         <tbody></tbody>
       </table>
+
+      <h4>{{.T.tokeny_tytul}}</h4>
+      <p class="drobne">{{.T.tokeny_opis}}</p>
+      <ul id="lista-tokenow" class="lista-kont lista-tokenow"></ul>
+      <form id="form-tokenu" class="wiersz-formy">
+        <input name="name" placeholder="{{.T.tokeny_nazwa}}" maxlength="64" autocomplete="off" required>
+        <button type="submit" class="btn btn--quiet">{{.T.tokeny_utworz}}</button>
+      </form>
+      <div class="nowy-token" id="nowy-token" hidden>
+        <p class="drobne">{{.T.tokeny_pokazany_raz}}</p>
+        <div class="wiersz-formy">
+          <input id="nowy-token-wartosc" readonly spellcheck="false" autocomplete="off"
+                 aria-label="{{.T.tokeny_tytul}}">
+          <button type="button" id="kopiuj-token" class="btn btn--quiet">{{.T.kopiuj}}</button>
+        </div>
+      </div>
     </section>
 
     <p class="ok-okna" id="ok-ustawien" hidden></p>

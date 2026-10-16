@@ -10,7 +10,7 @@ title: Homelab
 
 # Shared check settings. Change them once, they apply everywhere.
 defaults: &defaults
-  check:
+  check: &check
     interval: 30s
     timeout: 6s
     # ! 401 and 403 mean "the service is alive, it just wants a login" — not
@@ -49,6 +49,10 @@ groups:
       - name: Proxmox
         url: https://192.168.1.10:8006
         icon: proxmox
+        # description and tags are optional: a line under the name, and labels.
+        # Both are searched by the filter box; tags show as chips in list view.
+        description: Hypervisor, three nodes
+        tags: [infra, virtualization]
         check:
           interval: 30s
           timeout: 6s
@@ -59,7 +63,7 @@ groups:
         url: https://192.168.1.1
         icon: opnsense
         check:
-          <<: *defaults
+          <<: *check    # the shared settings, plus this service's own
           insecure: true
 
       - name: TrueNAS
@@ -70,6 +74,8 @@ groups:
       - name: Home Assistant
         url: http://192.168.1.20:8123
         icon: home-assistant
+        description: Lights, heating, sensors
+        tags: [home, automation]
         <<: *defaults
 
   - name: Media
@@ -77,12 +83,16 @@ groups:
       - name: Jellyfin
         url: http://192.168.1.30:8096
         icon: jellyfin
+        description: Movies and music
+        tags: [media, family]
         size: lg          # sm | md | lg — rozmiar kafla w widoku bento
         <<: *defaults
 
       - name: Immich
         url: https://photos.home.arpa
         icon: immich
+        description: Family photo library
+        tags: [media, family, backup]
         <<: *defaults
 
   - name: Tools
@@ -90,6 +100,8 @@ groups:
       - name: Vaultwarden
         url: https://vault.home.arpa
         icon: vaultwarden
+        description: Passwords for the household
+        tags: [security]
         <<: *defaults
 
       - name: Gitea
@@ -115,6 +127,13 @@ groups:
       - name: Grafana
         url: http://192.168.1.40:3000
         icon: grafana
-        <<: *defaults
+        check:
+          <<: *check
+          # Content check: ask /api/health instead of the front page, and call the
+          # service "degraded" (not "down") when the answer is not what we expect.
+          # The body is read up to 1 MiB; a redirect is not followed.
+          path: /api/health        # replaces the path of `url` for the check only
+          contains: '"database": "ok"'
+          # not_contains: maintenance
 
 # Adding a service? Copy a block above and change three fields.

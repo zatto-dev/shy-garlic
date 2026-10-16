@@ -8,8 +8,10 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -100,8 +102,84 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL,
+  hash         TEXT NOT NULL UNIQUE,
+  hint         TEXT NOT NULL DEFAULT '',
+  author       TEXT NOT NULL DEFAULT '',
+  user_id      INTEGER,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at DATETIME
+);
 `)
+	if err != nil {
+		return err
+	}
+	if err := s.dopiszUserIDTokenów(); err != nil {
+		return err
+	}
+	return s.zahaszujSesje()
+}
+
+// dopiszUserIDTokenów: tokeny API pamiętały tylko tekstowy login autora, więc
+// usunięcie konta ich nie ruszało. user_id wiąże token z kontem (bez klucza
+// obcego — ALTER TABLE ADD COLUMN z REFERENCES jest w SQLite wybredny, a
+// usuwanie robi UsuńUżytkownika). Stare wiersze dostają user_id po loginie
+// autora; te, których autora nie ma w users, zostają bez właściciela.
+// Idempotentne.
+func (s *Store) dopiszUserIDTokenów() error {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('api_tokens') WHERE name = 'user_id'`)
+	if err != nil {
+		return err
+	}
+	jest := rows.Next()
+	rows.Close()
+	if !jest {
+		if _, err := s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN user_id INTEGER`); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(`UPDATE api_tokens SET user_id = (SELECT id FROM users WHERE login = api_tokens.author)
+		WHERE user_id IS NULL`)
 	return err
+}
+
+// skrótTokenu — w bazie leży sha256 tokenu, nie sam token: wyciek pliku .db
+// (backup, snapshot) nie daje wtedy działających ciasteczek. Token ma 256 bitów
+// losowości, więc szybki skrót wystarcza (bcrypt byłby tu bez sensu).
+func skrótTokenu(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// zahaszujSesje przepisuje jawne tokeny ze starych baz na skróty, żeby po
+// aktualizacji nikt nie został wylogowany. Idempotentne: skrót ma 64 znaki
+// (hex), jawny token 43 (base64 z 32 bajtów).
+func (s *Store) zahaszujSesje() error {
+	rows, err := s.db.Query(`SELECT token FROM sessions WHERE length(token) <> 64`)
+	if err != nil {
+		return err
+	}
+	var jawne []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			rows.Close()
+			return err
+		}
+		jawne = append(jawne, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, t := range jawne {
+		if _, err := s.db.Exec(`UPDATE sessions SET token = ? WHERE token = ?`, skrótTokenu(t), t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ── ustawienia instancji ─────────────────────────────────────────────────────
@@ -215,9 +293,21 @@ func (s *Store) Użytkownicy(ctx context.Context) ([]Użytkownik, error) {
 	return out, rows.Err()
 }
 
+// UsuńUżytkownika kasuje konto razem z jego sesjami (kaskada) i tokenami API —
+// token wystawiony przez usuniętego użytkownika nie ma prawa przeżyć jego konta.
 func (s *Store) UsuńUżytkownika(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ── sesje ────────────────────────────────────────────────────────────────────
@@ -230,7 +320,7 @@ func (s *Store) NowaSesja(ctx context.Context, userID int64) (string, time.Time,
 	token := base64.RawURLEncoding.EncodeToString(b)
 	wygasa := time.Now().Add(CzasSesji)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, token, userID, wygasa)
+		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, skrótTokenu(token), userID, wygasa)
 	return token, wygasa, err
 }
 
@@ -239,7 +329,7 @@ func (s *Store) Sesja(ctx context.Context, token string) (*Użytkownik, error) {
 	err := s.db.QueryRowContext(ctx, `
 SELECT u.id, u.login, u.created_at FROM sessions s
 JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, token).
+WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, skrótTokenu(token)).
 		Scan(&u.ID, &u.Login, &u.Utworzony)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrBrakUżytkow
@@ -248,7 +338,15 @@ WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`, token).
 }
 
 func (s *Store) UsuńSesję(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, skrótTokenu(token))
+	return err
+}
+
+// UsuńInneSesje kończy wszystkie sesje użytkownika poza wskazaną. Po zmianie
+// hasła ktoś, kto miał skradzione ciasteczko, nie może dalej siedzieć w panelu.
+func (s *Store) UsuńInneSesje(ctx context.Context, userID int64, zostaw string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND token <> ?`, userID, skrótTokenu(zostaw))
 	return err
 }
 
@@ -266,6 +364,34 @@ func (s *Store) ZapiszWynik(ctx context.Context, w Wynik) error {
 		`INSERT INTO checks (key, state, code, ms, err, at) VALUES (?, ?, ?, ?, ?, ?)`,
 		w.Klucz, w.Stan, w.Kod, w.MS, w.Błąd, w.Kiedy.UTC())
 	return err
+}
+
+// PrzenieśKlucze przepisuje historię sprawdzeń pod nowe klucze (stary → nowy)
+// w jednej transakcji: albo przenoszą się wszystkie wiersze, albo żaden.
+//
+// Klucz usługi to grupa+"/"+nazwa, więc zmiana nazwy i przeniesienie do innej
+// grupy zmieniają klucz. Bez tego karta po przeciągnięciu traciła cały 24-godzinny
+// pasek. Przyjmuje pary, a nie prefiks: nazwa grupy może zawierać „/", a pary
+// z configu są jednoznaczne. Jeśli pod nowym kluczem już coś leży, wiersze się
+// łączą — historia nie jest nigdy kasowana.
+func (s *Store) PrzenieśKlucze(ctx context.Context, pary map[string]string) error {
+	if len(pary) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for stary, nowy := range pary {
+		if stary == nowy {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE checks SET key = ? WHERE key = ?`, nowy, stary); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Historia zwraca ostatnie n wyników dla usługi, od najstarszego.

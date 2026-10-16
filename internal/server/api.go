@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/zatto-dev/shy-garlic/internal/dockerdisc"
 	"github.com/zatto-dev/shy-garlic/internal/gitrepo"
 	"github.com/zatto-dev/shy-garlic/internal/i18n"
+	"github.com/zatto-dev/shy-garlic/internal/notify"
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
 
@@ -39,6 +42,23 @@ func jsonBłąd(w http.ResponseWriter, kod int, msg string) {
 	jsonOdp(w, kod, odpBłąd{Błąd: msg})
 }
 
+// Limity ciała żądań JSON. Bez nich jeden POST na kilka GB kładł proces
+// (json.Decoder czyta do końca, a zalogowany to nie zawsze zaufany).
+const (
+	limitJSON    = 1 << 20 // 1 MiB — ciało każdego zwykłego żądania to kilkaset bajtów
+	limitConfigu = 2 << 20 // 2 MiB — PUT /api/config niesie cały YAML w JSON-ie
+)
+
+// dekodujJSON czyta ciało żądania do v, nie więcej niż limitJSON bajtów.
+func dekodujJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return dekodujJSONLimit(w, r, v, limitJSON)
+}
+
+func dekodujJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 // zEdycją otwiera plik, woła fn, pokazuje albo zapisuje zmianę.
 //
 // Z parametrem ?dry=1 nic nie zapisuje — zwraca diff, żeby użytkownik zobaczył
@@ -50,6 +70,23 @@ func jsonBłąd(w http.ResponseWriter, kod int, msg string) {
 // gicie, jeśli plik leży w repozytorium. Konflikt z ręczną edycją pliku kończy
 // się 409, nie cichym nadpisaniem.
 func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, fn func(*config.Document) error) bool {
+	return s.zEdycjąZKluczami(w, r, opis, nil, fn)
+}
+
+// zEdycjąZKluczami jak zEdycją, ale po udanym zapisie przenosi historię i stan
+// usług, których klucz (grupa/nazwa) się zmienił. migr dostaje config sprzed
+// zmiany i zwraca pary stary → nowy; nil = nic nie przenosimy.
+func (s *Server) zEdycjąZKluczami(w http.ResponseWriter, r *http.Request, opis string,
+	migr func(stara *config.Config) map[string]string, fn func(*config.Document) error) bool {
+	return s.zEdycjąOtwarciem(w, r, opis, migr, config.Open, fn)
+}
+
+// zEdycjąOtwarciem — jak zEdycjąZKluczami, ale z wyborem sposobu otwarcia pliku.
+// Edytor surowego YAML i przywracanie wersji używają config.OpenSurowy, żeby dało
+// się nimi naprawić plik, którego config.Open nie przyjmie.
+func (s *Server) zEdycjąOtwarciem(w http.ResponseWriter, r *http.Request, opis string,
+	migr func(stara *config.Config) map[string]string,
+	otwórz func(string) (*config.Document, error), fn func(*config.Document) error) bool {
 	s.edycja.Lock()
 	defer s.edycja.Unlock()
 
@@ -58,18 +95,24 @@ func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, f
 		jsonBłąd(w, http.StatusInternalServerError, "nie mogę przeczytać configu: "+err.Error())
 		return false
 	}
-	d, err := config.Open(s.path)
+	d, err := otwórz(s.path)
 	if err != nil {
 		jsonBłąd(w, http.StatusInternalServerError, "nie mogę otworzyć configu: "+err.Error())
 		return false
 	}
 	if err := fn(d); err != nil {
 		kod := http.StatusBadRequest
+		komunikat := err.Error()
 		switch {
 		case errors.Is(err, config.ErrServiceNotFound), errors.Is(err, config.ErrGroupNotFound):
 			kod = http.StatusNotFound
+		case errors.Is(err, config.ErrDuplikat):
+			kod = http.StatusConflict
+			komunikat = i18n.T(i18n.Wybierz(r), "blad_duplikat_nazwy")
+		case errors.Is(err, config.ErrPoleDziedziczone):
+			komunikat = i18n.T(i18n.Wybierz(r), "blad_pole_dziedziczone")
 		}
-		jsonBłąd(w, kod, err.Error())
+		jsonBłąd(w, kod, komunikat)
 		return false
 	}
 	if _, err := config.Load(d.Bytes()); err != nil {
@@ -85,6 +128,12 @@ func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, f
 			"dry": true, "diff": diff, "added": dodane, "removed": usunięte, "summary": opis,
 		})
 		return false
+	}
+
+	// nic się nie zmieniło (np. ruch w miejsce, w którym element już stoi):
+	// ani zapisu, ani wpisu w historii, ani commita
+	if bytes.Equal(przed, d.Bytes()) {
+		return true
 	}
 
 	if err := d.Save(); err != nil {
@@ -104,6 +153,15 @@ func (s *Server) zEdycją(w http.ResponseWriter, r *http.Request, opis string, f
 		slog.Error("historia configu", "err", err)
 	}
 	s.commitDoGita(r.Context(), opis, autor)
+
+	// ! po Save (YAML jest już na dysku), przed reload (który zapomina nieznane klucze)
+	if migr != nil {
+		var stara *config.Config
+		if c, err := config.Load(przed); err == nil {
+			stara = c
+		}
+		s.migrujKlucze(r.Context(), migr(stara))
+	}
 
 	if err := s.reload(s.ctx); err != nil {
 		slog.Error("przeładowanie po zapisie", "err", err)
@@ -139,6 +197,61 @@ type żądanieUsługi struct {
 	Expect   []int  `json:"expect,omitempty"`
 	Insecure bool   `json:"insecure,omitempty"`
 	Rozmiar  string `json:"size,omitempty"`
+	// Opis i Tagi to wskaźniki: nieobecne pole znaczy „nie ruszaj", obecne a
+	// puste — „usuń z pliku".
+	Opis *string   `json:"description,omitempty"`
+	Tagi *[]string `json:"tags,omitempty"`
+}
+
+// opisITagi sprawdza opcjonalny opis i tagi z żądania. Zwraca wartości po
+// normalizacji (nil = pole nie przyszło) albo klucz tekstu błędu.
+func (ż żądanieUsługi) opisITagi() (opis *string, tagi *[]string, błąd string) {
+	if ż.Opis != nil {
+		v, err := config.NormalizujOpis(*ż.Opis)
+		switch {
+		case errors.Is(err, config.ErrOpisDługi):
+			return nil, nil, "blad_opis_dlugi"
+		case err != nil:
+			return nil, nil, "blad_opis_znaki"
+		}
+		opis = &v
+	}
+	if ż.Tagi != nil {
+		v, err := config.NormalizujTagi(*ż.Tagi)
+		if err != nil {
+			return nil, nil, "blad_tagi"
+		}
+		tagi = &v
+	}
+	return opis, tagi, ""
+}
+
+// tagiDoJSON — pusta lista jako [], nie null; JS iteruje po niej bez sprawdzania.
+func tagiDoJSON(t config.Tagi) []string {
+	if len(t) == 0 {
+		return []string{}
+	}
+	return []string(t)
+}
+
+// usługaZConfigu zwraca usługę ze stanu w pamięci.
+func (s *Server) usługaZConfigu(grupa, nazwa string) (config.Service, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cfg == nil {
+		return config.Service{}, false
+	}
+	for _, g := range s.cfg.Groups {
+		if g.Name != grupa {
+			continue
+		}
+		for _, u := range g.Services {
+			if u.Name == nazwa {
+				return u, true
+			}
+		}
+	}
+	return config.Service{}, false
 }
 
 // rozmiarZŻądania przepuszcza wyłącznie allowlistę; puste zostaje puste, żeby
@@ -166,7 +279,7 @@ func poprawnaNazwaWpisu(v string) bool {
 
 func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	var ż żądanieUsługi
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -174,7 +287,22 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
 		return
 	}
+	if !config.PoprawnyAdresUsługi(ż.URL) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
+		return
+	}
+	nowyOpis, noweTagi, błąd := ż.opisITagi()
+	if błąd != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+		return
+	}
 	svc := config.Service{Name: ż.Nazwa, URL: ż.URL, Icon: ż.Ikona, Size: rozmiarZŻądania(ż.Rozmiar)}
+	if nowyOpis != nil {
+		svc.Description = *nowyOpis
+	}
+	if noweTagi != nil {
+		svc.Tags = config.Tagi(*noweTagi)
+	}
 	svc.Check = przeliczCheck(ż)
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_usluge"), ż.Nazwa, ż.Grupa)
@@ -202,7 +330,7 @@ func przeliczCheck(ż żądanieUsługi) config.Check {
 
 func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	var ż żądanieUsługi
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -210,13 +338,41 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "nazwa i grupa są wymagane")
 		return
 	}
-
 	lang := i18n.Wybierz(r)
+	if !config.PoprawnyAdresUsługi(ż.URL) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
+		return
+	}
+	nowyOpis, noweTagi, kluczBłędu := ż.opisITagi()
+	if kluczBłędu != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, kluczBłędu))
+		return
+	}
+	// wartość równa obecnej nie jest zmianą — nie ma co jej zapisywać, a przy
+	// polu odziedziczonym z merge-key zapis byłby niemożliwy
+	if bieżąca, ok := s.usługaZConfigu(ż.Grupa, ż.Nazwa); ok {
+		if nowyOpis != nil && *nowyOpis == bieżąca.Description {
+			nowyOpis = nil
+		}
+		if noweTagi != nil && slices.Equal(*noweTagi, []string(bieżąca.Tags)) {
+			noweTagi = nil
+		}
+	}
 	opis := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_usluge"), ż.Nazwa)
 	if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
 		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.NowaGrupa)
 	}
-	ok := s.zEdycją(w, r, opis, func(d *config.Document) error {
+	// ! pary liczone TERAZ — fn niżej nadpisuje ż.Grupa nową grupą
+	nowaGrupa, nowaNazwa := ż.Grupa, ż.Nazwa
+	if ż.NowaGrupa != "" {
+		nowaGrupa = ż.NowaGrupa
+	}
+	if ż.NowaNazwa != "" {
+		nowaNazwa = ż.NowaNazwa
+	}
+	pary := map[string]string{key(ż.Grupa, ż.Nazwa): key(nowaGrupa, nowaNazwa)}
+	migr := func(*config.Config) map[string]string { return pary }
+	ok := s.zEdycjąZKluczami(w, r, opis, migr, func(d *config.Document) error {
 		// przeniesienie idzie pierwsze — dalsze zmiany szukają usługi w nowej grupie
 		grupa := ż.Grupa
 		if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
@@ -240,6 +396,16 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		if rozmiar := rozmiarZŻądania(ż.Rozmiar); rozmiar != "" {
 			if err := d.SetServiceField(ż.Grupa, ż.Nazwa, "size", rozmiar); err != nil &&
 				!errors.Is(err, config.ErrPathNotFound) {
+				return err
+			}
+		}
+		if nowyOpis != nil {
+			if err := d.UstawOpisUsługi(ż.Grupa, ż.Nazwa, *nowyOpis); err != nil {
+				return err
+			}
+		}
+		if noweTagi != nil {
+			if err := d.UstawTagiUsługi(ż.Grupa, ż.Nazwa, *noweTagi); err != nil {
 				return err
 			}
 		}
@@ -269,13 +435,100 @@ func (s *Server) handleServiceDelete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleServiceMove ustawia usługę na konkretnej pozycji — w tej samej grupie
+// albo w innej. index liczy się w liście docelowej po przesunięciu.
+func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Grupa   string `json:"group"`
+		Nazwa   string `json:"name"`
+		DoGrupy string `json:"toGroup"`
+		Pozycja *int   `json:"index"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := dekodujJSON(w, r, &ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	if ż.DoGrupy == "" {
+		ż.DoGrupy = ż.Grupa
+	}
+	if !poprawnaNazwaWpisu(ż.Grupa) || !poprawnaNazwaWpisu(ż.Nazwa) ||
+		!poprawnaNazwaWpisu(ż.DoGrupy) || ż.Pozycja == nil {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_uslugi"), ż.Nazwa, ż.DoGrupy, *ż.Pozycja+1)
+	if ż.DoGrupy != ż.Grupa {
+		opis = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), ż.Nazwa, ż.Grupa, ż.DoGrupy)
+	}
+	pary := map[string]string{key(ż.Grupa, ż.Nazwa): key(ż.DoGrupy, ż.Nazwa)}
+	if s.zEdycjąZKluczami(w, r, opis, func(*config.Config) map[string]string { return pary },
+		func(d *config.Document) error {
+			return d.MoveServiceTo(ż.Grupa, ż.Nazwa, ż.DoGrupy, *ż.Pozycja)
+		}) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
+	}
+}
+
+// handleGroupMove ustawia całą grupę na pozycji index.
+func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Nazwa   string `json:"name"`
+		Pozycja *int   `json:"index"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := dekodujJSON(w, r, &ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	if !poprawnaNazwaWpisu(ż.Nazwa) || ż.Pozycja == nil {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_grupy"), ż.Nazwa, *ż.Pozycja+1)
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.MoveGroup(ż.Nazwa, *ż.Pozycja) }) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
+	}
+}
+
+// ── tytuł panelu ─────────────────────────────────────────────────────────────
+
+// handleTitlePut zapisuje top-level `title` jednym spliceem. Walidacja leży
+// po stronie serwera niezależnie od pola w przeglądarce.
+func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
+	var ż struct {
+		Tytuł string `json:"title"`
+	}
+	lang := i18n.Wybierz(r)
+	if err := dekodujJSON(w, r, &ż); err != nil {
+		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
+		return
+	}
+	tytuł, err := config.NormalizujTytuł(ż.Tytuł)
+	if err != nil {
+		klucz := "blad_tytul_znaki"
+		switch {
+		case errors.Is(err, config.ErrTytułPusty):
+			klucz = "blad_tytul_pusty"
+		case errors.Is(err, config.ErrTytułDługi):
+			klucz = "blad_tytul_dlugi"
+		}
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, klucz))
+		return
+	}
+	opis := fmt.Sprintf(i18n.T(lang, "opis_tytul"), tytuł)
+	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.UstawTytuł(tytuł) }) {
+		jsonOdp(w, http.StatusOK, map[string]any{"ok": true, "title": tytuł})
+	}
+}
+
 // ── grupy ────────────────────────────────────────────────────────────────────
 
 func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 	var ż struct {
 		Nazwa string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil || ż.Nazwa == "" {
+	if err := dekodujJSON(w, r, &ż); err != nil || ż.Nazwa == "" {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name")
 		return
 	}
@@ -290,12 +543,29 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		Nazwa     string `json:"name"`
 		NowaNazwa string `json:"newName"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil || ż.Nazwa == "" || ż.NowaNazwa == "" {
+	if err := dekodujJSON(w, r, &ż); err != nil || ż.Nazwa == "" || ż.NowaNazwa == "" {
 		jsonBłąd(w, http.StatusBadRequest, "podaj name i newName")
 		return
 	}
-	if s.zEdycją(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
-		func(d *config.Document) error { return d.RenameGroup(ż.Nazwa, ż.NowaNazwa) }) {
+	// każda usługa grupy zmienia klucz; pary z configu sprzed zmiany, bo nazwa
+	// grupy może zawierać „/" i prefiks byłby niejednoznaczny
+	migr := func(stara *config.Config) map[string]string {
+		pary := map[string]string{}
+		if stara == nil {
+			return pary
+		}
+		for _, g := range stara.Groups {
+			if g.Name != ż.Nazwa {
+				continue
+			}
+			for _, svc := range g.Services {
+				pary[key(g.Name, svc.Name)] = key(ż.NowaNazwa, svc.Name)
+			}
+		}
+		return pary
+	}
+	if s.zEdycjąZKluczami(w, r, fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_zmieniono_grupe"), ż.Nazwa, ż.NowaNazwa),
+		migr, func(d *config.Document) error { return d.RenameGroup(ż.Nazwa, ż.NowaNazwa) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -329,7 +599,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	var ż struct {
 		YAML string `json:"yaml"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSONLimit(w, r, &ż, limitConfigu); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -337,7 +607,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, "niepoprawny YAML: "+err.Error())
 		return
 	}
-	if s.zEdycją(w, r, i18n.T(i18n.Wybierz(r), "opis_reczna_edycja"),
+	if s.zEdycjąOtwarciem(w, r, i18n.T(i18n.Wybierz(r), "opis_reczna_edycja"), nil, config.OpenSurowy,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(ż.YAML)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -429,7 +699,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		Login string `json:"login"`
 		Hasło string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -468,7 +738,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		Stare string `json:"old"`
 		Nowe  string `json:"new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -484,6 +754,13 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.ZmieńHasło(r.Context(), ja.ID, ż.Nowe); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// ! Zmiana hasła musi wyrzucić resztę sesji. Ktoś z ukradzionym ciasteczkiem
+	// inaczej zostawał w panelu do końca 30 dni. Bieżąca sesja zostaje.
+	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
+		if err := s.st.UsuńInneSesje(r.Context(), ja.ID, c.Value); err != nil {
+			slog.Error("kończenie innych sesji po zmianie hasła", "err", err)
+		}
 	}
 	jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -548,7 +825,8 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_przywrocono"), v.ID, v.Opis)
-	if s.zEdycją(w, r, opis, func(d *config.Document) error { return d.ReplaceAll([]byte(v.Treść)) }) {
+	if s.zEdycjąOtwarciem(w, r, opis, nil, config.OpenSurowy,
+		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Treść)) }) {
 		jsonOdp(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
@@ -634,9 +912,10 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	jsonOdp(w, http.StatusOK, map[string]any{
 		"key": klucz, "name": svc.Name, "group": grupa, "url": svc.URL, "icon": svc.Icon,
 		"iconSrc": ikona.Src, "iconWariantCiemny": ikona.WariantCiemny, "iconWariantJasny": ikona.WariantJasny,
-		"size": svc.Size,
+		"size": svc.Size, "description": svc.Description, "tags": tagiDoJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
 		"expect": svc.Check.Expect, "insecure": svc.Check.Insecure,
+		"path": svc.Check.Path, "contains": svc.Check.Contains, "notContains": svc.Check.NotContains,
 		"now":     s.mon.Snapshot()[klucz],
 		"day":     statyJSON(doba),
 		"week":    statyJSON(tydzień),
@@ -693,56 +972,131 @@ func (s *Server) źródłoWebhooka() string {
 }
 
 func (s *Server) handleNotifyGet(w http.ResponseWriter, r *http.Request) {
+	formaty := make([]string, len(notify.Formaty))
+	for i, f := range notify.Formaty {
+		formaty[i] = string(f)
+	}
 	jsonOdp(w, http.StatusOK, map[string]any{
-		"wlaczony": s.powiad.Włączony(),
-		"webhook":  maskaWebhooka(s.powiad.Webhook()),
-		"zrodlo":   s.źródłoWebhooka(),
-		"prog":     s.powiad.Próg(),
+		"wlaczony":     s.powiad.Włączony(),
+		"webhook":      maskaWebhooka(s.powiad.Webhook()),
+		"zrodlo":       s.źródłoWebhooka(),
+		"format":       string(s.powiad.Format()),
+		"formatZrodlo": s.źródłoFormatu(r.Context()),
+		"formaty":      formaty,
+		"prog":         s.powiad.Próg(),
 	})
 }
 
-// handleNotifyPut pisze do DWÓCH warstw naraz: adres do SQLite (bo jest
-// sekretem, a plik configu jest commitowany), próg do YAML-a (bo nie jest).
-// To jedyne miejsce, gdzie podział warstw przecieka do API — alternatywą były
-// dwie trasy i obsługa połowicznego niepowodzenia po stronie UI.
+func (s *Server) źródłoFormatu(ctx context.Context) string {
+	if s.formatZeŚrodowiska {
+		return "srodowisko"
+	}
+	if v, err := s.st.Ustawienie(ctx, "notify.format"); err == nil && v != "" {
+		return "baza"
+	}
+	return "domyslny"
+}
+
+// klucz tekstu błędu dla adresu, który nie pasuje do formatu
+func błądAdresuFormatu(err error) string {
+	switch {
+	case errors.Is(err, notify.ErrAdresTelegram):
+		return "webhook_adres_telegram"
+	case errors.Is(err, notify.ErrAdresGotify):
+		return "webhook_adres_gotify"
+	}
+	return "webhook_zly_adres"
+}
+
+// handleNotifyPut pisze do DWÓCH warstw naraz: adres i format do SQLite (adres
+// jest sekretem, a plik configu jest commitowany), próg do YAML-a (bo nie
+// jest). To jedyne miejsce, gdzie podział warstw przecieka do API —
+// alternatywą były dwie trasy i obsługa połowicznego niepowodzenia po stronie UI.
+//
+// Najpierw walidacja WSZYSTKIEGO, potem zapis: odrzucone żądanie nie zostawia
+// po sobie połowy zmian.
 func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.Wybierz(r)
 	var ż struct {
 		Webhook *string `json:"webhook"`
+		Format  *string `json:"format"`
 		Próg    *int    `json:"prog"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
 
-	if ż.Webhook != nil {
-		if s.webhookZeŚrodowiska {
-			jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_ze_srodowiska"))
+	if ż.Webhook != nil && s.webhookZeŚrodowiska {
+		jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_ze_srodowiska"))
+		return
+	}
+	if ż.Format != nil {
+		if s.formatZeŚrodowiska {
+			jsonBłąd(w, http.StatusConflict, i18n.T(lang, "webhook_format_ze_srodowiska"))
 			return
 		}
-		adres := strings.TrimSpace(*ż.Webhook)
+		if !notify.PoprawnyFormat(*ż.Format) {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_format"))
+			return
+		}
+	}
+	adres := ""
+	if ż.Webhook != nil {
+		adres = strings.TrimSpace(*ż.Webhook)
 		if adres != "" {
-			// ! Tylko https. Sekret jedzie w ścieżce adresu, więc po http
-			// poszedłby otwartym tekstem.
+			// ! Tylko https, w każdym formacie. Sekret jedzie w adresie (ścieżka
+			// albo query), więc po http poszedłby otwartym tekstem. Operator, który
+			// naprawdę chce http w LAN-ie (ntfy, Gotify), ustawia adres przez
+			// SHYG_WEBHOOK — tam wybór należy do deployu, nie do kliknięcia.
 			u, err := url.Parse(adres)
 			if err != nil || u.Scheme != "https" || u.Host == "" {
 				jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_adres"))
 				return
 			}
 		}
+	}
+	if ż.Próg != nil && (*ż.Próg < 1 || *ż.Próg > 10) {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_prog"))
+		return
+	}
+	// adres musi pasować do formatu — sprawdzamy parę w stanie, w jakim zostanie
+	// po zapisie, także gdy zmienia się tylko jedno z dwojga
+	if ż.Webhook != nil || ż.Format != nil {
+		format := s.powiad.Format()
+		if ż.Format != nil {
+			format = notify.Format(*ż.Format)
+		}
+		efektywny := s.powiad.Webhook()
+		if ż.Webhook != nil {
+			efektywny = adres
+		}
+		if err := notify.SprawdźAdres(format, efektywny); err != nil {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, błądAdresuFormatu(err)))
+			return
+		}
+	}
+
+	if ż.Webhook != nil {
 		if err := s.st.UstawUstawienie(r.Context(), "notify.webhook", adres); err != nil {
 			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		s.powiad.UstawWebhook(adres)
 	}
-
-	if ż.Próg != nil {
-		if *ż.Próg < 1 || *ż.Próg > 10 {
-			jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_prog"))
+	if ż.Format != nil {
+		zapis := *ż.Format
+		if zapis == string(notify.FormatDiscord) {
+			zapis = "" // domyślny nie leży w bazie
+		}
+		if err := s.st.UstawUstawienie(r.Context(), "notify.format", zapis); err != nil {
+			jsonBłąd(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.powiad.UstawFormat(notify.Format(*ż.Format))
+	}
+
+	if ż.Próg != nil {
 		if !s.zEdycją(w, r, "próg powiadomień", func(d *config.Document) error {
 			return d.UstawPrógPowiadomień(*ż.Próg)
 		}) {
@@ -872,7 +1226,7 @@ type żądanieWyglądu struct {
 func (s *Server) handleWyglądPut(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.Wybierz(r)
 	var ż żądanieWyglądu
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
@@ -1050,13 +1404,23 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		Grupa  string          `json:"group"`
 		Usługi []żądanieUsługi `json:"services"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&ż); err != nil {
+	if err := dekodujJSON(w, r, &ż); err != nil {
 		jsonBłąd(w, http.StatusBadRequest, "zły JSON")
 		return
 	}
 	if len(ż.Usługi) == 0 {
 		jsonBłąd(w, http.StatusBadRequest, "pusta lista")
 		return
+	}
+	for _, u := range ż.Usługi {
+		if !config.PoprawnyAdresUsługi(u.URL) {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), "blad_adres_uslugi"))
+			return
+		}
+		if _, _, błąd := u.opisITagi(); błąd != "" {
+			jsonBłąd(w, http.StatusBadRequest, i18n.T(i18n.Wybierz(r), błąd))
+			return
+		}
 	}
 
 	opis := fmt.Sprintf(i18n.T(i18n.Wybierz(r), "opis_dodano_wiele"), len(ż.Usługi), ż.Grupa)
@@ -1068,6 +1432,13 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			}
 			svc := config.Service{Name: u.Nazwa, URL: u.URL, Icon: u.Ikona,
 				Size: rozmiarZŻądania(u.Rozmiar)}
+			opis, tagi, _ := u.opisITagi() // błędy sprawdzone wyżej
+			if opis != nil {
+				svc.Description = *opis
+			}
+			if tagi != nil {
+				svc.Tags = config.Tagi(*tagi)
+			}
 			svc.Check = przeliczCheck(u)
 			if err := d.AddService(grupa, svc); err != nil {
 				return fmt.Errorf("%s: %w", u.Nazwa, err)

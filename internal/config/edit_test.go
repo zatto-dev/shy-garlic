@@ -365,3 +365,31 @@ func TestDodajWyglądNiesieDim(t *testing.T) {
 		t.Fatalf("chcę dim 20, mam %d — plik:\n%s", c.Appearance.Background.Dim, d.Bytes())
 	}
 }
+
+func TestSetServiceFieldNazwaOdrzucaDuplikat(t *testing.T) {
+	d, err := Parse([]byte(ruchSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	przed := string(d.Bytes())
+	if err := d.SetServiceField("Media", "A", "name", "B"); !errors.Is(err, ErrDuplikat) {
+		t.Fatalf("err = %v, chcę ErrDuplikat", err)
+	}
+	if string(d.Bytes()) != przed {
+		t.Error("odrzucona zmiana nazwy zmieniła plik")
+	}
+	// ta sama nazwa w INNEJ grupie jest dozwolona, a rename na własną nazwę to no-op
+	if err := d.SetServiceField("Media", "A", "name", "D"); err != nil {
+		t.Errorf("nazwa z innej grupy: %v", err)
+	}
+	if err := d.SetServiceField("Media", "B", "name", "B"); err != nil {
+		t.Errorf("rename na siebie: %v", err)
+	}
+}
+
+func TestRenameGroupDuplikatToErrDuplikat(t *testing.T) {
+	d, _ := Parse([]byte(ruchSrc))
+	if err := d.RenameGroup("Media", "Sieć"); !errors.Is(err, ErrDuplikat) {
+		t.Fatalf("err = %v, chcę ErrDuplikat", err)
+	}
+}

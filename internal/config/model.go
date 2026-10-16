@@ -142,8 +142,13 @@ type Service struct {
 	URL  string `yaml:"url"`
 	Icon string `yaml:"icon"`
 	// Size — rozmiar kafla w widoku bento; puste znaczy DomyślnyRozmiar.
-	Size  string `yaml:"size"`
-	Check Check  `yaml:"check"`
+	Size string `yaml:"size"`
+	// Description — jedna linia pod nazwą kafla (opcjonalna). Dziedziczy się
+	// przez merge-key jak każde inne pole.
+	Description string `yaml:"description"`
+	// Tags — etykiety do wyszukiwania i filtrowania; małe chipy w widoku listy.
+	Tags  Tagi  `yaml:"tags"`
+	Check Check `yaml:"check"`
 }
 
 // Check — semantyka heartbeatu pojedynczej usługi.
@@ -154,4 +159,16 @@ type Check struct {
 	// Insecure — homelab często stoi na samopodpisanym certyfikacie
 	// (Proxmox, iDRAC, NAS-y). Bez tego panel pokazywałby fałszywe "down".
 	Insecure bool `yaml:"insecure"`
+
+	// Kontrola treści (SHYG-48), tylko http(s).
+	//
+	// Path zastępuje ścieżkę (i query) z `url` TYLKO na czas sprawdzania —
+	// schemat, host i port zostają. Odpowiednik „użyj /healthz zamiast strony
+	// głównej". Musi zaczynać się od `/`.
+	Path string `yaml:"path"`
+	// Contains — tekst, który musi być w pierwszym 1 MiB odpowiedzi; Not… —
+	// którego nie może być. Niezgodność to stan `degraded` (serwer żyje, ale
+	// odpowiada czymś innym), nie `down`.
+	Contains    string `yaml:"contains"`
+	NotContains string `yaml:"not_contains"`
 }

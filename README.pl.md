@@ -85,7 +85,10 @@ Jedna linia zmieniona, trzy dodane, zero szkód ubocznych.
 Edytor cudzego pliku działa tylko wtedy, gdy ktoś mu ufa. Dlatego panel nigdy nie
 zapisuje niczego, czego wcześniej nie zobaczysz: każda akcja — dodanie usługi,
 zmiana nazwy grupy, edycja surowego YAML-a, zmiana wyglądu instancji — pokazuje
-dokładny diff i czeka na potwierdzenie.
+dokładny diff i czeka na potwierdzenie. Wyjątek to dwa szybkie gesty: zmiana
+tytułu w miejscu i przeciąganie w nową kolejność działają od razu, bo okno
+potwierdzenia po każdym upuszczeniu czyniłoby je bezużytecznymi. Idą tym samym
+silnikiem, trafiają do historii wersji i są o jedno kliknięcie od cofnięcia.
 
 Pod spodem są jeszcze dwa zabezpieczenia:
 
@@ -129,6 +132,12 @@ gdy nikt nie ma otwartej karty w przeglądarce.
   Dla daltonistów sam kolor to za mało.
 - `insecure: true` dla samopodpisanych certyfikatów, bo w homelabie stoją
   wszędzie, a Proxmox nie jest martwy tylko dlatego, że nikt nie kupił mu certu.
+- **Strona, która odpowiada 200, nadal może być zła.** `check.contains` i
+  `check.not_contains` zaglądają do odpowiedzi (pierwszy 1 MiB), a `check.path`
+  pyta endpoint zdrowia zamiast strony głównej. Gdy kod jest dobry, a treść nie
+  — domyślna strona nginxa zamiast aplikacji, baner „prace serwisowe" — usługa
+  robi się **pomarańczowa (`degraded`)**, z powodem w oknie szczegółów: serwer
+  żyje, tylko nie mówi tego, co trzeba.
 
 ## Każda usługa ma swoją historię
 
@@ -183,8 +192,9 @@ labels:
 
 ## Kiedy coś padnie
 
-Ustaw webhooka Discorda (albo cokolwiek innego, co przyjmuje JSON) i dostajesz
-jedno zdanie, gdy usługa padnie, i jedno, gdy wróci. Nic poza tym.
+Ustaw webhooka — Discord, Slack, ntfy, Gotify, Telegram albo dowolny adres
+przyjmujący JSON — i dostajesz jedną krótką wiadomość, gdy usługa padnie, i
+jedną, gdy wróci. Nic poza tym.
 
 To świadomie **nie jest** alerting: bez eskalacji, harmonogramów, reguł i okien
 ciszy. Kto chce prawdziwego alertingu, niech postawi Uptime Kumę — nie zamierzamy
@@ -200,6 +210,45 @@ Dwa szczegóły, które mają znaczenie w praktyce:
   Ustawisz go w Ustawienia → Powiadomienia albo zmienną `SHYG_WEBHOOK`, jeśli
   deploy zarządza swoimi sekretami sam — wartość ze środowiska wygrywa, żeby
   restart kontenera nie cofał po cichu zmiany zrobionej w panelu.
+- **Wiadomości idą w tle**, po jednej kolejce na usługę, więc wolny albo martwy
+  webhook nigdy nie wstrzymuje historii sprawdzeń. Wiadomość, której nie udało się
+  dostarczyć (trzy próby), nie jest uznana za zgłoszoną i wychodzi ponownie przy
+  następnym sprawdzeniu.
+
+### Formaty wiadomości
+
+Format wybierasz w Ustawienia → Powiadomienia albo zmienną `SHYG_WEBHOOK_FORMAT` /
+flagą `--webhook-format` (środowisko wygrywa z panelem, dokładnie jak adres).
+Format leży w bazie obok adresu.
+
+| Format     | Adres, który wpisujesz                                           | Co wychodzi                                                                  |
+| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | embed z kolorowym paskiem (domyślny)                                         |
+| `slack`    | `https://hooks.slack.com/services/…` (także Mattermost, Rocket.Chat) | `{"text": "…"}`                                                          |
+| `ntfy`     | `https://ntfy.sh/<temat>` albo Twój serwer                       | ciało tekstowe, nagłówki `Title`, `Priority` (`high` dla awarii), `Tags`, `Click` |
+| `gotify`   | `https://<host>/message?token=<TOKEN_APLIKACJI>`                 | `{"title", "message", "priority"}` (awaria = 8)                              |
+| `telegram` | `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>` | `{"text": "…"}`, bez parsowania Markdowna; id czatu jedzie w adresie       |
+| `generic`  | dowolny adres https                                              | JSON poniżej                                                                 |
+
+`generic` to stabilny kontrakt — pola nigdy nie zmieniają nazw:
+
+```json
+{"event": "down", "service": "Jellyfin", "group": "Media", "state": "down",
+ "previous": "up", "reason": "connection refused",
+ "at": "2026-10-16T12:30:00Z", "url": "http://192.168.1.30:8096"}
+```
+
+`event` to `down`, `degraded`, `recovered` albo `test`; `state` to nowy stan, a
+`previous` — ostatni zgłoszony (`up`, `degraded` lub `down`); `reason` jest pusty
+dla `recovered`. Dane logowania do ntfy mogą siedzieć w adresie
+(`https://user:hasło@ntfy.example/temat`).
+
+Przycisk **Wyślij wiadomość próbną** działa w każdym formacie. Adresy są
+maskowane w API i w panelu (tylko schemat i host), a nieudany test nigdy nie
+odsyła adresu w komunikacie — siedzą w nim tokeny botów. Panel przyjmuje wyłącznie
+adresy `https://`; jeśli Twój ntfy albo Gotify stoi na zwykłym `http` w LAN-ie,
+podaj adres przez deploy: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerty`
+`SHYG_WEBHOOK_FORMAT=ntfy` — tam wybór należy do tego, kto uruchamia.
 
 ## Instalacja
 
@@ -292,7 +341,7 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
 **Zwykły kubectl** (kustomize, przypięty do taga wydania):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.12.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.0"
 ```
 
 Potem wejdź do panelu i załóż administratora przy pierwszej wizycie (zob.
@@ -393,6 +442,11 @@ diff. Interfejs mówi po angielsku i po polsku, przełączasz w nagłówku.
 | `1` `2` `3` | widok grid, bento, lista        |
 | `Esc`       | zamknij, potem wyczyść filtr    |
 
+W trybie edycji przeciągnij uchwyt na karcie albo nagłówku grupy, żeby zmienić
+kolejność (mysz lub dotyk; `Esc` anuluje). Z klawiatury: fokus na uchwycie i
+`Alt`+`↑`/`↓` — nową pozycję odczyta czytnik ekranu. Ołówek przy tytule edytuje
+go w miejscu: `Enter` albo wyjście z pola zapisuje, `Esc` anuluje.
+
 ## Konfiguracja
 
 ```yaml
@@ -422,6 +476,8 @@ groups:
         url: http://jellyfin.home.arpa:8096
         icon: jellyfin
         size: lg      # sm | md | lg — rozmiar kafla w widoku bento
+        description: Filmy i muzyka     # pod nazwą, też wyszukiwany
+        tags: [media, rodzina]          # lista; wyszukiwana, chipy w widoku listy
         <<: *defaults
 
   - name: Zarządzanie
@@ -433,7 +489,19 @@ groups:
           interval: 30s
           expect: [200, 401]
           insecure: true    # samopodpisany certyfikat, tak ma być
+
+      - name: Grafana
+        url: http://grafana.home.arpa:3000
+        check:
+          path: /api/health               # pytane zamiast strony głównej
+          contains: '"database": "ok"'    # inna treść → degraded
 ```
+
+Kontrola treści działa na odpowiedziach, których kod jest w `expect`; zły kod to
+`HTTP <kod>` bez czytania ciała. Przekierowania nie są śledzone, więc wskaż w
+`path` adres docelowy. Przeszukiwany jest tylko pierwszy 1 MiB. `check.path` nigdy
+nie zmienia hosta: podmienia ścieżkę i query z `url`, a `url` zostaje tym, do
+czego prowadzi karta.
 
 | Pole                           | Znaczenie                                              | Domyślnie                    |
 | ------------------------------ | ------------------------------------------------------ | ---------------------------- |
@@ -443,6 +511,8 @@ groups:
 | `services[].url`               | adres; `http://`, `https://` albo `tcp://host:port`     | wymagane                     |
 | `services[].icon`              | nazwa z katalogu ikon albo pełny adres URL              | litera z nazwy               |
 | `services[].size`              | rozmiar kafla w widoku bento: `sm`, `md`, `lg`          | `md`                         |
+| `services[].description`       | jedna linia pod nazwą; też wyszukiwana (maks. 200 znaków) | —                          |
+| `services[].tags`              | lista etykiet, wyszukiwana; chipy w widoku listy (maks. 12×32) | —                     |
 | `appearance.background.preset` | `aurora`, `nebula`, `graphite`, `dawn`, `fog`, `photo`  | `aurora`                     |
 | `appearance.background.image`  | nazwa pliku z `/bg/`, tylko przy `preset: photo`        | —                            |
 | `appearance.background.blur`   | rozmycie tapety w px, `0`–`30`                          | `10`                         |
@@ -453,6 +523,9 @@ groups:
 | `check.timeout`                | ile czekać na odpowiedź                                 | `5s`                         |
 | `check.expect`                 | kody uznawane za „żyje"                                 | `[200, 301, 302, 401, 403]`  |
 | `check.insecure`               | ignoruj błędy certyfikatu                               | `false`                      |
+| `check.path`                   | ścieżka (i query) pytana zamiast tej z `url`; zaczyna się od `/`, ten sam host | —                    |
+| `check.contains`               | tekst, który musi być w pierwszym 1 MiB odpowiedzi; inaczej `degraded` | —                   |
+| `check.not_contains`           | tekst, którego nie może tam być; inaczej `degraded`     | —                            |
 | `notify.threshold`             | ile nieudanych sprawdzeń z rzędu, zanim powiadomimy     | `2`                          |
 | `discovery.docker`             | podpowiadaj usługi z kontenerów                         | włączone, jeśli jest gniazdo |
 
@@ -463,9 +536,9 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 
 | Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
 | Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
-| Baza SQLite                  | adres webhooka, konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
+| Baza SQLite                  | adres i format webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
 | Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
 
 Każda flaga ma odpowiednik w zmiennej środowiskowej z przedrostkiem `SHYG_`
@@ -490,15 +563,111 @@ Nie ma uprawnień per użytkownik: każde konto może wszystko. Przed czym panel
 broni, a przed czym nie, i jak zakłada, że go wdrożysz, spisane jest w
 [SECURITY.md](SECURITY.md) — przeczytaj, zanim wystawisz to szerzej niż na LAN.
 
+## Metryki i tokeny API tylko do odczytu
+
+Shy Garlic potrafi karmić Twój istniejący monitoring. **Ustawienia → Instancja →
+Tokeny API** tworzy token (`shyg_…`, 256 bitów losowości) z wybraną nazwą.
+Pokazujemy go raz, z przyciskiem „Kopiuj", a w bazie leży tylko jego skrót
+SHA-256 — jeśli go zgubisz, odwołaj go i utwórz nowy.
+
+Token jest **tylko do odczytu z konstrukcji**: nagłówek `Authorization: Bearer
+shyg_…` jest honorowany wyłącznie dla `GET` na trzech trasach — `/metrics`,
+`/api/status` i `/api/history`. Wszędzie indziej jest ignorowany i trasa żąda
+sesji, więc token wyciekły z Prometheusa nie zmieni configu, nie założy konta i
+nie wystawi kolejnego tokenu. Żądanie bez ważnego tokenu dostaje `401`, nigdy
+przekierowanie na logowanie. Nieudane próby są limitowane per adres, a w logu
+pojawiają się raz na minutę na adres.
+
+```sh
+# szybki podgląd; token w pliku, nie w historii powłoki
+curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/shyg.token)" \
+  https://garlic.home.arpa/metrics
+```
+
+### Prometheus
+
+```yaml
+scrape_configs:
+  - job_name: shy-garlic
+    scrape_interval: 30s
+    scheme: https
+    authorization:                                # Prometheus 2.26+
+      type: Bearer
+      credentials_file: /etc/prometheus/shyg.token
+    # starsze wersje: bearer_token_file: /etc/prometheus/shyg.token
+    static_configs:
+      - targets: ["garlic.home.arpa"]
+```
+
+| Metryka                                        | Znaczenie                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `shyg_service_up`                              | `1`, gdy ostatnie sprawdzenie się udało; `0` dla degraded i down          |
+| `shyg_service_degraded`                        | `1`, gdy odpowiada, ale złym kodem albo złą treścią                       |
+| `shyg_service_response_seconds`                | czas odpowiedzi ostatniego sprawdzenia; brak, gdy nic nie odpowiedziało   |
+| `shyg_service_availability_ratio{window="24h"}` | odsetek udanych sprawdzeń w 24 godzinach, `0`–`1`                         |
+| `shyg_service_last_check_timestamp_seconds`    | czas Unix ostatniego sprawdzenia                                          |
+| `shyg_build_info{version}`                     | zawsze `1`                                                                |
+
+Wszystkie metryki usług mają etykiety `group` i `service`. Usługa, której jeszcze
+nie sprawdzono (albo bez adresu), **nie ma żadnej serii** — `0` czytałoby się
+jako „leży" i budziło bez powodu. Alert, który odpala się tylko przy prawdziwej
+awarii: `shyg_service_up == 0 and shyg_service_degraded == 0`.
+
+Gotowy dashboard — liczniki up/degraded/down, tabela dostępności z 24 godzin,
+czasy odpowiedzi i oś stanów per usługa — leży w
+[`deploy/grafana/shy-garlic.json`](deploy/grafana/shy-garlic.json). W Grafanie:
+Dashboards → New → Import → wgraj plik i wskaż swoje źródło Prometheus.
+
+### Bez tokenu, z własnej sieci
+
+Domyślnie `/metrics` wymaga tokenu. Jeśli Prometheus stoi w zaufanej sieci i
+wolisz nie zarządzać tokenem, wymień tę sieć:
+
+```sh
+shyg serve --metrics-allow 192.168.0.0/24          # albo SHYG_METRICS_ALLOW=192.168.0.0/24,fd00::/8
+```
+
+To otwiera **wyłącznie** `GET /metrics` i tylko dla tych adresów. Za reverse
+proxy ustaw też `--trusted-proxy`: adres klienta jest wtedy brany z
+`X-Forwarded-For` jako skrajnie prawy wpis, który nie jest zaufanym proxy
+(wpisy z lewej pisze klient). Żądanie z nagłówkami proxy od peera, którego
+**nie** wpisano jako zaufane proxy, jest odrzucane — inaczej proxy stojące w
+Twoim LAN-ie pozwalałoby czytać metryki całemu internetowi. Z tego samego
+powodu zaufane proxy, które w ogóle **nie** wysyła `X-Forwarded-For`, jest przez
+`--metrics-allow` odrzucane (każde żądanie wyglądałoby jak adres samego proxy):
+nie używaj `--metrics-allow` za forwarderami L4 ani proxy, które nie dopisuje
+`X-Forwarded-For` (np. nginx skonfigurowany tylko z `X-Real-IP`). Tam używaj
+tokenu; tokeny działają dalej.
+
+### Home Assistant
+
+```yaml
+# configuration.yaml — w secrets.yaml:  shyg_authorization: "Bearer shyg_…"
+rest:
+  - resource: https://garlic.home.arpa/api/status
+    scan_interval: 60
+    headers:
+      Authorization: !secret shyg_authorization
+    sensor:
+      - name: "Garlic: usługi nie-up"
+        value_template: "{{ value_json.values() | rejectattr('state', 'equalto', 'up') | list | length }}"
+    binary_sensor:
+      - name: "Jellyfin działa"
+        device_class: connectivity
+        value_template: "{{ value_json['Media/Jellyfin'].state == 'up' }}"
+```
+
 ## API
 
-Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
+Wszystko za sesją — z wyjątkiem `/api/status`, `/api/history` i `/metrics`, które
+przyjmują też [token tylko do odczytu](#metryki-i-tokeny-api-tylko-do-odczytu).
+Panel używa dokładnie tych samych endpointów co Ty.
 
 | Metoda   | Ścieżka                          | Co robi                                                |
 | -------- | -------------------------------- | ------------------------------------------------------ |
-| `GET`    | `/api/status`                    | aktualny stan wszystkich usług                          |
+| `GET`    | `/api/status`                    | aktualny stan wszystkich usług (sesja albo token API)   |
 | `GET`    | `/events`                        | strumień SSE ze zmianami stanu                          |
-| `GET`    | `/api/history?key=Grupa/Usługa`  | historia sprawdzeń i dostępność 24 h                    |
+| `GET`    | `/api/history?key=Grupa/Usługa`  | historia sprawdzeń i dostępność 24 h (sesja albo token) |
 | `GET`    | `/api/service?key=Grupa/Usługa`  | wszystko o jednej usłudze: staty, wykres, zmiany stanu  |
 | `POST`   | `/api/check?key=Grupa/Usługa`    | sprawdź tę usługę natychmiast                           |
 | `GET`    | `/api/info`                      | co ta instancja ma włączone                             |
@@ -510,6 +679,9 @@ Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
 | `POST`   | `/api/services`                  | dodaj usługę                                            |
 | `PATCH`  | `/api/services`                  | zmień usługę                                            |
 | `DELETE` | `/api/services?group=…&name=…`   | usuń usługę                                             |
+| `POST`   | `/api/services/move`             | przenieś usługę na pozycję, w grupie lub między grupami |
+| `POST`   | `/api/groups/move`               | przenieś grupę na pozycję                               |
+| `PUT`    | `/api/title`                     | zmień tytuł panelu                                      |
 | `POST`   | `/api/services/bulk`             | dodaj wiele usług jako jedną zmianę                     |
 | `POST`   | `/api/groups`                    | dodaj grupę                                             |
 | `PATCH`  | `/api/groups`                    | zmień nazwę grupy                                       |
@@ -519,12 +691,16 @@ Wszystko za sesją. Panel używa dokładnie tych samych endpointów co Ty.
 | `GET`    | `/api/appearance`                | domyślny wygląd instancji                               |
 | `PUT`    | `/api/appearance`                | zmiana wyglądu (przez diff, jak każda edycja)           |
 | `GET`    | `/api/notify`                    | ustawienia powiadomień, bez adresu                      |
-| `PUT`    | `/api/notify`                    | ustaw adres webhooka                                    |
+| `PUT`    | `/api/notify`                    | ustaw adres webhooka, format wiadomości i próg           |
 | `POST`   | `/api/notify/test`               | wyślij wiadomość testową                                |
 | `POST`   | `/api/background`                | wgraj tapetę (multipart `file`)                         |
 | `GET`    | `/api/background`                | lista wgranych tapet                                    |
 | `DELETE` | `/api/background/{nazwa}`        | usuń tapetę (`409`, gdy jest w użyciu)                  |
 | `GET`    | `/bg/{nazwa}`                    | serwowanie tapety — tylko dla zalogowanych              |
+| `GET`    | `/metrics`                       | metryki Prometheusa — sesja albo token API              |
+| `GET`    | `/api/tokens`                    | lista tokenów API (nigdy sam sekret)                    |
+| `POST`   | `/api/tokens`                    | utwórz token; sekret tylko w tej jednej odpowiedzi      |
+| `DELETE` | `/api/tokens/{id}`               | odwołaj token                                           |
 | `GET`    | `/healthz`                       | liveness, jedyna trasa bez sesji                        |
 
 Zarządzanie kontami (`/api/users`, `/api/password`) działa na tych samych

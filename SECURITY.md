@@ -37,6 +37,16 @@ Knowing where the boundary is drawn saves everyone time.
   a client forge its own address, which affects both the log and the sign-in
   rate limit. It is deliberately a start-up flag and not something the panel
   can change about itself.
+- **API tokens are read-only and live in the database.** A token (`shyg_…`) is
+  honoured only for `GET` on `/metrics`, `/api/status` and `/api/history`; every
+  other route ignores it and requires a session. The database stores a SHA-256
+  hash, never the token. `--metrics-allow` lets listed networks read `/metrics`
+  without a token — use it only for networks you trust, and set
+  `--trusted-proxy` when a proxy sits in front (the address is then the
+  right-most `X-Forwarded-For` entry that is not a trusted proxy; a request
+  with proxy headers from an unlisted peer is refused, and so is a trusted
+  proxy that sends no `X-Forwarded-For`). Do not use `--metrics-allow` behind
+  L4 forwarders or proxies that do not append `X-Forwarded-For`; use a token.
 - **The Docker socket is read-only by design.** The bundled compose file puts
   a socket proxy in front of it with `POST` disabled, so discovery can list
   containers and nothing else. Handing the panel the bare socket gives it the
@@ -53,5 +63,12 @@ Knowing where the boundary is drawn saves everyone time.
 
 - No external security review has been carried out. That is the reason the
   version number still starts with a zero.
-- There is no rate limit on the API beyond sign-in.
-- Sessions are not invalidated when a password changes.
+- There is no rate limit on the API beyond sign-in and failed API tokens.
+- Sign-in has a global cap of 30 failed attempts per minute on top of the
+  per-address limit (IPv6 counted per /64). An attacker spread over many
+  addresses can keep that cap tripped and so block new sign-ins, including the
+  owner's; existing sessions and API tokens keep working.
+- Changing a password signs out every other session of that account (the one
+  you are using stays). API tokens are **not** revoked on a password change;
+  revoke them under API tokens. Deleting an account does revoke the tokens it
+  issued.
