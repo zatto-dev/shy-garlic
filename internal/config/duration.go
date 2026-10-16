@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,12 +15,20 @@ type Duration time.Duration
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 func (d Duration) String() string          { return time.Duration(d).String() }
 
-func (d *Duration) UnmarshalYAML(b []byte) error {
-	s := string(b)
-	// goccy podaje surowy skalar; zdejmij cudzysłowy jeśli są
-	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
-		s = s[1 : len(s)-1]
+// UnmarshalYAML bierze wartość przez dekoder, a nie surowe bajty: goccy podaje
+// w bajtach skalar RAZEM z komentarzem z końca linii, więc `interval: 1m  # x`
+// nie przechodził ParseDuration i kończył jako 1s z gałęzi „gołe sekundy".
+func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var s string
+	if err := unmarshal(&s); err != nil {
+		var secs float64
+		if err := unmarshal(&secs); err != nil {
+			return err
+		}
+		*d = Duration(time.Duration(secs * float64(time.Second)))
+		return nil
 	}
+	s = strings.TrimSpace(s)
 	if s == "" || s == "null" {
 		*d = 0
 		return nil
@@ -28,12 +38,12 @@ func (d *Duration) UnmarshalYAML(b []byte) error {
 		return nil
 	}
 	// gołe sekundy: `interval: 30`
-	var secs float64
-	if _, err := fmt.Sscanf(s, "%g", &secs); err == nil {
-		*d = Duration(time.Duration(secs * float64(time.Second)))
-		return nil
+	secs, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q", s)
 	}
-	return fmt.Errorf("invalid duration %q", s)
+	*d = Duration(time.Duration(secs * float64(time.Second)))
+	return nil
 }
 
 func (d Duration) MarshalYAML() ([]byte, error) {

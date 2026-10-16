@@ -186,17 +186,19 @@ func (s *Server) commitDoGita(ctx context.Context, opis, autor string) {
 // ── usługi ───────────────────────────────────────────────────────────────────
 
 type żądanieUsługi struct {
-	Grupa      string `json:"group"`
-	NowaGrupa  string `json:"newGroup,omitempty"`
-	Nazwa    string `json:"name"`
+	Grupa     string `json:"group"`
+	NowaGrupa string `json:"newGroup,omitempty"`
+	Nazwa     string `json:"name"`
 	NowaNazwa string `json:"newName,omitempty"`
-	URL      string `json:"url"`
-	Ikona    string `json:"icon"`
-	Interval string `json:"interval,omitempty"`
-	Timeout  string `json:"timeout,omitempty"`
-	Expect   []int  `json:"expect,omitempty"`
-	Insecure bool   `json:"insecure,omitempty"`
-	Rozmiar  string `json:"size,omitempty"`
+	URL       string `json:"url"`
+	Ikona     string `json:"icon"`
+	// Pola sprawdzania to wskaźniki z tego samego powodu co opis: przy edycji
+	// nieobecne pole znaczy „nie ruszaj", a puste — „wróć do domyślnej".
+	Interval *string `json:"interval,omitempty"`
+	Timeout  *string `json:"timeout,omitempty"`
+	Expect   *[]int  `json:"expect,omitempty"`
+	Insecure *bool   `json:"insecure,omitempty"`
+	Rozmiar  string  `json:"size,omitempty"`
 	// Opis i Tagi to wskaźniki: nieobecne pole znaczy „nie ruszaj", obecne a
 	// puste — „usuń z pliku".
 	Opis *string   `json:"description,omitempty"`
@@ -313,19 +315,77 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 
 func przeliczCheck(ż żądanieUsługi) config.Check {
 	var c config.Check
-	if ż.Interval != "" {
-		if v, err := time.ParseDuration(ż.Interval); err == nil {
+	if ż.Interval != nil {
+		if v, err := time.ParseDuration(*ż.Interval); err == nil {
 			c.Interval = config.Duration(v)
 		}
 	}
-	if ż.Timeout != "" {
-		if v, err := time.ParseDuration(ż.Timeout); err == nil {
+	if ż.Timeout != nil {
+		if v, err := time.ParseDuration(*ż.Timeout); err == nil {
 			c.Timeout = config.Duration(v)
 		}
 	}
-	c.Expect = ż.Expect
-	c.Insecure = ż.Insecure
+	if ż.Expect != nil {
+		c.Expect = *ż.Expect
+	}
+	if ż.Insecure != nil {
+		c.Insecure = *ż.Insecure
+	}
 	return c
+}
+
+// zmianaSprawdzania przelicza pola sekcji „Sprawdzanie" z żądania edycji.
+// Wartość równa obecnej (po domyślnych) nie jest zmianą — formularz odsyła to,
+// co pokazał, a domyślne nie mają lądować w pliku. Zwraca klucz tekstu błędu.
+func (ż żądanieUsługi) zmianaSprawdzania(bieżąca config.Check) (config.ZmianaSprawdzania, string) {
+	var z config.ZmianaSprawdzania
+	czas := func(pole *string, obecny config.Duration, domyślny time.Duration) (*config.Duration, bool) {
+		if pole == nil {
+			return nil, true
+		}
+		var v time.Duration
+		if t := strings.TrimSpace(*pole); t != "" {
+			var err error
+			// poniżej sekundy ticker zalewałby sprawdzaną usługę
+			if v, err = time.ParseDuration(t); err != nil || v < time.Second {
+				return nil, false
+			}
+		}
+		efektywny := v
+		if v == 0 {
+			efektywny = domyślny
+		}
+		if config.Duration(efektywny) == obecny {
+			return nil, true
+		}
+		d := config.Duration(v)
+		return &d, true
+	}
+	var ok bool
+	if z.Interval, ok = czas(ż.Interval, bieżąca.Interval, config.DefaultInterval); !ok {
+		return z, "blad_czas_sprawdzania"
+	}
+	if z.Timeout, ok = czas(ż.Timeout, bieżąca.Timeout, config.DefaultTimeout); !ok {
+		return z, "blad_czas_sprawdzania"
+	}
+	if ż.Expect != nil {
+		for _, k := range *ż.Expect {
+			if k < 100 || k > 599 {
+				return z, "blad_kody_http"
+			}
+		}
+		efektywne := *ż.Expect
+		if len(efektywne) == 0 {
+			efektywne = config.DefaultExpect
+		}
+		if !slices.Equal(efektywne, bieżąca.Expect) {
+			z.Expect = ż.Expect
+		}
+	}
+	if ż.Insecure != nil && *ż.Insecure != bieżąca.Insecure {
+		z.Insecure = ż.Insecure
+	}
+	return z, ""
 }
 
 func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
@@ -348,15 +408,30 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, kluczBłędu))
 		return
 	}
+	// bez configu w pamięci porównujemy z domyślnymi — UstawSprawdzanie i tak
+	// rusza tylko to, co różni się od pliku
+	rozmiar := rozmiarZŻądania(ż.Rozmiar)
+	bieżąceSprawdzanie := config.Check{Interval: config.Duration(config.DefaultInterval),
+		Timeout: config.Duration(config.DefaultTimeout), Expect: config.DefaultExpect}
 	// wartość równa obecnej nie jest zmianą — nie ma co jej zapisywać, a przy
 	// polu odziedziczonym z merge-key zapis byłby niemożliwy
 	if bieżąca, ok := s.usługaZConfigu(ż.Grupa, ż.Nazwa); ok {
+		bieżąceSprawdzanie = bieżąca.Check
+		// dialog zawsze odsyła rozmiar — domyślny `md` nie ma lądować w pliku
+		if rozmiar == bieżąca.Size {
+			rozmiar = ""
+		}
 		if nowyOpis != nil && *nowyOpis == bieżąca.Description {
 			nowyOpis = nil
 		}
 		if noweTagi != nil && slices.Equal(*noweTagi, []string(bieżąca.Tags)) {
 			noweTagi = nil
 		}
+	}
+	sprawdzanie, kluczBłędu := ż.zmianaSprawdzania(bieżąceSprawdzanie)
+	if kluczBłędu != "" {
+		jsonBłąd(w, http.StatusBadRequest, i18n.T(lang, kluczBłędu))
+		return
 	}
 	opis := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_usluge"), ż.Nazwa)
 	if ż.NowaGrupa != "" && ż.NowaGrupa != ż.Grupa {
@@ -393,7 +468,7 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if rozmiar := rozmiarZŻądania(ż.Rozmiar); rozmiar != "" {
+		if rozmiar != "" {
 			if err := d.SetServiceField(ż.Grupa, ż.Nazwa, "size", rozmiar); err != nil &&
 				!errors.Is(err, config.ErrPathNotFound) {
 				return err
@@ -408,6 +483,9 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 			if err := d.UstawTagiUsługi(ż.Grupa, ż.Nazwa, *noweTagi); err != nil {
 				return err
 			}
+		}
+		if err := d.UstawSprawdzanie(ż.Grupa, ż.Nazwa, sprawdzanie); err != nil {
+			return err
 		}
 		// zmiana nazwy na końcu — inaczej kolejne szukania po starej nazwie zawiodą
 		if ż.NowaNazwa != "" && ż.NowaNazwa != ż.Nazwa {
