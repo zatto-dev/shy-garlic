@@ -23,6 +23,7 @@ configMapGenerator:
       disableNameSuffixHash: true
 
 # Keep in step with the release you install (?ref=vX).
+# The release workflow fails when this tag does not match the git tag.
 images:
   - name: ghcr.io/zatto-dev/shy-garlic
     newTag: "0.13.2"
