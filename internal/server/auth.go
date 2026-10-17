@@ -293,23 +293,23 @@ func (s *Server) setSession(w http.ResponseWriter, r *http.Request, userID int64
 // ── pages ────────────────────────────────────────────────────────────────────
 
 type loginView struct {
-	Błąd   string
-	Login  string
-	Next   string
-	Wersja string
-	Setup  bool
-	Tytuł  string
+	Error   string
+	Login   string
+	Next    string
+	Version string
+	Setup   bool
+	Title   string
 
-	Lang             string
-	T                map[string]string
-	DrugiJezyk       string
-	DrugiJezykNazwa  string
-	DrugiJezykKrotko string
+	Lang            string
+	T               map[string]string
+	SecondLang      string
+	SecondLangName  string
+	SecondLangShort string
 
-	// Wyglad — the gate background. ! Never "photo" and never with a file name: /bg/ sits
+	// Appearance — the gate background. ! Never "photo" and never with a file name: /bg/ sits
 	// behind the login, and the user's photo (together with its EXIF) must not leak
 	// to someone who has not introduced themselves yet.
-	Wyglad appearanceView
+	Appearance appearanceView
 }
 
 // handleLang switches the language and goes back to where the user came from.
@@ -353,7 +353,7 @@ func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	s.renderLogin(w, s.withLang(lang, loginView{
-		Next: r.URL.Query().Get("next"), Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+		Next: r.URL.Query().Get("next"), Version: Version, Title: i18n.T(lang, "logowanie")}))
 }
 
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
@@ -372,8 +372,8 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
-			Błąd: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
-			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+			Error: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "logowanie")}))
 		return
 	}
 
@@ -384,8 +384,8 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
-			Błąd: i18n.T(lang, "zle_dane"), Login: login, Next: next,
-			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+			Error: i18n.T(lang, "zle_dane"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "logowanie")}))
 		return
 	}
 	if err := s.setSession(w, r, u.ID); err != nil {
@@ -421,7 +421,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
-			Setup: true, Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
+			Setup: true, Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
@@ -441,8 +441,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		} else if strings.Contains(err.Error(), "too short") {
 			message = i18n.T(lang, "login_za_krotki")
 		}
-		s.renderLogin(w, s.withLang(lang, loginView{Setup: true, Błąd: message, Login: login,
-			Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
+		s.renderLogin(w, s.withLang(lang, loginView{Setup: true, Error: message, Login: login,
+			Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
 	if err := s.setSession(w, r, u.ID); err != nil {
@@ -486,9 +486,9 @@ func (s *Server) withLang(l i18n.Lang, w loginView) loginView {
 	w.Lang = string(l)
 	w.T = i18n.Map(l)
 	d := second(l)
-	w.DrugiJezyk = string(d)
-	w.DrugiJezykNazwa = d.Name()
-	w.DrugiJezykKrotko = d.Short()
-	w.Wyglad = s.gateAppearance()
+	w.SecondLang = string(d)
+	w.SecondLangName = d.Name()
+	w.SecondLangShort = d.Short()
+	w.Appearance = s.gateAppearance()
 	return w
 }

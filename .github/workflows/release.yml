@@ -5,8 +5,8 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write   # tworzenie Release i wgrywanie plików
-  packages: write   # publikacja obrazu na GHCR
+  contents: write   # creating the Release and uploading files
+  packages: write   # publishing the image to GHCR
 
 jobs:
   binaries:
@@ -18,27 +18,27 @@ jobs:
           go-version: '1.25'
           check-latest: true
 
-      - name: Zbuduj binarki
+      - name: Build binaries
         run: |
           set -euo pipefail
-          WERSJA="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          for cel in linux/amd64 linux/arm64 linux/arm darwin/amd64 darwin/arm64; do
-            GOOS="${cel%/*}"; GOARCH="${cel#*/}"
-            # -trimpath usuwa ścieżki budowania, więc binarka nie niesie
-            # układu katalogów maszyny, na której powstała
+          for target in linux/amd64 linux/arm64 linux/arm darwin/amd64 darwin/arm64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            # -trimpath strips build paths, so the binary does not carry
+            # the directory layout of the machine it was built on
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -trimpath -ldflags="-s -w -X main.wersja=${WERSJA}" \
+              -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
               -o "dist/shyg" ./cmd/shyg
-            tar -czf "dist/shyg_${WERSJA}_${GOOS}_${GOARCH}.tar.gz" -C dist shyg
+            tar -czf "dist/shyg_${VERSION}_${GOOS}_${GOARCH}.tar.gz" -C dist shyg
             rm dist/shyg
           done
           cd dist && sha256sum *.tar.gz > checksums.txt
 
-      # gh jest preinstalowany na runnerze. Własne polecenie zamiast obcej
-      # akcji to o jedną zależność w łańcuchu dostaw mniej — i o jedną rzecz
-      # mniej do przypinania i audytowania.
-      - name: Wydanie
+      # gh is preinstalled on the runner. Our own command instead of a third-party
+      # action is one dependency less in the supply chain — and one thing
+      # less to pin and audit.
+      - name: Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -48,14 +48,14 @@ jobs:
             --verify-tag \
             dist/*
 
-  obraz:
+  image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      # GITHUB_TOKEN wystarcza do GHCR — zero sekretów do rotowania.
+      # GITHUB_TOKEN is enough for GHCR — no secrets to rotate.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -71,10 +71,10 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      # ! --target git jest konieczny. Etap `git` jest ostatni w Dockerfile,
-      # więc build bez celu i tak dałby jego — ale jawny target broni przed
-      # tym, że ktoś przestawi kolejność etapów i po cichu wyda distroless
-      # bez gita, przez co przestaną działać commity configu.
+      # ! --target git is required. The `git` stage is the last one in the Dockerfile,
+      # so a build without a target would give it anyway — but an explicit target guards
+      # against someone reordering the stages and silently shipping distroless
+      # without git, which would break the config commits.
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -85,60 +85,60 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # Strażnik widoczności. Paczka GHCR tworzona przez workflow w organizacji
-      # jest domyślnie PRYWATNA, a GitHub nie ma API do zmiany tego — robi się to
-      # tylko w UI. Bez tego kroku wydanie wygląda na udane, a `docker pull`
-      # bez logowania daje `unauthorized` (issue #1). Sprawdzamy pull całkiem
-      # anonimowo: własny token bez uwierzytelnienia, czysty curl, zero akcji.
-      - name: Sprawdź anonimowy pull obrazu
+      # Visibility guard. A GHCR package created by a workflow in an organization
+      # is PRIVATE by default, and GitHub has no API to change that — it is done
+      # only in the UI. Without this step the release looks successful, while `docker pull`
+      # without login gives `unauthorized` (issue #1). We check the pull fully
+      # anonymously: our own token without authentication, plain curl, no actions.
+      - name: Check anonymous image pull
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           repo="${GITHUB_REPOSITORY,,}"
           tag="${TAG#v}"
-          blad() {
-            echo "::error title=Obraz prywatny::Obraz ghcr.io/${repo}:${tag} nie daje się pobrać anonimowo ($1) — obraz prywatny, przestaw widoczność w ustawieniach paczki: https://github.com/orgs/${repo%%/*}/packages/container/${repo#*/}/settings (Danger Zone → Change visibility → Public)"
+          fail() {
+            echo "::error title=Private image::Image ghcr.io/${repo}:${tag} cannot be pulled anonymously ($1) — the image is private, change visibility in the package settings: https://github.com/orgs/${repo%%/*}/packages/container/${repo#*/}/settings (Danger Zone → Change visibility → Public)"
             exit 1
           }
           token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])') \
-            || blad "brak anonimowego tokenu"
-          kod=$(curl -sS -o /dev/null -w '%{http_code}' \
+            || fail "no anonymous token"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${token}" \
             -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
             "https://ghcr.io/v2/${repo}/manifests/${tag}")
-          [ "$kod" = "200" ] || blad "HTTP ${kod}"
-          echo "OK: ghcr.io/${repo}:${tag} jest publiczny"
+          [ "$code" = "200" ] || fail "HTTP ${code}"
+          echo "OK: ghcr.io/${repo}:${tag} is public"
 
-  # Chart Helm jako OCI na ghcr.io/zatto-dev/charts/shy-garlic. Wersja chartu
-  # i appVersion biorą się z taga, więc `helm install ... --version X` daje
-  # dokładnie ten obraz, który wyszedł w tym samym wydaniu.
+  # Helm chart as OCI at ghcr.io/zatto-dev/charts/shy-garlic. The chart version
+  # and appVersion come from the tag, so `helm install ... --version X` gives
+  # exactly the image that came out in the same release.
   chart:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Zainstaluj Helma (przypięta wersja + suma)
+      - name: Install Helm (pinned version + checksum)
         run: .github/scripts/install-helm.sh
 
-      - name: Zapakuj i wypchnij chart
+      - name: Package and push the chart
         env:
           TAG: ${{ github.ref_name }}
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          wersja="${TAG#v}"
+          version="${TAG#v}"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          helm lint charts/shy-garlic --set "image.tag=${wersja}"
-          helm package charts/shy-garlic --version "$wersja" --app-version "$wersja" --destination dist
+          helm lint charts/shy-garlic --set "image.tag=${version}"
+          helm package charts/shy-garlic --version "$version" --app-version "$version" --destination dist
           echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GH_ACTOR" --password-stdin
-          helm push "dist/shy-garlic-${wersja}.tgz" "oci://ghcr.io/${owner}/charts"
+          helm push "dist/shy-garlic-${version}.tgz" "oci://ghcr.io/${owner}/charts"
 
-      # Ten sam strażnik co dla obrazu: paczka chartu też powstaje jako
-      # PRYWATNA i widoczność przestawia się tylko w UI.
-      - name: Sprawdź anonimowy pull chartu
+      # The same guard as for the image: the chart package is also created as
+      # PRIVATE and visibility is changed only in the UI.
+      - name: Check anonymous chart pull
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -146,16 +146,16 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           repo="${owner}/charts/shy-garlic"
           tag="${TAG#v}"
-          blad() {
-            echo "::error title=Chart prywatny::Chart oci://ghcr.io/${repo}:${tag} nie daje się pobrać anonimowo ($1) — paczka prywatna, przestaw widoczność w ustawieniach paczki: https://github.com/orgs/${owner}/packages/container/charts%2Fshy-garlic/settings (Danger Zone → Change visibility → Public)"
+          fail() {
+            echo "::error title=Private chart::Chart oci://ghcr.io/${repo}:${tag} cannot be pulled anonymously ($1) — the package is private, change visibility in the package settings: https://github.com/orgs/${owner}/packages/container/charts%2Fshy-garlic/settings (Danger Zone → Change visibility → Public)"
             exit 1
           }
           token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])') \
-            || blad "brak anonimowego tokenu"
-          kod=$(curl -sS -o /dev/null -w '%{http_code}' \
+            || fail "no anonymous token"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${token}" \
             -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
             "https://ghcr.io/v2/${repo}/manifests/${tag}")
-          [ "$kod" = "200" ] || blad "HTTP ${kod}"
-          echo "OK: oci://ghcr.io/${repo}:${tag} jest publiczny"
+          [ "$code" = "200" ] || fail "HTTP ${code}"
+          echo "OK: oci://ghcr.io/${repo}:${tag} is public"

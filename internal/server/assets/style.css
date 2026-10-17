@@ -1,32 +1,32 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Shy Garlic Glass — tokeny. Wklej na sam początek style.css, ZAMIAST
-   obecnych linii 1-58 (:root + dwa bloki [data-theme]).
-   Akcent jest STAŁY (#A4CF36 = dawny --kielek), więc wszystkie color-mix()
-   z projektu są tu prewyliczone jako rgba() — jedyny wyjątek to --acc-ink
-   w tonie jasnym (mieszanie w oklab), podany dwiema deklaracjami: fallback
-   + color-mix, żeby stara przeglądarka dostała sensowny kolor.
+   Shy Garlic Glass — tokens. Paste at the very start of style.css, INSTEAD OF
+   the current lines 1-58 (:root + two [data-theme] blocks).
+   The accent is FIXED (#A4CF36 = the former --kielek), so all color-mix()
+   calls from the design are precomputed here as rgba() — the only exception is --acc-ink
+   in the light tone (mixing in oklab), given as two declarations: fallback
+   + color-mix, so that an old browser gets a sensible colour.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
   color-scheme: dark;
 
-  /* ── paleta maskotki: zostaje, bo to decyzja brandowa (logo, litera) ── */
+  /* ── mascot palette: stays, because it is a brand decision (logo, letter) ── */
   --krem:   #FBF2E2;
   --lisc:   #6B9924;
   --kielek: #A4CF36;
 
-  /* ── akcent + prewyliczone miksy ── */
+  /* ── accent + precomputed mixes ── */
   --acc:      #A4CF36;
   --acc-fg:   #1A2005;               /* lum(#A4CF36)=0.6929 > 0.55 */
-  --acc-ink:  #A4CF36;               /* w tonie ciemnym = acc */
-  --acc-12:   rgba(164,207,54,.12);  /* tło linii "+" w diffie */
-  --acc-22:   rgba(164,207,54,.22);  /* tło włączonego toggle, halo up */
-  --acc-32:   rgba(164,207,54,.32);  /* ring focusu */
-  --acc-55:   rgba(164,207,54,.55);  /* obwódka włączonego toggle */
-  --acc-80:   rgba(164,207,54,.80);  /* cień przycisku akcentowego */
-  --acc-bar:  rgba(164,207,54,.85);  /* wypełnienie słupków "up" */
+  --acc-ink:  #A4CF36;               /* in the dark tone = acc */
+  --acc-12:   rgba(164,207,54,.12);  /* background of the "+" line in the diff */
+  --acc-22:   rgba(164,207,54,.22);  /* background of an enabled toggle, halo up */
+  --acc-32:   rgba(164,207,54,.32);  /* focus ring */
+  --acc-55:   rgba(164,207,54,.55);  /* border of an enabled toggle */
+  --acc-80:   rgba(164,207,54,.80);  /* shadow of the accent button */
+  --acc-bar:  rgba(164,207,54,.85);  /* fill of the "up" bars */
 
-  /* ── VARS.dark (projekt, dosłownie) ── */
+  /* ── VARS.dark (from the design, verbatim) ── */
   --ink:    #F3F0E8;
   --ink2:   rgba(243,240,232,.68);
   --ink3:   rgba(243,240,232,.62);
@@ -40,7 +40,7 @@
   --panel:  rgba(18,22,28,.8);
   --bar:    rgba(12,15,20,.55);
 
-  /* wariant awaryjny bez backdrop-filter — patrz @supports niżej */
+  /* fallback variant without backdrop-filter — see @supports below */
   --panel-krycie: rgba(20,24,30,.97);
   --bar-krycie:   rgba(14,17,22,.97);
 
@@ -48,22 +48,22 @@
   --glass:  rgba(255,255,255,.072);
   --glass2: rgba(255,255,255,.122);
 
-  /* ── geometria i ruch ── */
-  --blur: 20px;                          /* backdrop-filter paneli */
-  --r:    24px;                          /* promień bazowy kart */
+  /* ── geometry and motion ── */
+  --blur: 20px;                          /* backdrop-filter of the panels */
+  --r:    24px;                          /* base radius of the cards */
   --r-mala: 8px;
   --r-duza: 14px;
-  --dur:  .7s;                           /* wejście kart (sg-in) */
-  --lift: -3px;                          /* podniesienie karty na hover */
+  --dur:  .7s;                           /* card entrance (sg-in) */
+  --lift: -3px;                          /* card lift on hover */
   --przejscie: 140ms cubic-bezier(.2,.7,.3,1);
   --ease: cubic-bezier(.2,.7,.2,1);
 
-  /* ── statusy ── */
+  /* ── statuses ── */
   --up:            var(--acc);
   --degraded:      #E8A33D;
   --down:          #E5484D;
-  --down-ink:      #FF7B7F;              /* tekst/hover na czerwonym */
-  --down-obwodka:  rgba(229,72,77,.35);  /* krawędź akcji niszczącej */
+  --down-ink:      #FF7B7F;              /* text/hover on red */
+  --down-obwodka:  rgba(229,72,77,.35);  /* border of a destructive action */
   --unknown:       #8A8578;
   --halo-up:       rgba(164,207,54,.22);
   --halo-degraded: rgba(232,163,61,.22);
@@ -73,21 +73,21 @@
   --spark-degraded:#E8A33D;
   --spark-down:    rgba(229,72,77,.7);
 
-  /* ── warstwa tła (JS nadpisuje --tlo-obraz i --tlo-rozmycie przez CSSOM) ── */
+  /* ── background layer (JS overrides --tlo-obraz and --tlo-rozmycie through CSSOM) ── */
   --tlo-baza:      #0A0F14;
-  --tlo-obraz:     none;                 /* url("/bg/<nazwa>") albo none */
+  --tlo-obraz:     none;                 /* url("/bg/<name>") or none */
   --tlo-rozmycie:  10px;                 /* 0..30px */
-  --tlo-inset:     -24px;                /* = -(2*rozmycie + 4) */
+  --tlo-inset:     -24px;                /* = -(2*blur + 4) */
   --ziarno-krycie: .07;
 
-  /* ── typografia ── */
+  /* ── typography ── */
   --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system,
                "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* ── baza .btn (Faza 2 / Task 7) — aliasy na tokeny wyżej, żeby nie mnożyć
-     równoległych źródeł prawdy. Wyprowadzone z Shy-Garlic-Glass.dc.html,
-     patrz komentarz przy bloku .btn niżej. ── */
+  /* ── .btn base (Phase 2 / Task 7) — aliases to the tokens above, so as not to multiply
+     parallel sources of truth. Derived from Shy-Garlic-Glass.dc.html,
+     see the comment at the .btn block below. ── */
   --btn-bg:       var(--chip);
   --btn-bg-hover: var(--glass2);
   --btn-edge:     var(--edge);
@@ -96,9 +96,9 @@
   --btn-ease:     .2s ease;
 }
 
-/* ── ton jasny. Sterowany WYŁĄCZNIE atrybutem data-ton na <html>.
-      Nie ma tu @media (prefers-color-scheme) — o tonie decyduje wybrane tło,
-      a pierwszy wybór presetu robi serwer/JS na podstawie preferencji systemu. ── */
+/* ── light tone. Driven EXCLUSIVELY by the data-ton attribute on <html>.
+      There is no @media (prefers-color-scheme) here — the tone is decided by the chosen background,
+      and the first preset choice is made by the server/JS based on the system preference. ── */
 :root[data-ton="light"] {
   color-scheme: light;
 
@@ -122,13 +122,13 @@
   --glass2: rgba(255,255,255,.675);       /* light: min(.96, 0.5 + 0.5g) */
 
   --acc-ink: #6E8C22;                                        /* fallback */
-  --acc-ink: color-mix(in oklab, #A4CF36 62%, #1B1813);      /* wg projektu */
+  --acc-ink: color-mix(in oklab, #A4CF36 62%, #1B1813);      /* per the design */
 
   --ziarno-krycie: .045;
 }
 
-/* ── kolor bazowy warstwy tła per preset (PRESETS.base z projektu) ──
-      Musi stać PO bloku tonu, bo preset jest bardziej szczegółowy niż ton. ── */
+/* ── base colour of the background layer per preset (PRESETS.base from the design) ──
+      Must come AFTER the tone block, because a preset is more specific than a tone. ── */
 :root[data-preset="aurora"]   { --tlo-baza: #0A0F14; }
 :root[data-preset="nebula"]   { --tlo-baza: #0C0A18; }
 :root[data-preset="graphite"] { --tlo-baza: #121316; }
@@ -137,8 +137,8 @@
 :root[data-preset="photo"]    { --tlo-baza: #0B0D10; }
 :root[data-preset="photo"][data-ton="light"] { --tlo-baza: #E9E6E1; }
 
-/* ── wariant awaryjny: brak backdrop-filter = panele nieprzezroczyste.
-      Bez tego dialog nad zdjęciem jest nieczytelny. ── */
+/* ── fallback variant: no backdrop-filter = opaque panels.
+      Without it a dialog over a photo is unreadable. ── */
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
   :root {
     --panel: var(--panel-krycie);
@@ -156,7 +156,7 @@
   }
 }
 
-/* ── @font-face: pliki lokalne, zero sieci w runtime ── */
+/* ── @font-face: local files, zero network at runtime ── */
 @font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:400;
   font-display:swap; src:url("/assets/fonts/hanken-grotesk-400.woff2") format("woff2"); }
 @font-face { font-family:"Hanken Grotesk"; font-style:normal; font-weight:500;
@@ -170,7 +170,7 @@
 @font-face { font-family:"DM Mono"; font-style:normal; font-weight:500;
   font-display:swap; src:url("/assets/fonts/dm-mono-500.woff2") format("woff2"); }
 
-/* ── keyframes z projektu (dosłownie) ── */
+/* ── keyframes from the design (verbatim) ── */
 @keyframes sg-dryf1 { from{transform:translate(0,0) scale(1)}    to{transform:translate(9vw,7vh) scale(1.18)} }
 @keyframes sg-dryf2 { from{transform:translate(0,0) scale(1.1)}  to{transform:translate(-8vw,9vh) scale(.94)} }
 @keyframes sg-dryf3 { from{transform:translate(0,0) scale(1)}    to{transform:translate(6vw,-8vh) scale(1.22)} }
@@ -180,17 +180,17 @@
 @keyframes sg-puls    { 0%,100%{box-shadow:0 0 0 3px var(--puls-down-a)} 50%{box-shadow:0 0 0 8px var(--puls-down-b)} }
 @keyframes sg-obrot   { to{transform:rotate(360deg)} }
 
-/* ── ruch wyłączony: nasza twardsza wersja zostaje (nie .01ms z projektu) ── */
+/* ── motion disabled: our stricter version stays (not the .01ms from the design) ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* ── reset i dokument ─────────────────────────────────────────────────── */
+/* ── reset and document ───────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
 
-/* Wiele komponentów (menu, picker, toast) ma display:flex i chowa się
-   atrybutem [hidden] — bez tego atrybut przegrywa z regułą klasy. */
+/* Many components (menu, picker, toast) have display:flex and hide with the
+   [hidden] attribute — without this the attribute loses to the class rule. */
 [hidden] { display: none !important; }
 
 body {
@@ -204,32 +204,32 @@ body {
   overflow-x: hidden;
 }
 
-/* Kontener treści. ! BEZ z-index — w projekcie wrapper miał z-index:1
-   i tworzył własny kontekst układania, przez co pasek (30) lądował pod
-   łapaczem kliknięć (25) i kliknięcie w preset trafiało w próżnię. */
+/* Content container. ! NO z-index — in the design the wrapper had z-index:1
+   and created its own stacking context, so the bar (30) ended up under the
+   click catcher (25) and a click on a preset hit the void. */
 .top, #podsumowanie, main, .stopka { max-width: 1440px; margin-inline: auto; }
 
 main { display: flex; flex-direction: column; gap: 28px; }
 
 h1, h2, h3, h4 { letter-spacing: -.015em; }
 
-/* Treść tylko dla czytników ekranu — #podsumowanie zostaje w DOM jako
-   role="status", ale liczby pokazują chipy w pasku. */
+/* Content for screen readers only — #podsumowanie stays in the DOM as
+   role="status", but the numbers are shown by the chips in the bar. */
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; border: 0; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
 }
 
-/* ── warstwa tła ──────────────────────────────────────────────────────── */
+/* ── background layer ─────────────────────────────────────────────────── */
 
-/* ! z-index: -1, NIE 0. Warstwa tła jest position:fixed, więc przy z-index:0
-   malowałaby się w warstwie „pozycjonowane potomki", czyli NAD zwykłą treścią
-   w przepływie — nagłówki grup, stopka i #dodaj-grupe znikały pod tłem
-   (karty przeżywały tylko dlatego, że mają position:relative).
-   Lekarstwem NIE jest z-index:1 na wrapperze treści — to był właśnie bug
-   projektu, przez który pasek (30) lądował pod zasłoną (25). Tło schodzi
-   poniżej zera i reszta skali (25/30/40/60/70/80) zostaje nietknięta. */
+/* ! z-index: -1, NOT 0. The background layer is position:fixed, so with z-index:0
+   it would paint in the "positioned descendants" layer, i.e. ABOVE ordinary in-flow content —
+   group headings, the footer and #dodaj-grupe vanished under the background
+   (cards survived only because they have position:relative).
+   The remedy is NOT z-index:1 on the content wrapper — that was exactly the design bug
+   because of which the bar (30) ended up under the scrim (25). The background goes
+   below zero and the rest of the scale (25/30/40/60/70/80) stays untouched. */
 #tlo {
   position: fixed; inset: 0; z-index: -1;
   overflow: hidden; pointer-events: none;
@@ -250,9 +250,9 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
   will-change: transform;
 }
 
-/* Pozycje, rozmiary, kolory i czasy dryfu — PRESETS z projektu, 1:1.
-   Szablon renderuje zawsze cztery bloby; presety z mniejszą liczbą kul
-   chowają nadmiarowe. Numer animacji = i%3+1, jak w projekcie. */
+/* Positions, sizes, colours and drift times — PRESETS from the design, 1:1.
+   The template always renders four blobs; presets with fewer orbs
+   hide the surplus. Animation number = i%3+1, as in the design. */
 
 :root[data-preset="aurora"] .tlo-blob:nth-child(1) {
   left: -10%; top: -20%; width: 55vw; height: 55vw;
@@ -292,7 +292,7 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
 }
 :root[data-preset="nebula"] .tlo-blob:nth-child(4) { display: none; }
 
-/* graphite i fog są statyczne z definicji — zero animacji, zero kosztu GPU */
+/* graphite and fog are static by definition — zero animation, zero GPU cost */
 :root[data-preset="graphite"] .tlo-blob:nth-child(1) {
   left: -10%; top: -30%; width: 70vw; height: 70vw;
   background: radial-gradient(closest-side, rgba(255,255,255,.07), transparent);
@@ -332,11 +332,11 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
 :root[data-preset="fog"] .tlo-blob:nth-child(3),
 :root[data-preset="fog"] .tlo-blob:nth-child(4) { display: none; }
 
-/* w trybie zdjęcia blobów nie ma w ogóle — tapeta niesie całe tło */
+/* in photo mode there are no blobs at all — the wallpaper carries the whole background */
 :root[data-preset="photo"] .tlo-blob { display: none; }
 
-/* Tapeta i przyciemnienie żyją tylko w trybie photo. Inset jest ujemny,
-   żeby rozmycie nie odsłoniło jasnej krawędzi przy brzegu ekranu. */
+/* The wallpaper and the dimming live only in photo mode. The inset is negative,
+   so that the blur does not reveal a light edge at the screen border. */
 .tlo-obraz, .tlo-przycmienie { display: none; }
 :root[data-preset="photo"] .tlo-obraz {
   display: block;
@@ -347,11 +347,11 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
   filter: blur(var(--tlo-rozmycie));
   transform: translateZ(0);
 }
-/* Krycie steruje --dim (ułamek z appearance.background.dim). Górny koniec to
-   zawsze dim × .56 — proporcja z pierwotnych .28/.5, żeby przyciemnienie dalej
-   narastało ku dołowi, gdzie stoją kafle.
-   ! Sam kolor tekstu czytelności nie ratuje: na zdjęciu o dużym kontraście
-   część kafli leży na jasnym, a część na ciemnym. */
+/* The opacity is driven by --dim (a fraction from appearance.background.dim). The top end is
+   always dim × .56 — the proportion from the original .28/.5, so that the dimming still
+   increases towards the bottom, where the tiles are.
+   ! The text colour alone does not save legibility: on a photo with high contrast
+   some tiles lie on a light area and some on a dark one. */
 :root[data-preset="photo"] .tlo-przycmienie {
   display: block;
   position: absolute; inset: 0;
@@ -365,7 +365,7 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
     rgba(255,255,255,var(--dim, .5)));
 }
 
-/* Ziarno rozbija banding gradientów. SVG inline w data: — zero sieci. */
+/* The grain breaks up gradient banding. Inline SVG in data: — zero network. */
 .tlo-ziarno {
   position: absolute; inset: 0;
   opacity: var(--ziarno-krycie);
@@ -388,7 +388,7 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
 }
 .skip:focus { left: 16px; top: 16px; }
 
-/* ── pasek górny ──────────────────────────────────────────────────────── */
+/* ── top bar ──────────────────────────────────────────────────────────── */
 
 .top {
   position: sticky; top: 12px; z-index: 30;
@@ -434,21 +434,21 @@ h1, h2, h3, h4 { letter-spacing: -.015em; }
 }
 .search input:not(:placeholder-shown) + kbd { opacity: 0; }
 
-/* Przełączniki w pasku świecą akcentem, gdy są włączone. */
+/* Toggles in the bar glow with the accent when enabled. */
 .btn--icon[aria-pressed="true"] {
   background: var(--acc-22); color: var(--acc-ink); border-color: var(--acc-55);
 }
 
-/* Przełącznik języka ZOSTAJE linkiem — działa bez JS i przez proxy. */
+/* The language switch STAYS a link — it works without JS and through a proxy. */
 a.btn--icon.jezyk {
   font: 600 11.5px/1 var(--font-mono);
   letter-spacing: .04em; text-decoration: none;
 }
 
-/* Łapacz kliknięć popoverów. Niżej niż pasek (30), wyżej niż treść. */
+/* Click catcher of the popovers. Lower than the bar (30), higher than the content. */
 .zaslona { position: fixed; inset: 0; z-index: 25; }
 
-/* ── chipy licznikowe ─────────────────────────────────────────────────── */
+/* ── counter chips ────────────────────────────────────────────────────── */
 
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
@@ -482,7 +482,7 @@ a.btn--icon.jezyk {
   border-color: rgba(229,72,77,.55);
 }
 
-/* ── przełącznik widoku ───────────────────────────────────────────────── */
+/* ── view switch ──────────────────────────────────────────────────────── */
 
 .przelacznik-widoku {
   display: flex; gap: 2px; flex: none;
@@ -490,8 +490,8 @@ a.btn--icon.jezyk {
   border: 1px solid var(--edge); border-radius: 999px;
   background: var(--field);
 }
- /* Segmentowany przełącznik: obwódkę i tło niesie pigułka, nie dzieci —
-   dlatego jedyne miejsce, gdzie kontener nadpisuje bazę .btn. */
+ /* Segmented switch: the border and background are carried by the pill, not the children —
+   hence the only place where the container overrides the .btn base. */
 .przelacznik-widoku .btn {
   width: 34px; height: 32px;
   border: 0; background: transparent; color: var(--ink3);
@@ -502,22 +502,22 @@ a.btn--icon.jezyk {
   box-shadow: inset 0 0 0 1px var(--edge2), 0 2px 6px -2px rgba(0,0,0,.3);
 }
 
-/* ── menu usługi ──────────────────────────────────────────────────────── */
+/* ── service menu ─────────────────────────────────────────────────────── */
 
-/* Wygląd niesie .btn--primary; tu zostaje tylko to, czym ten przycisk różni
-   się od innych primary — wysokość paska i większy napis. */
+/* The look is carried by .btn--primary; only what makes this button differ
+   from other primary ones stays here — the bar height and a larger label. */
 .menu-uslugi { height: 40px; padding: 0 12px; font-size: 14px; flex: none; }
 .menu-uslugi svg { width: 16px; height: 16px; }
 
-/* Popover kotwiczy się do .top (sticky = kontekst układania), nie do
-   przycisku — dzięki temu nie potrzebuje własnego wrappera w szablonie. */
-/* ! Tło KRYJĄCE, nie półprzezroczyste. Popover jest dzieckiem .top, a .top
-   ma backdrop-filter — element z backdrop-filter tworzy „backdrop root",
-   więc własny backdrop-filter potomka NIE widzi już strony pod paskiem i
-   nic nie rozmywa. Przy półprzezroczystym tle treść kart przebijała przez
-   napisy menu. Stąd --panel-krycie, ten sam token co w wariancie
-   awaryjnym @supports. Deklaracja backdrop-filter zostaje: nie szkodzi,
-   a zadziała, gdyby popover kiedyś wyszedł poza pasek. */
+/* The popover is anchored to .top (sticky = stacking context), not to
+   the button — thanks to that it needs no wrapper of its own in the template. */
+/* ! An OPAQUE background, not semi-transparent. The popover is a child of .top, and .top
+   has backdrop-filter — an element with backdrop-filter creates a "backdrop root",
+   so the descendant's own backdrop-filter no longer sees the page under the bar and
+   blurs nothing. With a semi-transparent background the card content showed through
+   the menu labels. Hence --panel-krycie, the same token as in the @supports
+   fallback variant. The backdrop-filter declaration stays: it does no harm,
+   and it will work if the popover ever moves outside the bar. */
 .menu-panel {
   position: absolute; top: calc(100% + 10px); right: 12px;
   z-index: 40; width: 230px;
@@ -531,7 +531,7 @@ a.btn--icon.jezyk {
   animation: sg-pop .22s var(--ease) both;
 }
 
-/* Docker niedostępny NIE znika — blednie, żeby było widać, że istnieje. */
+/* Docker unavailable does NOT disappear — it fades, so it is visible that it exists. */
 .btn--menu[aria-disabled="true"] { opacity: .45; cursor: default; }
 .btn--menu[aria-disabled="true"]:hover { background: none; }
 
@@ -542,7 +542,7 @@ a.btn--icon.jezyk {
 }
 .menu-badge { font-size: 11px; color: var(--ink3); }
 
-/* ── picker tła ───────────────────────────────────────────────────────── */
+/* ── background picker ────────────────────────────────────────────────── */
 
 .picker-tla {
   position: absolute; top: calc(100% + 10px); right: 12px;
@@ -550,7 +550,7 @@ a.btn--icon.jezyk {
   display: flex; flex-direction: column; gap: 14px;
   padding: 16px;
   border: 1px solid var(--edge2); border-radius: 24px;
-  /* kryjące z tego samego powodu co .menu-panel — patrz komentarz wyżej */
+  /* opaque for the same reason as .menu-panel — see the comment above */
   background: var(--panel-krycie);
   backdrop-filter: blur(30px) saturate(1.6);
   -webkit-backdrop-filter: blur(30px) saturate(1.6);
@@ -566,8 +566,8 @@ a.btn--icon.jezyk {
 
 .picker-siatka { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 
-/* Kafle niosą już bazę .btn — zostaje wyłącznie ich układ: podpis i opis
-   w jednym wierszu pod miniaturą. */
+/* The tiles already carry the .btn base — only their layout stays: the label and description
+   in one row under the thumbnail. */
 .kafel-presetu, .kafel-tapety {
   display: grid; grid-template-columns: 1fr auto; gap: 6px;
   padding: 0; border: 0; background: none;
@@ -588,7 +588,7 @@ a.btn--icon.jezyk {
 .kafel-podpis { font-size: 12px; color: var(--ink2); padding-left: 2px; }
 .kafel-sub { font-size: 12px; color: var(--ink3); padding-right: 2px; text-align: right; }
 
-/* Miniatury presetów — PRESETS.thumb z projektu, 1:1. */
+/* Preset thumbnails — PRESETS.thumb from the design, 1:1. */
 .kafel-presetu[data-preset="aurora"] .miniatura {
   background:
     radial-gradient(70% 90% at 15% 20%, rgba(164,207,54,.85), transparent 70%),
@@ -622,8 +622,8 @@ a.btn--icon.jezyk {
     #EDF1F4;
 }
 
-/* Miniaturę tapety podstawia JS przez CSSOM (setProperty), nigdy szablon.
-   Domyślne none = kafel wygląda jak pusty slot na zrzut. */
+/* The wallpaper thumbnail is set by JS through CSSOM (setProperty), never by the template.
+   The default none = the tile looks like an empty slot for a screenshot. */
 .kafel-tapety .miniatura {
   background-color: var(--chip);
   background-image: var(--tlo-miniatura, none);
@@ -634,7 +634,7 @@ a.btn--icon.jezyk {
 .kafel-tapety.pusty .miniatura { border: 1px dashed var(--edge2); }
 .kafel-tapety .miniatura svg { width: 18px; height: 18px; }
 
-/* Sekcja tapety ma sens tylko wtedy, gdy tapeta jest tłem. */
+/* The wallpaper section only makes sense when the wallpaper is the background. */
 .picker-tapeta {
   display: flex; flex-direction: column; gap: 12px;
   padding-top: 12px;
@@ -650,8 +650,8 @@ a.btn--icon.jezyk {
 .picker-suwak input[type="range"] { width: 100%; margin: 0; accent-color: var(--acc); }
 #wartosc-rozmycia { font: 500 12px/1 var(--font-mono); text-align: right; }
 
-/* Ton tekstu jest dostępny dla WSZYSTKICH presetów, nie tylko dla zdjęcia —
-   projekt dawał go tylko w trybie photo, u nas to stała kontrola. */
+/* The text tone is available for ALL presets, not only for a photo —
+   the design gave it only in photo mode, for us it is a constant control. */
 .picker-ton {
   display: flex; gap: 2px; width: max-content;
   padding: 3px;
@@ -691,7 +691,7 @@ a.btn--icon.jezyk {
 .tlo-pozycja.uzywana { border-color: var(--acc-55); color: var(--ink); }
 .picker-tip { margin: 0; font-size: 12px; color: var(--ink3); }
 
-/* ── grupy ────────────────────────────────────────────────────────────── */
+/* ── groups ───────────────────────────────────────────────────────────── */
 
 .grupa { display: flex; flex-direction: column; gap: 14px; }
 
@@ -710,12 +710,12 @@ a.btn--icon.jezyk {
   background: linear-gradient(90deg, var(--edge2), transparent);
 }
 
-/* Akcje nagłówka grupy pokazują się dopiero w trybie edycji. Sterowane po
-   kontenerze, bo własna klasa na przycisku byłaby kolejnym idiomem. */
+/* The group header actions show up only in edit mode. Driven through
+   the container, because a class of its own on the button would be one more idiom. */
 .grupa h2 .btn { display: none; width: 24px; height: 24px; background: none; }
 body.edycja .grupa h2 .btn { display: inline-flex; }
 
-/* ── siatka i karty ───────────────────────────────────────────────────── */
+/* ── grid and cards ───────────────────────────────────────────────────── */
 
 .siatka {
   list-style: none; margin: 0; padding: 0;
@@ -723,9 +723,9 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
-/* Karta ma PŁASKI DOM — .glowna, .szczegoly, .karta-meta i oba zestawy akcji
-   są rodzeństwem, bo kontrakt nie przewiduje wrappera wiersza. Układ robi
-   więc grid: wiersz 1 = nazwa + stan, wiersz 2 = meta + akcje. */
+/* The card has a FLAT DOM — .glowna, .szczegoly, .karta-meta and both action sets
+   are siblings, because the contract does not provide a row wrapper. The layout is therefore
+   done by grid: row 1 = name + state, row 2 = meta + actions. */
 .karta {
   position: relative;
   display: grid;
@@ -746,15 +746,15 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   background: var(--glass2);
   border-color: var(--edge2);
 }
-/* :has(:focus-visible), nie :focus-within — kliknięcie myszą/palcem nie
-   zostawia obwódki na karcie, klawiatura nadal ją pokazuje. */
+/* :has(:focus-visible), not :focus-within — a click with mouse/finger does not
+   leave an outline on the card, the keyboard still shows it. */
 .karta:has(:focus-visible) {
   border-color: var(--acc);
   box-shadow: inset 0 1px 0 var(--shine), 0 0 0 3px var(--acc-32);
 }
 
-/* Kaskada wejścia — w projekcie liczona w JS jako inline delay, u nas
-   czysto w CSS, bo styli inline nie wolno (CSP style-src 'self'). */
+/* Entrance cascade — in the design computed in JS as an inline delay, for us
+   pure CSS, because inline styles are not allowed (CSP style-src 'self'). */
 .siatka > :nth-child(1)  { animation-delay: 0ms; }
 .siatka > :nth-child(2)  { animation-delay: 35ms; }
 .siatka > :nth-child(3)  { animation-delay: 70ms; }
@@ -774,8 +774,8 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   min-width: 0;
   text-decoration: none; color: inherit;
 }
-/* Ring siedzi na samym linku, nie na .nazwa — .nazwa ma overflow:hidden
-   i przycięłaby obwódkę przy dłuższej nazwie usługi. */
+/* The ring sits on the link itself, not on .nazwa — .nazwa has overflow:hidden
+   and would clip the outline with a longer service name. */
 .glowna:focus-visible {
   outline: none;
   border-radius: 12px;
@@ -793,14 +793,14 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
 .ikona img { width: 24px; height: 24px; object-fit: contain; display: block; }
 .litera { font-weight: 600; font-size: 15px; color: var(--acc-ink); }
 
-/* ── warianty ikon na ciemny/jasny tusz ──────────────────────────────────
-   Część ikon (Dashboard Icons) ma osobną grafikę na ciemny i na jasny motyw
-   panelu — ciemny tusz ginie na ciemnym tle i odwrotnie. Oba obrazy leżą w
-   DOM-ie naraz (patrz app.js renderujIkone / index.html), tu tylko czysty
-   CSS decyduje, który się pokaże — zero JS-a i zero drugiego requestu przy
-   przełączeniu motywu. display:contents na opakowaniu, żeby <img> w środku
-   dalej liczył się jak bezpośrednie dziecko .ikona / .ikona-podglad /
-   .kafel-ikony dla reguł rozmiaru zdefiniowanych przy tamtych klasach. */
+/* ── icon variants for dark/light ink ────────────────────────────────────
+   Some icons (Dashboard Icons) have a separate graphic for the dark and for the light
+   panel theme — dark ink vanishes on a dark background and vice versa. Both images lie in
+   the DOM at once (see app.js renderIcon / index.html), here only pure
+   CSS decides which one shows — zero JS and no second request on
+   theme switch. display:contents on the wrapper, so that the <img> inside
+   keeps counting as a direct child of .ikona / .ikona-podglad /
+   .kafel-ikony for the size rules defined at those classes. */
 .ikona-motyw--ciemny { display: contents; }
 .ikona-motyw--jasny { display: none; }
 :root[data-ton="light"] .ikona-motyw--ciemny { display: none; }
@@ -816,9 +816,9 @@ body.edycja .grupa h2 .btn { display: inline-flex; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* Opis i tagi usługi (SHYG-47). Opis to jedna przycięta linia pod hostem; tagi
-   to małe chipy, które na zwartej karcie (siatka, bento sm/md) zostają
-   schowane — widać je w liście, w dużym kaflu bento i w oknie szczegółów. */
+/* Service description and tags (SHYG-47). The description is one clipped line under the host; tags
+   are small chips which on a compact card (grid, bento sm/md) stay
+   hidden — they are visible in the list, in a large bento tile and in the details dialog. */
 .opis-uslugi {
   font-size: 12px; line-height: 1.3; color: var(--ink2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -842,8 +842,8 @@ body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none;
 .detale-opis { margin: 4px 0 0; font-size: 13px; color: var(--ink2); }
 #detale-tagi { margin-top: 6px; }
 
-/* Dolny pasek karty: uptime · ago. Trzyma wysokość, żeby akcje na hover
-   nie przesuwały treści. */
+/* Bottom bar of the card: uptime · ago. Keeps the height so that the hover actions
+   do not shift the content. */
 .karta-meta {
   grid-column: 1; grid-row: 2;
   display: flex; align-items: center; gap: 8px;
@@ -874,7 +874,7 @@ body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none;
 }
 .szczegoly:hover { background: var(--chip); }
 
-/* Kafel „Dodaj do <grupa>" — tylko w trybie edycji. */
+/* The "Add to <group>" tile — only in edit mode. */
 .kafel-dodaj {
   display: none;
   align-items: center; justify-content: center; gap: 8px;
@@ -886,8 +886,8 @@ body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none;
   transition: background .2s, color .2s;
 }
 .kafel-dodaj:hover { background: var(--chip); color: var(--ink); }
-/* Wygląd kafla niesie <li>; przycisk w środku ma tylko wypełnić go klikalnie,
-   w wyśrodkowanym wierszu — kolumna z .btn--tile rozbijała ikonę i podpis. */
+/* The look of the tile is carried by the <li>; the button inside only has to fill it clickably,
+   in a centred row — a column with .btn--tile broke up the icon and the label. */
 .kafel-dodaj .btn {
   width: 100%; height: 100%;
   flex-direction: row; align-items: center; justify-content: center;
@@ -902,10 +902,10 @@ body[data-widok="bento"] .karta[data-rozmiar="sm"] .opis-uslugi { display: none;
   animation: sg-fade .3s both;
 }
 
-/* ── widok bento ──────────────────────────────────────────────────────── */
+/* ── bento view ───────────────────────────────────────────────────────── */
 
-/* Rozmiary działają WYŁĄCZNIE w bento — w siatce wszystkie karty są równe,
-   bo to jest cała różnica między tymi dwoma widokami. */
+/* Sizes work ONLY in bento — in the grid all cards are equal,
+   because that is the whole difference between these two views. */
 body[data-widok="bento"] .siatka {
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   grid-auto-rows: 52px;
@@ -914,8 +914,8 @@ body[data-widok="bento"] .siatka {
 body[data-widok="bento"] .karta { grid-column: span 2; grid-row: span 2; }
 body[data-widok="bento"] .kafel-dodaj { grid-column: span 2; grid-row: span 2; }
 
-/* Mały kafel to jeden wiersz: ikona, nazwa, stan. Host, meta i wykres
-   nie mieszczą się w 52 px, więc znikają — nie ściskamy ich do nieczytelności. */
+/* A small tile is one row: icon, name, state. The host, meta and chart
+   do not fit in 52 px, so they disappear — we do not squeeze them to illegibility. */
 body[data-widok="bento"] .karta[data-rozmiar="sm"] {
   grid-row: span 1;
   gap: 10px;
@@ -932,8 +932,8 @@ body[data-widok="bento"] .karta[data-rozmiar="sm"] .host,
 body[data-widok="bento"] .karta[data-rozmiar="sm"] .karta-meta,
 body[data-widok="bento"] .karta[data-rozmiar="sm"] .karta-akcje,
 body[data-widok="bento"] .karta[data-rozmiar="sm"] .wykres { display: none; }
-/* Akcje edycji muszą zostać dostępne — mały kafel dostaje trzecią kolumnę,
-   żeby nie nachodziły na stan (grid nakłada elementy z tej samej komórki). */
+/* The edit actions must stay accessible — a small tile gets a third column,
+   so that they do not overlap the state (grid stacks elements from the same cell). */
 body.edycja[data-widok="bento"] .karta[data-rozmiar="sm"] {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
@@ -952,32 +952,32 @@ body[data-widok="bento"] .karta[data-rozmiar="lg"] .ikona img { width: 28px; hei
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .nazwa {
   font-size: 17px; letter-spacing: -.015em;
 }
-/* Duży kafel rozkłada się na trzy wiersze: nagłówek, pełnowymiarowy
-   wykres, meta — dlatego wykres dostaje całą szerokość karty. */
+/* A large tile lays out in three rows: header, full-size
+   chart, meta — hence the chart gets the full card width. */
 body[data-widok="bento"] .karta[data-rozmiar="lg"] {
   grid-template-rows: auto 1fr auto;
   align-items: start;
 }
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .glowna { align-self: center; }
-/* align-self: stretch jest tu konieczne — karta ma align-items:start, więc
-   bez tego .szczegoly skurczyłoby się do wysokości tekstu i absolutny
-   wykres nie miałby czego wypełnić. */
+/* align-self: stretch is necessary here — the card has align-items:start, so
+   without it .szczegoly would shrink to the text height and the absolute
+   chart would have nothing to fill. */
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .szczegoly {
   grid-column: 1 / -1; grid-row: 2;
   position: relative; align-self: stretch; align-items: center;
   margin: 0; min-height: 56px;
 }
-/* ! Wykres WYPADA Z PRZEPŁYWU. SVG ma viewBox 80×18, więc dopóki jest
-   zwykłym pudełkiem, przeglądarka liczy jego wysokość z proporcji (przy
-   740 px szerokości to 166 px) i rozpycha kartę o stałej wysokości —
-   raz wypychając akcje poza kartę, raz nachodząc na wiersz meta.
-   Absolutny inset:0 przykleja go dokładnie do swojego wiersza siatki. */
+/* ! The chart FALLS OUT OF THE FLOW. The SVG has a viewBox of 80×18, so as long as it is
+   an ordinary box, the browser computes its height from the proportions (at
+   740 px width that is 166 px) and stretches a card of fixed height —
+   once pushing the actions out of the card, once overlapping the meta row.
+   Absolute inset:0 glues it exactly to its grid row. */
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .wykres {
   position: absolute; inset: 0;
   width: 100%; height: 100%; min-height: 0;
 }
-/* Stan zostaje w przepływie, więc maluje się nad wykresem, przy prawej —
-   dostaje pigułkę, żeby dało się go odczytać na tle słupków. */
+/* The state stays in the flow, so it paints above the chart, on the right —
+   it gets a pill so that it can be read against the bars. */
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .stan {
   position: relative; margin-left: auto; align-self: center;
   height: 32px; padding: 0 12px;
@@ -990,10 +990,10 @@ body[data-widok="bento"] .karta[data-rozmiar="lg"] .karta-meta,
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .karta-akcje,
 body[data-widok="bento"] .karta[data-rozmiar="lg"] .edycja-akcje { grid-row: 3; }
 
-/* ── widok listy ──────────────────────────────────────────────────────── */
+/* ── list view ────────────────────────────────────────────────────────── */
 
-/* Ten sam DOM, inna skóra: karty stają się wierszami wspólnej tabeli.
-   Zero re-renderu i zero dublowania modelu — SSR zostaje nietknięty. */
+/* The same DOM, a different skin: cards become rows of a shared table.
+   Zero re-render and zero duplication of the model — SSR stays untouched. */
 body[data-widok="list"] .siatka {
   display: block;
   border: 1px solid var(--edge); border-radius: calc(var(--r) - 2px);
@@ -1017,7 +1017,7 @@ body[data-widok="list"] .karta:hover { transform: none; background: var(--glass2
 body[data-widok="list"] .karta:has(:focus-visible) {
   box-shadow: inset 0 0 0 2px var(--acc-32); border-color: var(--edge);
 }
-/* Wiersz listy jest jednowierszowy — wszystkie dzieci wracają do rzędu 1. */
+/* A list row is single-line — all children go back to row 1. */
 body[data-widok="list"] .glowna,
 body[data-widok="list"] .karta-meta,
 body[data-widok="list"] .szczegoly,
@@ -1033,12 +1033,12 @@ body[data-widok="list"] .ikona img { width: 20px; height: 20px; }
 body[data-widok="list"] .nazwa { font-size: 14px; }
 body[data-widok="list"] .kafel-dodaj { display: none !important; }
 
-/* ── stan usługi ──────────────────────────────────────────────────────── */
+/* ── service state ────────────────────────────────────────────────────── */
 
-/* Kolory TEKSTU statusu są oddzielne od kolorów grafiki. Kropki, słupki
-   wykresu i obwódki zostają przy czystych --degraded/--down (to grafika,
-   próg 3:1), ale etykieta jest tekstem: w tonie jasnym #E8A33D daje 1,9:1,
-   a #FF7B7F 2,1:1 — oba zaprojektowane pod ciemne tło. */
+/* The status TEXT colours are separate from the graphic colours. Dots, chart bars
+   and borders stay with the pure --degraded/--down (that is graphics,
+   threshold 3:1), but the label is text: in the light tone #E8A33D gives 1.9:1,
+   and #FF7B7F 2.1:1 — both designed for a dark background. */
 :root {
   --degraded-ink: var(--degraded);
   --down-tekst:   var(--down-ink);
@@ -1055,8 +1055,8 @@ body[data-widok="list"] .kafel-dodaj { display: none !important; }
 }
 .stan .etykieta { min-width: 42px; text-align: right; }
 
-/* Kształt niesie znaczenie razem z kolorem — dla daltonistów sam kolor to
-   za mało. up = koło, degraded = romb, down = kwadrat, unknown = pierścień. */
+/* The shape carries meaning together with the colour — for colour-blind users colour alone is
+   not enough. up = circle, degraded = diamond, down = square, unknown = ring. */
 .kropka {
   width: 9px; height: 9px; flex: none;
   border-radius: 50%;
@@ -1083,10 +1083,10 @@ body[data-widok="list"] .kafel-dodaj { display: none !important; }
 [data-stan="down"] .etykieta { color: var(--down-tekst); }
 [data-stan="degraded"] .etykieta { color: var(--degraded-ink); }
 
-/* ── wykresy ──────────────────────────────────────────────────────────── */
+/* ── charts ───────────────────────────────────────────────────────────── */
 
-/* Trzy ścieżki, jedna na stan, w kolejności up / degraded / down — tak je
-   wypełnia szablon i tak rysuje je JS. Kolor bierze CSS, nie atrybut. */
+/* Three paths, one per state, in the order up / degraded / down — that is how the template
+   fills them and how JS draws them. The colour comes from CSS, not from an attribute. */
 .wykres { width: 60px; height: 18px; flex: none; display: block; }
 .wykres path:nth-child(1), .wykres-duzy path:nth-child(1) { fill: var(--acc-bar); }
 .wykres path:nth-child(2), .wykres-duzy path:nth-child(2) { fill: var(--spark-degraded); }
@@ -1099,20 +1099,20 @@ body[data-widok="list"] .kafel-dodaj { display: none !important; }
   background: var(--chip);
 }
 
-/* Przezroczysta nakładka niosąca <title> per próbka — jedyne miejsce,
-   gdzie użytkownik widzi powód bez otwierania szczegółów. */
+/* A transparent overlay carrying a <title> per sample — the only place
+   where the user sees the reason without opening the details. */
 .detale-slupek { fill: transparent; }
 .detale-slupek:hover { fill: var(--shine); }
 
 #dodaj-grupe { align-self: flex-start; font-weight: 500; }
 
-/* Obwódka klawiaturowa — NIGDY outline:none bez zamiennika. Kontrolki
-   dostają ring na :focus-visible, pola tekstowe na zwykłym :focus. */
+/* Keyboard outline — NEVER outline:none without a replacement. Controls
+   get a ring on :focus-visible, text fields on plain :focus. */
 .przycisk:focus-visible,
 .ikonka:focus-visible,
 .menu-uslugi:focus-visible,
 .menu-pozycja:focus-visible,
-/* Fokus niesie baza .btn. Zostają komponenty, które bazą nie są. */
+/* Focus is carried by the .btn base. What stays are the components that are not the base. */
 .szczegoly:focus-visible,
 .chip-problemy:focus-visible,
 .skip:focus-visible {
@@ -1121,12 +1121,12 @@ body[data-widok="list"] .kafel-dodaj { display: none !important; }
   border-radius: 999px;
 }
 .szczegoly:focus-visible { border-radius: 12px; }
-/* Promień pierścienia musi iść za kształtem wariantu, inaczej wokół kafla
-   rysuje się pigułka. */
+/* The ring radius must follow the shape of the variant, otherwise a pill
+   is drawn around the tile. */
 .btn--tile:focus-visible { border-radius: 14px; }
 .btn--menu:focus-visible { border-radius: 12px; }
 
-/* ── tryb edycji ──────────────────────────────────────────────────────── */
+/* ── edit mode ────────────────────────────────────────────────────────── */
 
 .edycja-akcje {
   grid-column: 2; grid-row: 2; justify-self: end;
@@ -1134,18 +1134,18 @@ body[data-widok="list"] .kafel-dodaj { display: none !important; }
 }
 body.edycja .edycja-akcje { display: flex; }
 body.edycja .kafel-dodaj { display: flex; animation: sg-fade .2s both; }
-/* W trybie edycji rządzą akcje edycji — hover-owe chowamy, żeby się nie biły. */
+/* In edit mode the edit actions rule — we hide the hover ones so that they do not fight. */
 body.edycja .karta-akcje { display: none; }
 
 .edycja-akcje svg, .karta-akcje svg { width: 14px; height: 14px; }
 
-/* ── okna dialogowe ───────────────────────────────────────────────────── */
+/* ── dialogs ──────────────────────────────────────────────────────────── */
 
 dialog {
   width: min(560px, 94vw);
   max-height: calc(100dvh - 40px);
-  /* Bez tego okno ustawień (konta + hasło + powiadomienia + historia +
-     surowy YAML) urywa się na dole — natywny <dialog> sam nie przewija. */
+  /* Without this the settings dialog (accounts + password + notifications + history +
+     raw YAML) is cut off at the bottom — a native <dialog> does not scroll by itself. */
   overflow: auto;
   padding: 0;
   border: 1px solid var(--edge2); border-radius: 28px;
@@ -1174,16 +1174,16 @@ dialog menu {
   margin: 4px 0 0; padding: 0;
 }
 
-/* Okno ustawień ma pięć sekcji i pole z całym YAML-em — „Zamknij" lądowało
-   kilka ekranów niżej, w oderwaniu od reszty. Przyklejamy stopkę do dołu;
-   krycie musi być pełne, bo pod spodem przewija się tekst. */
+/* The settings dialog has five sections and a field with the whole YAML — "Close" ended up
+   several screens lower, detached from the rest. We stick the footer to the bottom;
+   the opacity must be full, because text scrolls underneath. */
 #okno-ustawien menu {
   position: sticky; bottom: 0; z-index: 1;
   margin: 8px -24px -24px; padding: 14px 24px;
   background: var(--panel-krycie);
   border-top: 1px solid var(--edge);
 }
-/* zapas, żeby ostatni wiersz sekcji nie kończył się tuż pod przyklejoną stopką */
+/* slack, so that the last row of the section does not end right under the sticky footer */
 #okno-ustawien section:last-of-type { padding-bottom: 6px; }
 
 dialog label { display: grid; gap: 5px; font-size: 13px; }
@@ -1208,10 +1208,10 @@ dialog input:focus, dialog select:focus, dialog textarea:focus {
   border-color: var(--acc-55);
   box-shadow: 0 0 0 3px var(--acc-32);
 }
-/* ! Rozwijana lista <select> to widget rysowany przez system, nie przez nas.
-   Na Linuksie Chrome bierze do niej motyw GTK i ignoruje color-scheme strony —
-   w ciemnym oknie wyskakiwał jasny popup. Jedyne, co przeglądarki tu
-   respektują, to jawne tło i kolor na <option>. */
+/* ! The dropdown <select> list is a widget drawn by the system, not by us.
+   On Linux Chrome takes the GTK theme for it and ignores the page's color-scheme —
+   a light popup popped out in a dark dialog. The only thing browsers
+   respect here is an explicit background and colour on <option>. */
 select option {
   background: var(--panel-krycie);
   color: var(--ink);
@@ -1235,7 +1235,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
   background: rgba(229,72,77,.14); color: var(--down-tekst);
   font-size: 13px;
 }
-/* Sukces ma własny wariant — dotąd nadużywana była .blad-okna. */
+/* Success has its own variant — until now .blad-okna was being abused. */
 .ok-okna {
   margin: 0; padding: 10px 12px;
   border: 1px solid var(--acc-55); border-radius: var(--r-duza);
@@ -1244,7 +1244,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .drobne { margin: 0; font-size: 12.5px; color: var(--ink3); }
 
-/* Segment rozmiaru kafla w edytorze usługi. */
+/* Tile size segment in the service editor. */
 .pole-rozmiaru {
   display: flex; gap: 2px; width: max-content;
   padding: 3px;
@@ -1266,7 +1266,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .pole-rozmiaru button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
 
-/* ── wybierak ikon ────────────────────────────────────────────────────── */
+/* ── icon picker ──────────────────────────────────────────────────────── */
 
 .pole-ikony {
   display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center;
@@ -1298,7 +1298,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 .kafel-ikony[aria-pressed="true"] { border-color: var(--acc); background: var(--acc-12); }
 .kafel-ikony img { width: 24px; height: 24px; object-fit: contain; }
 
-/* ── konta ────────────────────────────────────────────────────────────── */
+/* ── accounts ─────────────────────────────────────────────────────────── */
 
 .lista-kont { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
 .lista-kont li {
@@ -1312,8 +1312,8 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
   padding: 0; border: 0; background: none;
   color: var(--ink3); font: inherit; font-size: 12.5px; cursor: pointer;
 }
-/* ! po samym `button.grozna` nie wystarczy — `.lista-kont button` ma tę samą
-   wagę i stoi niżej w pliku, więc kasowanie konta wyglądało na neutralne */
+/* ! `button.grozna` alone is not enough — `.lista-kont button` has the same
+   weight and sits lower in the file, so deleting an account looked neutral */
 .lista-kont button.grozna { color: var(--down-tekst); }
 .lista-kont button:hover { color: var(--down-tekst); }
 .lista-kont button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
@@ -1328,10 +1328,10 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 .wiersz-formy { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .wiersz-formy input { flex: 1; min-width: 120px; }
 
-/* ── wygląd i mini-dialogi ────────────────────────────────────────────── */
+/* ── appearance and mini-dialogs ──────────────────────────────────────── */
 
-/* Zastępują prompt() i confirm() — natywne okna przeglądarki nie dają się
-   ostylować, a w szkle wyglądały jak wyrwa. */
+/* They replace prompt() and confirm() — native browser dialogs cannot be
+   styled, and in the glass they looked like a hole. */
 #okno-nazwy, #okno-potwierdzenia { width: min(380px, 94vw); }
 #pole-nazwy { width: 100%; }
 #blad-nazwy {
@@ -1344,14 +1344,14 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 #potwierdz-tak:hover { filter: brightness(1.08); }
 
-/* ── podgląd zmiany ───────────────────────────────────────────────────── */
+/* ── change preview ───────────────────────────────────────────────────── */
 
 #okno-diff { width: min(760px, 94vw); }
 
-/* Kolory tekstu diffa są ODDZIELNE od kolorów statusu. --down-ink (#FF7B7F)
-   jest zaprojektowany na ciemne tło i na jasnej pigułce diffa daje 2,0:1,
-   a --acc-ink 3,8:1 — obie poniżej progu. Diff to miejsce, w którym
-   użytkownik zatwierdza zmianę pliku, więc musi być czytelny w obu tonach. */
+/* The diff text colours are SEPARATE from the status colours. --down-ink (#FF7B7F)
+   is designed for a dark background and on the light diff pill gives 2.0:1,
+   and --acc-ink 3.8:1 — both below the threshold. The diff is the place where the
+   user approves a file change, so it must be legible in both tones. */
 .diff, .licznik-diff {
   --diff-plus:  var(--acc-ink);
   --diff-minus: var(--down-ink);
@@ -1375,11 +1375,11 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .diff .plus  { display: block; color: var(--diff-plus); background: var(--acc-12); }
 .diff .minus { display: block; color: var(--diff-minus); background: rgba(229,72,77,.12); }
-/* bez opacity — .75 na --ink3 schodziło do 3,0:1 */
+/* without opacity — .75 on --ink3 dropped to 3.0:1 */
 .diff .hunk  { display: block; margin-top: 6px; color: var(--ink2); }
 .diff .ctx   { display: block; }
 
-/* ── historia zmian ───────────────────────────────────────────────────── */
+/* ── change history ───────────────────────────────────────────────────── */
 
 .lista-wersji {
   list-style: none; margin: 0; padding: 0;
@@ -1410,7 +1410,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 .lista-wersji button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
 #git-info { color: var(--acc-ink); }
 
-/* ── okno szczegółów ──────────────────────────────────────────────────── */
+/* ── details dialog ───────────────────────────────────────────────────── */
 
 #okno-detali { width: min(780px, 94vw); }
 
@@ -1470,7 +1470,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
   overflow: hidden; text-overflow: ellipsis;
 }
 
-/* ── podpowiadanie z Dockera ──────────────────────────────────────────── */
+/* ── Docker suggestions ───────────────────────────────────────────────── */
 
 #okno-docker { width: min(680px, 94vw); }
 
@@ -1517,7 +1517,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .komunikat.ostrzezenie { border-color: rgba(232,163,61,.55); }
 
-/* ── stopka ───────────────────────────────────────────────────────────── */
+/* ── footer ───────────────────────────────────────────────────────────── */
 
 .stopka {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1534,7 +1534,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .polaczenie.zerwane { color: var(--down-tekst); }
 .polaczenie.zerwane::before { background: var(--down); }
-/* Zerwany strumień wygasza liczniki — pokazują stan sprzed chwili. */
+/* A broken stream dims the counters — they show the state from a moment ago. */
 .polaczenie.zerwane ~ .chip, body:has(.polaczenie.zerwane) .chip { opacity: .55; }
 
 .skroty {
@@ -1551,7 +1551,7 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
 }
 .wyloguj .btn:hover { background: none; color: var(--ink); }
 
-/* ── ekran logowania ──────────────────────────────────────────────────── */
+/* ── login screen ─────────────────────────────────────────────────────── */
 
 body.brama {
   display: grid; place-items: center;
@@ -1611,9 +1611,9 @@ body.brama {
 .brama-jezyk a { color: var(--ink3); font-size: 12.5px; text-decoration: underline; }
 .brama-jezyk a:hover { color: var(--ink); }
 
-/* ── maskotka ─────────────────────────────────────────────────────────── */
+/* ── mascot ───────────────────────────────────────────────────────────── */
 
-/* Rastrowa, więc pilnujemy ostrości przy skalowaniu w dół. */
+/* Raster, so we watch the sharpness when scaling down. */
 .logo {
   display: block;
   image-rendering: -webkit-optimize-contrast;
@@ -1621,10 +1621,10 @@ body.brama {
 }
 .brama-karta .logo { margin-bottom: 2px; }
 
-/* ── responsywność ────────────────────────────────────────────────────── */
+/* ── responsiveness ───────────────────────────────────────────────────── */
 
-/* Progi 640 i 1040 są w projekcie liczone w JS (resize + ResizeObserver +
-   interwał 1 s). U nas robi to CSS — układ nie może zależeć od skryptu. */
+/* The 640 and 1040 breakpoints are computed in JS in the design (resize + ResizeObserver +
+   1 s interval). For us CSS does it — the layout must not depend on a script. */
 
 @media (max-width: 639.98px) {
   body { padding-bottom: 48px; }
@@ -1639,12 +1639,12 @@ body.brama {
 
   .siatka { grid-template-columns: 1fr; }
 
-  /* Bento na wąskim ekranie: duża karta zajmuje pełną szerokość siatki. */
+  /* Bento on a narrow screen: a large card takes the full grid width. */
   body[data-widok="bento"] .siatka { grid-template-columns: repeat(2, 1fr); }
   body[data-widok="bento"] .karta[data-rozmiar="lg"] { grid-column: span 2; grid-row: span 5; }
 
-  /* Wiersz listy: nazwa + stan + akcje. Kolumna akcji jest zadeklarowana
-     wprost, żeby nie powstawała kolumna domyślna poza szablonem siatki. */
+  /* List row: name + state + actions. The actions column is declared
+     explicitly, so that no default column appears outside the grid template. */
   body[data-widok="list"] .karta { grid-template-columns: minmax(0, 1fr) auto auto; }
   body[data-widok="list"] .szczegoly { grid-column: 2; }
   body[data-widok="list"] .karta-akcje,
@@ -1656,8 +1656,8 @@ body.brama {
   .wyloguj { margin-left: auto; }
 }
 
-/* Kolumny host / wykres / uptime / akcje pojawiają się dopiero, gdy jest
-   dla nich miejsce — poniżej 1040 wiersz listy zostaje przy nazwie i stanie. */
+/* The host / chart / uptime / actions columns appear only when there is room
+   for them — below 1040 the list row stays with the name and the state. */
 @media (max-width: 1039.98px) {
   body[data-widok="list"] .karta { grid-template-columns: minmax(0, 1fr) auto auto; }
   body[data-widok="list"] .szczegoly { grid-column: 2; }
@@ -1674,30 +1674,31 @@ body.brama {
   body[data-widok="list"] .wykres { width: 80px; }
 }
 
-/* Ekran dotykowy nie ma hovera — akcje muszą być widoczne od razu,
-   inaczej na tablecie w kuchni nie da się ich dosięgnąć. */
+/* A touch screen has no hover — the actions must be visible right away,
+   otherwise on a tablet in the kitchen they cannot be reached. */
 @media (hover: none) {
   .karta-akcje { opacity: 1; pointer-events: auto; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   System .btn (Faza 2 / Task 7) — jedna baza, zamknięty zestaw wariantów.
-   TYLKO DODAJE: żaden z trzynastu dzisiejszych idiomów (.przycisk, .ikonka,
+   .btn system (Phase 2 / Task 7) — one base, a closed set of variants.
+   ONLY ADDS: none of the thirteen current idioms (.przycisk, .ikonka,
    .grupa-akcja, .karta-akcje > *, .edycja-akcje button, .menu-pozycja,
    .kafel-presetu/-tapety, .picker-*, button.cichy/.grozna, .wyloguj button,
-   bezklasowy submit) wyżej w pliku nie zmienia się ani nie znika — kasowanie
-   i podpięcie w szablonach to Task 8, robione osobnym commitem celowo, żeby
-   dało się odrzucić jedno bez drugiego.
-
-   Tokeny (--btn-bg/-bg-hover/-edge/-ink/-radius/-ease w :root, patrz wyżej)
-   to ALIASY na już istniejące zmienne (--chip, --glass2, --edge, --ink2) —
-   dokładnie te, których dzisiejsze .ikonka/.przycisk już używają. Canvas
-   Shy-Garlic-Glass.dc.html rysuje styl w atrybutach style=, nie w klasach,
-   i tylko dwa ekrany („Homelab panel", „Service details") — poniższe reguły
-   to ta sama para wartości co dzisiejsze .przycisk/.ikonka/.menu-pozycja/
-   .kafel-presetu (już raz wyprowadzone z tego samego canvasu, patrz nagłówek
-   pliku), plus warianty, których canvas nigdy nie narysował (disabled,
-   .btn--lg) — te są oznaczone niżej wprost jako wyprowadzone przez analogię,
+   classless submit) higher up in the file changes or disappears — deleting them
+   and wiring up the templates is Task 8, done in a separate commit on purpose, so
+   that one can be rejected without the other.
+   
+   The tokens (--btn-bg/-bg-hover/-edge/-ink/-radius/-ease in :root, see above)
+   are ALIASES of already existing variables (--chip, --glass2, --edge, --ink2) —
+   exactly those which the current .ikonka/.przycisk already use. The canvas
+   Shy-Garlic-Glass.dc.html draws the style in style= attributes, not in classes,
+   and only two screens ("Homelab panel", "Service details") — the rules below
+   are the same pair of values as the current .przycisk/.ikonka/.menu-pozycja/
+   .kafel-presetu (already derived once from the same canvas, see the file
+   header), plus variants which the canvas never drew (disabled,
+   .btn--lg) — those are marked explicitly below as derived by analogy,
+   not from the drawing.
    nie z rysunku. */
 
 .btn {
@@ -1708,9 +1709,9 @@ body.brama {
   background: var(--btn-bg);
   color: var(--btn-ink);
   font: 500 13.5px/1 var(--font-sans);
-  /* Baza siedzi też na <a> (język w pasku, „otwórz" na karcie i w
-     szczegółach) — bez tego link dostaje podkreślenie od przeglądarki i
-     wygląda jak obcy element między dwoma przyciskami. */
+  /* The base also sits on <a> (the language in the bar, "open" on the card and in the
+     details) — without this a link gets an underline from the browser and
+     looks like a foreign element between two buttons. */
   text-decoration: none;
   cursor: pointer;
   transition: background var(--btn-ease), color var(--btn-ease),
@@ -1718,29 +1719,29 @@ body.brama {
               filter var(--btn-ease), box-shadow var(--btn-ease);
 }
 .btn:hover { background: var(--btn-bg-hover); color: var(--ink); }
-/* Ring jak wszędzie indziej w pliku (.przycisk:focus-visible i cała reszta
-   mega-selektora niżej w sekcji „przyciski") — jeden pierścień, akcentowy,
-   niezależnie od wariantu, żeby fokus był spójny. */
+/* A ring like everywhere else in the file (.przycisk:focus-visible and the rest of the
+   mega-selector lower in the "buttons" section) — one ring, accent, regardless
+   of the variant, so that the focus is consistent. */
 .btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--acc-32);
 }
-/* Canvas nie rysuje ani jednego disabled — nic w dwóch zaprojektowanych
-   ekranach nigdy nie jest wyłączone. Nieprzezroczystość .45 nie jest więc
-   z rysunku: to jedyny istniejący w pliku precedens wyblakłego/nieaktywnego
-   stanu, .menu-pozycja[aria-disabled="true"] (Docker niedostępny — blednie,
-   zamiast znikać, patrz komentarz przy tamtej regule). Powtarzam tę samą
-   wartość zamiast wymyślać nową. */
+/* The canvas draws not a single disabled — nothing in the two designed
+   screens is ever disabled. The opacity .45 is therefore not from the
+   drawing: it is the only precedent in the file of a faded/inactive
+   state, .menu-pozycja[aria-disabled="true"] (Docker unavailable — it fades
+   instead of disappearing, see the comment at that rule). I repeat the same
+   value instead of inventing a new one. */
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--btn-bg); color: var(--btn-ink); }
 .btn svg { width: 15px; height: 15px; flex: none; }
 
-/* Stany toggle/tab na atrybutach ARIA, nie na klasach — atrybut i tak musi
-   być ustawiony dla czytnika ekranu, a druga równoległa prawda w postaci
-   klasy .wybrany dziś się z nim rozjeżdża (patrz System przycisków w specu).
-   Canvas ma DWA różne wizualne "włączone", więc dwie osobne reguły:
-   aria-pressed = tint akcentowy (edit/tło w pasku — .ikonka[aria-pressed]),
-   aria-selected = szkło + pierścień (przełącznik widoku — seg() z canvasu). */
+/* Toggle/tab states on ARIA attributes, not on classes — the attribute has to be set
+   anyway for the screen reader, and a second parallel truth in the form of
+   the .wybrany class today diverges from it (see Button system in the spec).
+   The canvas has TWO different visual "enabled" states, so two separate rules:
+   aria-pressed = accent tint (edit/background in the bar — .ikonka[aria-pressed]),
+   aria-selected = glass + ring (view switch — seg() from the canvas). */
 .btn[aria-pressed="true"] {
   background: var(--acc-22); color: var(--acc-ink); border-color: var(--acc-55);
 }
@@ -1749,11 +1750,11 @@ body.brama {
   box-shadow: inset 0 0 0 1px var(--edge2), 0 2px 6px -2px rgba(0,0,0,.3);
 }
 
-/* ── primary — dzisiejsze .przycisk / canvas: przycisk "Service" (menu
-   akcji, linia z onClick={{ toggleMenu }}) i "Check now" w Service details.
-   bg/kolor tekstu/cień to dosłownie var(--acc)/var(--acc-fg)/var(--acc-80)
-   z canvasu (accent-fg dobrany po luminancji, --acc-80 = "cień przycisku
-   akcentowego" — już tak nazwany w tokenach na górze pliku). ── */
+/* ── primary — today's .przycisk / canvas: the "Service" button (action
+   menu, the line with onClick={{ toggleMenu }}) and "Check now" in Service details.
+   bg/text colour/shadow are literally var(--acc)/var(--acc-fg)/var(--acc-80)
+   from the canvas (accent-fg chosen by luminance, --acc-80 = "accent button
+   shadow" — already named so in the tokens at the top of the file). ── */
 .btn--primary {
   border-color: transparent;
   background: var(--acc); color: var(--acc-fg);
@@ -1766,23 +1767,23 @@ body.brama {
 }
 .btn--primary:disabled { box-shadow: none; transform: none; filter: none; }
 
-/* ── quiet — dzisiejsze .przycisk.cichy / .cichy: ten sam kształt co primary
-   (pigułka), ale szklana. Krawędź --edge2 (mocniejsza niż baza .btn) i pełny
-   --ink zamiast --ink2 to dosłowne różnice z .przycisk.cichy wobec .btn. ── */
+/* ── quiet — today's .przycisk.cichy / .cichy: the same shape as primary
+   (pill), but glass. The --edge2 edge (stronger than the .btn base) and full
+   --ink instead of --ink2 are the literal differences of .przycisk.cichy against .btn. ── */
 .btn--quiet {
   border-color: var(--edge2);
   color: var(--ink);
 }
 .btn--quiet:hover { background: var(--btn-bg-hover); color: var(--ink); }
 
-/* ── danger — scala dwa dzisiejsze idiomy grozna: pigułkę (.przycisk.grozna,
-   krawędź czerwona już w spoczynku, tło czerwienieje na hover) i akcję-ikonę
-   (.grupa-akcja.grozna / .edycja-akcje button.grozna — czerwień pojawia się
-   DOPIERO na hover, w canvasie linie z onClick={{ s.del }}/{{ soonDelete }}
-   i style-hover="color:#FF7B7F;border-color:rgba(229,72,77,.6)"). Jeden
-   wariant robi oba: delikatna czerwona krawędź od razu, pełna czerwień
-   (tło + tekst + krawędź) na hover — Task 8 dostaje jedną klasę zamiast
-   dwóch zachowań do wyboru. ── */
+/* ── danger — merges two current grozna idioms: the pill (.przycisk.grozna,
+   the edge already red at rest, the background turns red on hover) and the icon action
+   (.grupa-akcja.grozna / .edycja-akcje button.grozna — the red appears
+   ONLY on hover, in the canvas the lines with onClick={{ s.del }}/{{ soonDelete }}
+   and style-hover="color:#FF7B7F;border-color:rgba(229,72,77,.6)"). One
+   variant does both: a delicate red edge right away, full red
+   (background + text + edge) on hover — Task 8 gets one class instead of
+   two behaviours to choose from. ── */
 .btn--danger { border-color: var(--down-obwodka, rgba(229,72,77,.35)); }
 .btn--danger:hover {
   background: rgba(229,72,77,.16);
@@ -1790,18 +1791,18 @@ body.brama {
   border-color: rgba(229,72,77,.6);
 }
 
-/* ── icon — dzisiejsze .ikonka (38×38, kółko) scalone z .karta-akcje > *
-   i .grupa-akcja (mniejsze kwadratowe akcje w wierszu karty). Canvas ma tu
-   NIESPÓJNE promienie między kontekstami (999px / 9px / 7px) — normalizuję
-   na jeden kształt (koło, przez --btn-radius) i różnicuję tylko rozmiarem
-   przez .btn--sm, zamiast dorzucać trzeci token promienia. ── */
+/* ── icon — today's .ikonka (38×38, circle) merged with .karta-akcje > *
+   and .grupa-akcja (smaller square actions in the card row). The canvas has
+   INCONSISTENT radii between contexts here (999px / 9px / 7px) — I normalise
+   to one shape (circle, via --btn-radius) and differentiate only by size
+   through .btn--sm, instead of adding a third radius token. ── */
 .btn--icon { width: 38px; height: 38px; padding: 0; flex: none; }
 .btn--icon svg { width: 16px; height: 16px; }
 
-/* ── tile — dzisiejsze .kafel-presetu / .kafel-tapety (siatka presetów tła
-   w pickerze). W canvasie i w dzisiejszym CSS ten "przycisk" nie ma własnego
-   tła/krawędzi wcale — cały chrom niesie miniatura w środku, więc wariant
-   zdejmuje geometrię pigułki z bazy .btn zamiast ją zachowywać. ── */
+/* ── tile — today's .kafel-presetu / .kafel-tapety (the grid of background presets
+   in the picker). In the canvas and in today's CSS this "button" has no background/edge
+   of its own at all — the whole chrome is carried by the thumbnail inside, so the variant
+   strips the pill geometry from the .btn base instead of keeping it. ── */
 .btn--tile {
   flex-direction: column; align-items: stretch; justify-content: flex-start;
   height: auto; width: 100%; padding: 0;
@@ -1811,11 +1812,11 @@ body.brama {
 }
 .btn--tile:hover { background: none; color: var(--btn-ink); }
 
-/* ── menu — dzisiejsze .menu-pozycja (pozycje w rozwijanym menu "Service").
-   Promień 12px jest dosłowny z canvasu i w dzisiejszym CSS też jest literałem
-   (nie tokenem) — nie dodaję dla niego zmiennej. Hover na --chip, NIE na
-   --btn-bg-hover: pozycja menu siedzi już na nieprzezroczystym tle popovera,
-   więc kontrast --glass2 byłby tu za mocny wobec tego, co widać w canvasie. ── */
+/* ── menu — today's .menu-pozycja (items in the "Service" dropdown menu).
+   The 12px radius is literal from the canvas and in today's CSS it is also a literal
+   (not a token) — I am not adding a variable for it. Hover on --chip, NOT on
+   --btn-bg-hover: a menu item already sits on the popover's opaque background,
+   so the --glass2 contrast would be too strong against what is visible in the canvas. ── */
 .btn--menu {
   width: 100%; justify-content: space-between;
   height: auto; padding: 9px 12px;
@@ -1825,18 +1826,18 @@ body.brama {
 }
 .btn--menu:hover { background: var(--chip); color: var(--ink); }
 
-/* ── rozmiary — .btn--sm to dosłownie dzisiejsze .przycisk.maly; .btn--lg
-   nie istnieje ani w canvasie, ani dziś w pliku (nic w dwóch zaprojektowanych
-   ekranach nie jest większe od .przycisk). Wyprowadzony przez analogię: ten
-   sam krok, odwrotny kierunek (baza→sm = -10px wysokości/-4px paddingu/
-   -1px fontu, więc baza→lg = +10px/+4px/+1px), żeby zachować proporcję,
-   o którą prosi zadanie, bez zgadywania wartości znikąd. ── */
+/* ── sizes — .btn--sm is literally today's .przycisk.maly; .btn--lg
+   does not exist either in the canvas or in the file today (nothing in the two designed
+   screens is larger than .przycisk). Derived by analogy: the same
+   step, the opposite direction (base→sm = -10px height/-4px padding/
+   -1px font, so base→lg = +10px/+4px/+1px), to keep the proportion
+   the task asks for, without guessing values from nowhere. ── */
 .btn--sm { height: 30px; padding: 0 12px; font-size: 12.5px; font-weight: 500; }
 .btn--sm.btn--icon { width: 28px; height: 28px; padding: 0; }
 .btn--sm svg { width: 13px; height: 13px; }
 .btn--lg { height: 50px; padding: 0 20px; font-size: 14.5px; }
 
-/* ── ustawienia: zakładki ─────────────────────────────────────────────── */
+/* ── settings: tabs ───────────────────────────────────────────────────── */
 
 .zakladki {
   display: flex; flex-wrap: wrap; gap: 4px;
@@ -1863,15 +1864,15 @@ body.brama {
 .instancja-wartosc { font-family: var(--font-mono); color: var(--ink2); word-break: break-all; }
 .instancja-zrodlo { color: var(--ink3); white-space: nowrap; }
 
-/* Kafel niesie zaznaczenie pierścieniem wokół miniatury — tło z bazy .btn
-   podświetlałoby jeszcze podpis, przez co wybrany kafel wyglądał na wyższy. */
+/* The tile carries the selection with a ring around the thumbnail — the .btn base background
+   would also highlight the label, making the selected tile look taller. */
 .btn--tile[aria-pressed="true"] { background: none; }
 
-/* ── edytor pliku ─────────────────────────────────────────────────────────
-   Kolory rysuje <pre> LEŻĄCY POD przezroczystym <textarea>. Cała sztuczka
-   stoi na tym, że obie warstwy mają identyczną typografię, padding i
-   zawijanie — rozjazd choćby o pół piksela i tekst zaczyna pływać nad
-   kolorami. Dlatego wspólne wartości siedzą w zmiennych. */
+/* ── file editor ──────────────────────────────────────────────────────────
+   The colours are drawn by a <pre> LYING UNDER a transparent <textarea>. The whole trick
+   rests on both layers having identical typography, padding and
+   wrapping — a drift of even half a pixel and the text starts floating over the
+   colours. Hence the shared values sit in variables. */
 
 .naglowek-edytora {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
@@ -1914,30 +1915,30 @@ body.brama {
   display: block; width: 100%;
   resize: vertical;
   background: transparent;
-  /* Tekst niewidoczny — widać go przez warstwę kolorów pod spodem. Kursor i
-     zaznaczenie zostają, bo maluje je przeglądarka osobno. */
+  /* The text is invisible — it can be seen through the colour layer underneath. The caret and
+     selection stay, because the browser paints them separately. */
   color: transparent;
   caret-color: var(--ink);
 }
 .edytor-yaml textarea::selection { background: var(--acc-32); color: transparent; }
 .edytor-yaml textarea:focus { outline: none; border-color: transparent; }
 
-/* Tokeny YAML-a. Kolory z palety motywu, żeby oba tony działały bez
-   osobnych wartości. */
+/* YAML tokens. Colours from the theme palette, so that both tones work without
+   separate values. */
 .tok-komentarz { color: var(--ink3); font-style: italic; }
 .tok-klucz     { color: var(--acc-ink); }
 .tok-tekst     { color: var(--ink); }
-/* --degraded-ink, nie --degraded: ten drugi to czysty pomarańcz kropki stanu,
-   który na białym tle tonu jasnego jest nieczytelny. Token -ink istnieje
-   dokładnie po to i jest już ściemniony dla jasnego. */
+/* --degraded-ink, not --degraded: the latter is the pure orange of the state dot,
+   which is unreadable on the white background of the light tone. The -ink token exists
+   precisely for that and is already darkened for light. */
 .tok-liczba    { color: var(--degraded-ink); }
 .tok-slowo     { color: var(--degraded-ink); }
 .tok-kotwica   { color: var(--down-tekst); }
 .tok-myslnik   { color: var(--ink3); }
 
-/* ── pełny ekran ──────────────────────────────────────────────────────────
-   Bez drugiego <dialog>: jeden modal to jedna pułapka fokusu i jeden stan
-   do zamknięcia. Powiększamy ten, który już jest otwarty. */
+/* ── fullscreen ───────────────────────────────────────────────────────────
+   Without a second <dialog>: one modal is one focus trap and one state
+   to close. We enlarge the one that is already open. */
 #okno-ustawien.pelny-ekran {
   width: 100vw; max-width: 100vw;
   height: 100dvh; max-height: 100dvh;
@@ -1945,10 +1946,10 @@ body.brama {
 }
 #okno-ustawien.pelny-ekran .tresc-okna {
   height: 100%;
-  /* ! Ukryte dzieci wypadają z siatki, więc po schowaniu zakładek, menu i
-     pozostałych paneli zostają dokładnie dwa wiersze: nagłówek i edytor.
-     Rozpisanie ich „na zapas" zostawiało edytor w wierszu auto i pół ekranu
-     pustki pod spodem. */
+  /* ! Hidden children fall out of the grid, so after hiding the tabs, the menu and
+     the other panels exactly two rows remain: the header and the editor.
+     Specifying them "in reserve" left the editor in an auto row and half a screen
+     of emptiness underneath. */
   grid-template-rows: auto 1fr;
   padding: 20px 24px;
 }
@@ -1964,20 +1965,20 @@ body.brama {
   height: 100%; resize: none;
 }
 
-/* Plik poza limitem kolorowania — wracamy do gołego pola. */
+/* A file beyond the highlighting limit — we go back to the bare field. */
 .edytor-yaml.bez-kolorow .podswietlenie { display: none; }
 .edytor-yaml.bez-kolorow textarea { color: var(--ink); }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Edycja tytułu i zmiana kolejności (SHYG-39, SHYG-40).
-   Dopisane PO systemie .btn, a selektory mają dwie klasy — baza .btn ma
-   display/height/padding i przy jednej klasie wygrywałaby kolejnością.
+   Title editing and reordering (SHYG-39, SHYG-40).
+   Appended AFTER the .btn system, and the selectors have two classes — the .btn base has
+   display/height/padding and with one class it would win by order.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── tytuł ────────────────────────────────────────────────────────────── */
+/* ── title ────────────────────────────────────────────────────────────── */
 
 .brand { position: relative; }
-/* ołówek tylko w trybie edycji — ten sam wzorzec co przyciski nagłówka grupy */
+/* the pencil only in edit mode — the same pattern as the group header buttons */
 .brand #tytul-edytuj { display: none; }
 body.edycja .brand #tytul-edytuj { display: inline-flex; }
 
@@ -1991,7 +1992,7 @@ body.edycja .brand #tytul-edytuj { display: inline-flex; }
 .tytul-pole:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acc-32); }
 .tytul-pole[aria-invalid="true"] { border-color: var(--down); }
 
-/* komunikat przy polu — pod nagłówkiem, nie w przepływie (nagłówek jest sticky) */
+/* message by the field — under the header, not in the flow (the header is sticky) */
 .blad-pola {
   position: absolute; left: 40px; top: calc(100% + 8px); z-index: 60;
   margin: 0; padding: 8px 12px; max-width: min(420px, 90vw);
@@ -2000,14 +2001,14 @@ body.edycja .brand #tytul-edytuj { display: inline-flex; }
   font-size: 13px; box-shadow: var(--shadow);
 }
 
-/* ── przeciąganie ─────────────────────────────────────────────────────── */
+/* ── dragging ─────────────────────────────────────────────────────────── */
 
 .btn.uchwyt { cursor: grab; touch-action: none; }
 .btn.uchwyt:active { cursor: grabbing; }
 
-/* Cała karta i nagłówek grupy to powierzchnia przeciągania — tylko w trybie
-   edycji (tak jak uchwyt). touch-action zostaje domyślne: palec przewija stronę,
-   a przeciąganie zaczyna się dopiero po długim przytrzymaniu (app.js). */
+/* The whole card and the group heading are the drag surface — only in edit
+   mode (like the handle). touch-action stays default: a finger scrolls the page,
+   and dragging starts only after a long press (app.js). */
 body.edycja .karta,
 body.edycja .grupa > h2 {
   cursor: grab;
@@ -2021,7 +2022,7 @@ body.edycja .karta .uchwyt, body.edycja .grupa > h2 .uchwyt { cursor: grab; }
 body.przeciaganie, body.przeciaganie * { cursor: grabbing !important; }
 body.przeciaganie { user-select: none; -webkit-user-select: none; }
 
-/* oryginał zostaje w DOM-ie i robi za znacznik miejsca upuszczenia */
+/* the original stays in the DOM and acts as the marker of the drop place */
 body .karta.przeciagana, body .karta.przeciagana:hover {
   transform: none; animation: none;
   background: var(--acc-12); border: 1px dashed var(--acc-55);
@@ -2037,9 +2038,9 @@ body .karta.przeciagana > * { visibility: hidden; }
 .grupa.przeciagana > h2 > * { visibility: hidden; }
 .grupa.przeciagana > h2::after { display: none; }
 
-/* duch pod palcem/kursorem — nieprzezroczysty, jak każdy element nad treścią */
-/* `body` na początku: widoki listy i bento dają .karta własne tło i ramkę
-   selektorem o dwóch klasach, a duch ma być nieprzezroczysty w każdym z nich. */
+/* ghost under the finger/cursor — opaque, like every element above the content */
+/* `body` at the start: list and bento views give .karta its own background and border
+   with a two-class selector, and the ghost is to be opaque in each of them. */
 body[data-widok] .duch {
   position: fixed; left: 0; top: 0; z-index: 90; margin: 0;
   pointer-events: none; will-change: transform;
@@ -2057,7 +2058,7 @@ body[data-widok] .duch.karta { backdrop-filter: none; -webkit-backdrop-filter: n
   .duch--dotyk { scale: 1.05; }
 }
 
-/* ── baner stanu pliku (błąd YAML / nieznane klucze) ────────────────────── */
+/* ── file state banner (YAML error / unknown keys) ──────────────────────── */
 .baner-config {
   margin: 12px clamp(12px, 3vw, 28px); padding: 10px 14px;
   border: 1px solid var(--edge2); border-radius: var(--r-duza);

@@ -1002,7 +1002,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	icon := s.resolveIcon(svc.Icon, svc.Name)
 	jsonReply(w, http.StatusOK, map[string]any{
 		"key": serviceKey, "name": svc.Name, "group": group, "url": svc.URL, "icon": svc.Icon,
-		"iconSrc": icon.Src, "iconWariantCiemny": icon.WariantCiemny, "iconWariantJasny": icon.WariantJasny,
+		"iconSrc": icon.Src, "iconWariantCiemny": icon.VariantDark, "iconWariantJasny": icon.VariantLight,
 		"size": svc.Size, "description": svc.Description, "tags": tagsToJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
 		"expect": svc.Check.Expect, "insecure": svc.Check.Insecure,

@@ -45,19 +45,19 @@ func checkTemplateOutput(t *testing.T, html string) {
 
 func fullPageView() pageView {
 	d := pageView{
-		Title: "Homelab", Wersja: "test", Użytkownik: "admin", IconCount: 3363,
-		Stan: template.JS("{}"), Lang: "pl",
-		Wyglad:     appearanceView{Preset: "aurora", Blur: 10, Ton: "dark", Widok: "grid"},
-		WygladJSON: template.JS(`{"preset":"aurora","image":"","blur":10,"tone":"dark","view":"grid"}`),
-		CanWrite:   true, BackgroundLimit: BackgroundLimitMB,
+		Title: "Homelab", Version: "test", User: "admin", IconCount: 3363,
+		State: template.JS("{}"), Lang: "pl",
+		Appearance:     appearanceView{Preset: "aurora", Blur: 10, Tone: "dark", View: "grid"},
+		AppearanceJSON: template.JS(`{"preset":"aurora","image":"","blur":10,"tone":"dark","view":"grid"}`),
+		CanWrite:       true, BackgroundLimit: BackgroundLimitMB,
 		Groups: []groupView{{Name: "Media", Services: []serviceView{{
 			Key: "Media/Jellyfin", Group: "Media", Name: "Jellyfin",
 			URL: "http://jellyfin", Host: "jellyfin", IconName: "jellyfin",
-			Icon: iconRef{Src: "/icon/jellyfin", Litera: "J"}, Rozmiar: "md",
+			Icon: iconRef{Src: "/icon/jellyfin", Letter: "J"}, Size: "md",
 		}}}},
 	}
-	d.T, d.TJSON, d.DrugiJezyk, d.DrugiJezykNazwa, d.DrugiJezykKrotko = fillLang(i18n.PL)
-	d.SzukajIkonPlaceholder = "Szukaj ikony"
+	d.T, d.TJSON, d.SecondLang, d.SecondLangName, d.SecondLangShort = fillLang(i18n.PL)
+	d.SearchIconsPlaceholder = "Szukaj ikony"
 	return d
 }
 
@@ -74,7 +74,7 @@ func TestTemplatesExecute(t *testing.T) {
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		for _, setup := range []bool{false, true} {
 			buf.Reset()
-			data := s.withLang(l, loginView{Setup: setup, Wersja: "test", Tytuł: "Logowanie"})
+			data := s.withLang(l, loginView{Setup: setup, Version: "test", Title: "Logowanie"})
 			if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 				t.Fatalf("login.html (%s, setup=%v): %v", l, setup, err)
 			}
@@ -134,7 +134,7 @@ func TestLoginDoesNotLeakWallpaper(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	data := s.withLang(i18n.PL, loginView{Wersja: "test", Tytuł: "Logowanie"})
+	data := s.withLang(i18n.PL, loginView{Version: "test", Title: "Logowanie"})
 	if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 		t.Fatal(err)
 	}
@@ -644,8 +644,8 @@ func TestPreviewPages(t *testing.T) {
 		var buf bytes.Buffer
 		// EN as in a default request without Accept-Language — the other screenshots
 		// are also in English, and both READMEs share the same pictures
-		data := s.withLang(i18n.EN, loginView{Setup: w.setup, Wersja: "0.9.0",
-			Tytuł: "Sign in"})
+		data := s.withLang(i18n.EN, loginView{Setup: w.setup, Version: "0.9.0",
+			Title: "Sign in"})
 		if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 			t.Fatal(err)
 		}

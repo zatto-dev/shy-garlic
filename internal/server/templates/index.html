@@ -1,6 +1,6 @@
 {{define "index.html" -}}
 <!doctype html>
-<html lang="{{.Lang}}" data-preset="{{.Wyglad.Preset}}" data-ton="{{.Wyglad.Ton}}">
+<html lang="{{.Lang}}" data-preset="{{.Appearance.Preset}}" data-ton="{{.Appearance.Tone}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -10,12 +10,12 @@
 <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/assets/favicon-180.png">
 </head>
-<body data-widok="{{.Wyglad.Widok}}">
+<body data-widok="{{.Appearance.View}}">
 <a class="skip" href="#tresc">{{.T.przejdz_do_uslug}}</a>
 
-<!-- ── warstwa tła ────────────────────────────────────────────────────── -->
-<!-- Pozycje i kolory blobów bierze CSS z :root[data-preset]; JS podmienia
-     wyłącznie --tlo-obraz / --tlo-rozmycie przez CSSOM. -->
+<!-- ── background layer ───────────────────────────────────────────────── -->
+<!-- The positions and colours of the blobs come from CSS :root[data-preset]; JS overrides
+     only --tlo-obraz / --tlo-rozmycie through CSSOM. -->
 <div id="tlo" aria-hidden="true">
   <div class="tlo-warstwa">
     <div class="tlo-blob"></div>
@@ -28,7 +28,7 @@
   </div>
 </div>
 
-<!-- łapacz kliknięć poza popoverami; poza .top, żeby nie wpaść w jego z-index -->
+<!-- click catcher outside the popovers; outside .top, so as not to fall into its z-index -->
 <div class="zaslona" id="zaslona" hidden></div>
 
 <header class="top">
@@ -98,9 +98,9 @@
            stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"></rect><circle cx="9" cy="10" r="1.6"></circle><path d="M21 16l-5-5-8 8"></path></svg>
     </button>
 
-    <a href="/lang?set={{.DrugiJezyk}}" class="btn btn--icon jezyk"
-       title="{{.T.jezyk}}: {{.DrugiJezykNazwa}}" aria-label="{{.T.jezyk}}: {{.DrugiJezykNazwa}}"
-       rel="nofollow">{{.DrugiJezykKrotko}}</a>
+    <a href="/lang?set={{.SecondLang}}" class="btn btn--icon jezyk"
+       title="{{.T.jezyk}}: {{.SecondLangName}}" aria-label="{{.T.jezyk}}: {{.SecondLangName}}"
+       rel="nofollow">{{.SecondLangShort}}</a>
 
     <button id="ustawienia" class="btn btn--icon" type="button" aria-label="{{.T.ustawienia}}" title="{{.T.ustawienia}}">
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -108,7 +108,7 @@
     </button>
   </div>
 
-  <!-- ── menu „Usługa" ────────────────────────────────────────────────── -->
+  <!-- ── "Service" menu ───────────────────────────────────────────────── -->
   <div class="menu-panel" id="menu-uslugi-panel" role="menu" aria-labelledby="menu-uslugi" hidden>
     <button class="btn btn--menu" id="menu-nowa-usluga" type="button" role="menuitem">
       <span>{{.T.nowa_usluga}}</span>
@@ -123,7 +123,7 @@
     </button>
   </div>
 
-  <!-- ── picker tła ───────────────────────────────────────────────────── -->
+  <!-- ── background picker ────────────────────────────────────────────── -->
   <div class="picker-tla" id="picker-tla" role="dialog" aria-label="{{.T.tlo}}" hidden>
     <div class="picker-naglowek">
       <b>{{.T.tlo}}</b>
@@ -197,10 +197,10 @@
   <input id="plik-tapety" type="file" accept="image/*" hidden>
 </header>
 
-<div class="baner-config" id="baner-config" data-stan="{{.Baner.Stan}}" role="alert"{{if eq .Baner.Stan "ok"}} hidden{{end}}>
-  <strong id="baner-tytul">{{.Baner.Tytuł}}</strong>
-  <p id="baner-blad"{{if not .Baner.Błąd}} hidden{{end}}>{{.Baner.Błąd}}</p>
-  <ul id="baner-lista"{{if not .Baner.Ostrzeżenia}} hidden{{end}}>{{range .Baner.Ostrzeżenia}}<li>{{.}}</li>{{end}}</ul>
+<div class="baner-config" id="baner-config" data-stan="{{.Banner.State}}" role="alert"{{if eq .Banner.State "ok"}} hidden{{end}}>
+  <strong id="baner-tytul">{{.Banner.Title}}</strong>
+  <p id="baner-blad"{{if not .Banner.Error}} hidden{{end}}>{{.Banner.Error}}</p>
+  <ul id="baner-lista"{{if not .Banner.Warnings}} hidden{{end}}>{{range .Banner.Warnings}}<li>{{.}}</li>{{end}}</ul>
 </div>
 
 <div class="sr-only" id="podsumowanie" role="status" aria-live="polite"></div>
@@ -223,15 +223,15 @@
     </h2>
     <ul class="siatka">
     {{range .Services}}
-      <li class="karta" data-rozmiar="{{.Rozmiar}}" data-key="{{.Key}}" data-grupa="{{.Group}}"
+      <li class="karta" data-rozmiar="{{.Size}}" data-key="{{.Key}}" data-grupa="{{.Group}}"
           data-nazwa="{{.Name}}" data-adres="{{.URL}}" data-ikona="{{.IconName}}"
           data-opis="{{.Description}}" data-tagi="{{.TagsJSON}}"
-          data-szukaj="{{.SzukajTekst}}">
+          data-szukaj="{{.SearchText}}">
         <a class="glowna"{{if .Href}} href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{end}}{{if .Description}} title="{{.Description}}"{{end}}>
           <span class="ikona">
-            {{if .Icon.WariantCiemny}}<span class="ikona-motyw ikona-motyw--ciemny"><img src="{{.Icon.WariantCiemny}}" alt="" loading="lazy" width="28" height="28"></span><span class="ikona-motyw ikona-motyw--jasny"><img src="{{.Icon.WariantJasny}}" alt="" loading="lazy" width="28" height="28"></span>
+            {{if .Icon.VariantDark}}<span class="ikona-motyw ikona-motyw--ciemny"><img src="{{.Icon.VariantDark}}" alt="" loading="lazy" width="28" height="28"></span><span class="ikona-motyw ikona-motyw--jasny"><img src="{{.Icon.VariantLight}}" alt="" loading="lazy" width="28" height="28"></span>
             {{else if .Icon.Src}}<img src="{{.Icon.Src}}" alt="" loading="lazy" width="28" height="28">
-            {{else}}<span class="litera">{{.Icon.Litera}}</span>{{end}}
+            {{else}}<span class="litera">{{.Icon.Letter}}</span>{{end}}
           </span>
           <span class="opis">
             <span class="nazwa">{{.Name}}</span>
@@ -298,16 +298,16 @@
 </main>
 
 <footer class="stopka">
-  <span>Shy Garlic {{.Wersja}}</span>
+  <span>Shy Garlic {{.Version}}</span>
   <span class="kropka-sep">·</span>
   <span id="polaczenie" class="polaczenie" title="{{.T.strumien}}">{{.T.na_zywo}}</span>
   <span class="kropka-sep">·</span>
-  <span>{{.Użytkownik}}</span>
+  <span>{{.User}}</span>
   <span class="skroty">{{.T.skroty_podpowiedz}}</span>
   <form method="post" action="/logout" class="wyloguj"><button type="submit" class="btn btn--quiet btn--sm">{{.T.wyloguj}}</button></form>
 </footer>
 
-<!-- ── okno edycji usługi ─────────────────────────────────────────────── -->
+<!-- ── service edit dialog ────────────────────────────────────────────── -->
 <dialog id="okno-uslugi">
   <form method="dialog" id="form-uslugi">
     <h3 id="tytul-uslugi">{{.T.nowa_usluga}}</h3>
@@ -338,7 +338,7 @@
       <span class="etykieta-pola">{{.T.ikona}}</span>
       <div class="ikona-podglad" id="ikona-podglad"><span class="litera">?</span></div>
       <input id="szukaj-ikony" type="search" autocomplete="off" spellcheck="false"
-             placeholder="{{.SzukajIkonPlaceholder}}">
+             placeholder="{{.SearchIconsPlaceholder}}">
       <input type="hidden" name="icon" id="pole-ikony">
     </div>
     <div class="siatka-ikon" id="siatka-ikon"></div>
@@ -366,7 +366,7 @@
   </form>
 </dialog>
 
-<!-- ── podpowiadanie z Dockera ────────────────────────────────────────── -->
+<!-- ── Docker suggestions ─────────────────────────────────────────────── -->
 <dialog id="okno-docker">
   <div class="tresc-okna">
     <h3>{{.T.docker_tytul}}</h3>
@@ -384,7 +384,7 @@
   </div>
 </dialog>
 
-<!-- ── szczegóły usługi ───────────────────────────────────────────────── -->
+<!-- ── service details ────────────────────────────────────────────────── -->
 <dialog id="okno-detali">
   <div class="tresc-okna">
     <div class="detale-naglowek">
@@ -423,7 +423,7 @@
   </div>
 </dialog>
 
-<!-- ── podgląd zmiany przed zapisem ───────────────────────────────────── -->
+<!-- ── change preview before saving ───────────────────────────────────── -->
 <dialog id="okno-diff">
   <div class="tresc-okna">
     <h3 id="tytul-diff">{{.T.podglad_zmian}}</h3>
@@ -437,7 +437,7 @@
   </div>
 </dialog>
 
-<!-- ── mini-dialog: nazwa (zastępuje prompt) ──────────────────────────── -->
+<!-- ── mini-dialog: name (replaces prompt) ────────────────────────────── -->
 <dialog id="okno-nazwy">
   <form method="dialog" id="form-nazwy" class="tresc-okna">
     <h3 id="tytul-nazwy">{{.T.nazwa_grupy_tytul}}</h3>
@@ -451,7 +451,7 @@
   </form>
 </dialog>
 
-<!-- ── mini-dialog: potwierdzenie (zastępuje confirm) ─────────────────── -->
+<!-- ── mini-dialog: confirmation (replaces confirm) ───────────────────── -->
 <dialog id="okno-potwierdzenia">
   <div class="tresc-okna">
     <h3>{{.T.potwierdzenie_tytul}}</h3>
@@ -463,7 +463,7 @@
   </div>
 </dialog>
 
-<!-- ── ustawienia ─────────────────────────────────────────────────────── -->
+<!-- ── settings ───────────────────────────────────────────────────────── -->
 <dialog id="okno-ustawien">
   <div class="tresc-okna okno-ustawien">
     <h3>{{.T.ustawienia}}</h3>
@@ -483,8 +483,8 @@
               aria-selected="false" aria-controls="panel-instancja">{{.T.zakladka_instancja}}</button>
     </div>
 
-    <!-- Wygląd: domyślne dla CAŁEJ instancji. Picker w pasku pisze tylko do
-         tej przeglądarki — to są dwie różne warstwy i mają to mówić wprost. -->
+    <!-- Appearance: defaults for the WHOLE instance. The picker in the bar writes only to
+         this browser — these are two different layers and they are meant to say so plainly. -->
     <section id="panel-wyglad" role="tabpanel">
       <p class="drobne">{{.T.wyglad_instancji_opis}}</p>
       <div class="picker-siatka" id="inst-presety">
@@ -586,9 +586,9 @@
           </svg>
         </button>
       </div>
-      <!-- Warstwa kolorów siedzi POD przezroczystym textarea. Dzięki temu pole
-           zostaje prawdziwym <textarea>: cofanie, wklejanie i zaznaczanie
-           działają natywnie, czego edytory na contenteditable nie potrafią. -->
+      <!-- The colour layer sits UNDER the transparent textarea. Thanks to that the field
+           stays a real <textarea>: undo, paste and selection
+           work natively, which contenteditable editors cannot do. -->
       <div class="edytor-yaml" id="edytor-yaml">
         <pre class="podswietlenie" id="podswietlenie-yaml" aria-hidden="true"><code></code></pre>
         <textarea id="surowy-yaml" spellcheck="false" rows="14" autocomplete="off"
@@ -639,10 +639,10 @@
 <div class="komunikat" id="komunikat" role="status" aria-live="polite" hidden></div>
 
 <script>
-window.STAN_POCZATKOWY = {{.Stan}};
+window.STAN_POCZATKOWY = {{.State}};
 window.I18N = {{.TJSON}};
 window.LANG = "{{.Lang}}";
-window.WYGLAD = {{.WygladJSON}};
+window.WYGLAD = {{.AppearanceJSON}};
 </script>
 <script src="/assets/app.js" defer></script>
 </body>

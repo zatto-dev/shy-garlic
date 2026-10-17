@@ -211,10 +211,10 @@ func New(path string, st *store.Store, o Options) (*Server, error) {
 // bannerAPI — what the card shows above the list of services: a file error (with the
 // line number) and/or warnings. Texts ready, in the language of the request.
 type bannerAPI struct {
-	Stan        string   `json:"state"` // ok | error | warnings
-	Tytuł       string   `json:"title"`
-	Błąd        string   `json:"error"`
-	Ostrzeżenia []string `json:"warnings"`
+	State    string   `json:"state"` // ok | error | warnings
+	Title    string   `json:"title"`
+	Error    string   `json:"error"`
+	Warnings []string `json:"warnings"`
 }
 
 func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
@@ -224,21 +224,21 @@ func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
 	source := s.cfgSource
 	s.mu.RUnlock()
 
-	b := bannerAPI{Stan: "ok", Ostrzeżenia: []string{}}
+	b := bannerAPI{State: "ok", Warnings: []string{}}
 	if err != nil {
 		// warnings concern the PREVIOUS version of the file (line numbers have
 		// drifted) — on error we do not show them next to the new one
 		warns = nil
 	}
 	for _, o := range warns {
-		b.Ostrzeżenia = append(b.Ostrzeżenia, warningDescription(l, o))
+		b.Warnings = append(b.Warnings, warningDescription(l, o))
 	}
-	if len(b.Ostrzeżenia) > 0 {
-		b.Stan = "warnings"
-		b.Tytuł = i18n.T(l, "baner_ostrz_tytul")
+	if len(b.Warnings) > 0 {
+		b.State = "warnings"
+		b.Title = i18n.T(l, "baner_ostrz_tytul")
 	}
 	if err != nil {
-		b.Stan = "error"
+		b.State = "error"
 		key := "baner_blad_poprzednia"
 		switch source {
 		case "historia":
@@ -246,14 +246,14 @@ func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
 		case "pusta":
 			key = "baner_blad_pusta"
 		}
-		b.Tytuł = i18n.T(l, key)
+		b.Title = i18n.T(l, key)
 		switch {
 		case err.Line > 0 && err.Column > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), err.Line, err.Column, err.Message)
+			b.Error = fmt.Sprintf(i18n.T(l, "baner_pozycja"), err.Line, err.Column, err.Message)
 		case err.Line > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), err.Line, err.Message)
+			b.Error = fmt.Sprintf(i18n.T(l, "baner_linia"), err.Line, err.Message)
 		default:
-			b.Błąd = err.Message
+			b.Error = err.Message
 		}
 	}
 	return b
@@ -718,7 +718,7 @@ type serviceView struct {
 	Host     string
 	IconName string
 	Icon     iconRef
-	Rozmiar  string // "sm" | "md" | "lg" — never empty
+	Size     string // "sm" | "md" | "lg" — never empty
 
 	Description string
 	Tags        []string
@@ -727,8 +727,8 @@ type serviceView struct {
 	TagsJSON string
 }
 
-// SzukajTekst — what the filter in the header searches: name, host, description and tags.
-func (w serviceView) SzukajTekst() string {
+// SearchText — what the filter in the header searches: name, host, description and tags.
+func (w serviceView) SearchText() string {
 	return strings.TrimSpace(strings.Join(append([]string{w.Name, w.Host, w.Description}, w.Tags...), " "))
 }
 
@@ -745,8 +745,8 @@ type appearanceView struct {
 	Image  string // file name from /bg/; non-empty only when Preset=="photo"
 	Blur   int    // 0..30
 	Dim    int    // 0..80, opacity of the dimming layer in percent
-	Ton    string // "dark" | "light"
-	Widok  string // "grid" | "bento" | "list"
+	Tone   string // "dark" | "light"
+	View   string // "grid" | "bento" | "list"
 }
 
 // appearanceAPI — the shape of the appearance in JSON (GET /api/appearance, SSE event).
@@ -768,24 +768,24 @@ type appearanceWindow struct {
 }
 
 type pageView struct {
-	Title      string
-	Groups     []groupView
-	Stan       template.JS
-	Wersja     string
-	Użytkownik string
-	IconCount  int
+	Title     string
+	Groups    []groupView
+	State     template.JS
+	Version   string
+	User      string
+	IconCount int
 
-	Lang                  string
-	T                     map[string]string
-	TJSON                 template.JS
-	DrugiJezyk            string
-	DrugiJezykNazwa       string
-	DrugiJezykKrotko      string
-	SzukajIkonPlaceholder string
+	Lang                   string
+	T                      map[string]string
+	TJSON                  template.JS
+	SecondLang             string
+	SecondLangName         string
+	SecondLangShort        string
+	SearchIconsPlaceholder string
 
-	Baner      bannerAPI
-	Wyglad     appearanceView
-	WygladJSON template.JS
+	Banner         bannerAPI
+	Appearance     appearanceView
+	AppearanceJSON template.JS
 	// CanWrite — today every logged-in user may save. The field exists so
 	// that introducing roles is a single line, not a template rework.
 	CanWrite        bool
@@ -803,21 +803,21 @@ func (s *Server) instanceAppearance() appearanceView {
 	s.mu.RUnlock()
 
 	w := appearanceView{Preset: config.DefaultPreset, Blur: config.DefaultBlur,
-		Dim: config.DefaultDim, Ton: config.ToneFor(config.DefaultPreset),
-		Widok: config.DefaultView}
+		Dim: config.DefaultDim, Tone: config.ToneFor(config.DefaultPreset),
+		View: config.DefaultView}
 	if cfg == nil {
 		return w
 	}
 	a := cfg.Appearance
 	if config.Allowed(a.Background.Preset, config.BackgroundPresets) {
 		w.Preset = a.Background.Preset
-		w.Ton = config.ToneFor(w.Preset) // the preset carries the tone; an explicit tone below overrides it
+		w.Tone = config.ToneFor(w.Preset) // the preset carries the tone; an explicit tone below overrides it
 	}
 	if config.Allowed(a.Background.Tone, config.BackgroundTones) {
-		w.Ton = a.Background.Tone
+		w.Tone = a.Background.Tone
 	}
 	if config.Allowed(a.View, config.Views) {
-		w.Widok = a.View
+		w.View = a.View
 	}
 	if a.Background.Blur >= 0 && a.Background.Blur <= config.MaxBlur {
 		w.Blur = a.Background.Blur
@@ -834,13 +834,13 @@ func (s *Server) instanceAppearance() appearanceView {
 	// ! at the end, because the preset may have changed above. The tone is chosen only
 	// with one's own wallpaper — the preset carries the brightness, and thus the only readable tone.
 	if w.Preset != config.PresetPhoto {
-		w.Ton = config.ToneFor(w.Preset)
+		w.Tone = config.ToneFor(w.Preset)
 	}
 	return w
 }
 
 func (w appearanceView) toAPI() appearanceAPI {
-	return appearanceAPI{Preset: w.Preset, Image: w.Image, Blur: w.Blur, Dim: w.Dim, Tone: w.Ton, View: w.Widok}
+	return appearanceAPI{Preset: w.Preset, Image: w.Image, Blur: w.Blur, Dim: w.Dim, Tone: w.Tone, View: w.View}
 }
 
 // gateAppearance — the background for /login and /setup. The wallpaper stays behind the login.
@@ -849,7 +849,7 @@ func (s *Server) gateAppearance() appearanceView {
 	w.Image = ""
 	if w.Preset == config.PresetPhoto {
 		w.Preset = config.DefaultPreset
-		if w.Ton == "light" {
+		if w.Tone == "light" {
 			w.Preset = "dawn"
 		}
 	}
@@ -888,22 +888,22 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lang := i18n.FromRequest(r)
-	data := pageView{Title: cfg.Title, Wersja: Version, IconCount: s.icons.Count(), Lang: string(lang)}
-	data.T, data.TJSON, data.DrugiJezyk, data.DrugiJezykNazwa, data.DrugiJezykKrotko = fillLang(lang)
-	data.Wyglad = s.instanceAppearance()
-	data.Baner = s.instanceBanner(lang)
+	data := pageView{Title: cfg.Title, Version: Version, IconCount: s.icons.Count(), Lang: string(lang)}
+	data.T, data.TJSON, data.SecondLang, data.SecondLangName, data.SecondLangShort = fillLang(lang)
+	data.Appearance = s.instanceAppearance()
+	data.Banner = s.instanceBanner(lang)
 	data.CanWrite = true
 	data.BackgroundLimit = BackgroundLimitMB
 	// ! the template gets JSON from the STRUCT after validation, never raw input
-	if b, err := json.Marshal(appearanceWindow{appearanceAPI: data.Wyglad.toAPI(),
+	if b, err := json.Marshal(appearanceWindow{appearanceAPI: data.Appearance.toAPI(),
 		Writable: data.CanWrite, LimitMB: data.BackgroundLimit}); err == nil {
-		data.WygladJSON = template.JS(b)
+		data.AppearanceJSON = template.JS(b)
 	} else {
-		data.WygladJSON = template.JS("{}")
+		data.AppearanceJSON = template.JS("{}")
 	}
-	data.SzukajIkonPlaceholder = fmt.Sprintf(i18n.T(lang, "szukaj_ikon"), s.icons.Count())
+	data.SearchIconsPlaceholder = fmt.Sprintf(i18n.T(lang, "szukaj_ikon"), s.icons.Count())
 	if u := UserFromRequest(r); u != nil {
-		data.Użytkownik = u.Login
+		data.User = u.Login
 	}
 	if data.Title == "" {
 		data.Title = "Shy Garlic"
@@ -924,7 +924,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 				Host:     hostOf(svc.URL),
 				IconName: svc.Icon,
 				Icon:     s.resolveIcon(svc.Icon, svc.Name),
-				Rozmiar:  size,
+				Size:     size,
 
 				Description: svc.Description,
 				Tags:        []string(svc.Tags),
@@ -937,9 +937,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// initial state injected into the HTML — without it the panel would flash "unknown"
 	// for the first half second after every refresh
 	if b, err := json.Marshal(s.monitor.Snapshot()); err == nil {
-		data.Stan = template.JS(b)
+		data.State = template.JS(b)
 	} else {
-		data.Stan = template.JS("{}")
+		data.State = template.JS("{}")
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

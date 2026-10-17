@@ -564,27 +564,27 @@ func (k *Catalog) Search(q string, limit int) []string {
 // rendering the page — it must give both and leave the decision to CSS, with zero
 // extra JS or requests when the theme changes.
 type iconRef struct {
-	Src           string // path on our server, empty when missing or when there are variants
-	Litera        string // fallback: a tile with a letter
-	WariantCiemny string // path to the variant for the DARK theme (light ink), empty = none
-	WariantJasny  string // path to the variant for the LIGHT theme (dark ink), empty = none
+	Src          string // path on our server, empty when missing or when there are variants
+	Letter       string // fallback: a tile with a letter
+	VariantDark  string // path to the variant for the DARK theme (light ink), empty = none
+	VariantLight string // path to the variant for the LIGHT theme (dark ink), empty = none
 }
 
 func (s *Server) resolveIcon(icon, name string) iconRef {
 	letter := firstLetter(name)
 	switch {
 	case icon == "":
-		return iconRef{Litera: letter}
+		return iconRef{Letter: letter}
 	case strings.HasPrefix(icon, "http://"), strings.HasPrefix(icon, "https://"):
-		return iconRef{Src: "/icon/proxy?u=" + urlEscape(icon), Litera: letter}
+		return iconRef{Src: "/icon/proxy?u=" + urlEscape(icon), Letter: letter}
 	default:
 		n := strings.TrimSuffix(strings.TrimSuffix(icon, ".svg"), ".png")
 		if dark, light := s.icons.Variants(n); dark != "" && light != "" {
-			return iconRef{WariantCiemny: "/icon/" + dark, WariantJasny: "/icon/" + light, Litera: letter}
+			return iconRef{VariantDark: "/icon/" + dark, VariantLight: "/icon/" + light, Letter: letter}
 		}
 		// even when the index did not load, try — the worst case is a 404
 		// and the card shows a letter
-		return iconRef{Src: "/icon/" + n, Litera: letter}
+		return iconRef{Src: "/icon/" + n, Letter: letter}
 	}
 }
 

@@ -147,8 +147,8 @@ func TestBrokenFileDuringRunLogsOnceAndClearsBanner(t *testing.T) {
 	if html := homePage(t, s); strings.Contains(html, `data-stan="error"`) {
 		t.Fatal("banner for a good file")
 	}
-	if b := s.instanceBanner("en"); len(b.Ostrzeżenia) != 1 {
-		t.Fatalf("setup: want 1 warning, have %v", b.Ostrzeżenia)
+	if b := s.instanceBanner("en"); len(b.Warnings) != 1 {
+		t.Fatalf("setup: want 1 warning, have %v", b.Warnings)
 	}
 
 	breakFile := func(content string) {
@@ -173,8 +173,8 @@ func TestBrokenFileDuringRunLogsOnceAndClearsBanner(t *testing.T) {
 	}
 
 	// warnings from the previous version of the file do not hang next to the new error
-	if b := s.instanceBanner("en"); len(b.Ostrzeżenia) != 0 {
-		t.Errorf("on error the banner shows old warnings: %v", b.Ostrzeżenia)
+	if b := s.instanceBanner("en"); len(b.Warnings) != 0 {
+		t.Errorf("on error the banner shows old warnings: %v", b.Warnings)
 	}
 
 	// a different error → a new log entry

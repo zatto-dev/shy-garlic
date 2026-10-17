@@ -33,13 +33,13 @@ export PATH=/usr/local/go/bin:$PATH
 
 case "${1:-test}" in
   test)  go test ./... ;;
-  # podgląd stron do zrzutów ekranu: bin/podglad/*.html (assety + ikony obok)
+  # page preview for screenshots: bin/podglad/*.html (assets + icons alongside)
   podglad) go test ./internal/server -run TestPreviewPages -podglad -count=1 -v ;;
   vet)   go vet ./... ;;
-  # wyścigi: -race wymaga cgo, więc potrzebny gcc na sandboxie
+  # races: -race needs cgo, so gcc is required on the sandbox
   race)  CGO_ENABLED=1 go test -race -count=1 ./internal/... ;;
   build) go build -trimpath -ldflags="-s -w" -o bin/shyg ./cmd/shyg && ls -lh bin/shyg ;;
   tidy)  go mod tidy ;;
   run)   shift; go run ./cmd/shyg "$@" ;;
-  *)     echo "użycie: ./x [test|race|vet|build|tidy|run|podglad]"; exit 1 ;;
+  *)     echo "usage: ./x [test|race|vet|build|tidy|run|podglad]"; exit 1 ;;
 esac

@@ -26,7 +26,7 @@ import (
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
 
-var wersja = "dev"
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -43,25 +43,25 @@ func run() error {
 	}
 
 	fs := flag.NewFlagSet("shyg", flag.ExitOnError)
-	cfgPath := fs.String("config", envOr("SHYG_CONFIG", "shygarlic.yaml"), "ścieżka do pliku konfiguracyjnego")
-	addr := fs.String("addr", envOr("SHYG_ADDR", ":8080"), "adres nasłuchu")
-	dataPath := fs.String("data", envOr("SHYG_DATA", "shygarlic.db"), "plik SQLite z kontami i historią")
-	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "opcjonalny icons.zip — komplet ikon offline, bez pobierania z sieci")
-	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "katalog cache ikon (domyślnie obok pliku bazy)")
+	cfgPath := fs.String("config", envOr("SHYG_CONFIG", "shygarlic.yaml"), "path to the config file")
+	addr := fs.String("addr", envOr("SHYG_ADDR", ":8080"), "listen address")
+	dataPath := fs.String("data", envOr("SHYG_DATA", "shygarlic.db"), "SQLite file with accounts and history")
+	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "optional icons.zip — a full offline icon set, no downloading from the network")
+	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "icon cache directory (default: next to the DB file)")
 	webhook := fs.String("webhook", envOr("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
-		"adres webhooka powiadomień (Discord albo dowolny przyjmujący JSON)")
+		"notification webhook URL (Discord or anything that accepts JSON)")
 	webhookFormat := fs.String("webhook-format", envOr("SHYG_WEBHOOK_FORMAT", ""),
-		"format wiadomości webhooka: "+strings.Join(formatTexts(), ", ")+" (domyślnie z ustawień panelu, a tam discord; flaga bije panel)")
-	failThreshold := fs.Int("fail-threshold", 2, "ile nieudanych sprawdzeń z rzędu zanim wyślemy powiadomienie (właściwe miejsce to notify.threshold w pliku; flaga go nadpisuje)")
+		"webhook message format: "+strings.Join(formatTexts(), ", ")+" (default: from the panel settings, and there discord; the flag beats the panel)")
+	failThreshold := fs.Int("fail-threshold", 2, "how many failed checks in a row before a notification is sent (the proper place is notify.threshold in the file; the flag overrides it)")
 	dockerSock := fs.String("docker", envOr("SHYG_DOCKER", ""),
-		"gniazdo Dockera do podpowiadania usług (domyślnie /var/run/docker.sock, jeśli jest)")
+		"Docker socket for suggesting services (default: /var/run/docker.sock, if present)")
 	backgroundDir := fs.String("backgrounds", envOr("SHYG_BACKGROUNDS", ""),
-		"katalog wgranych tapet (domyślnie podkatalog bg/ obok pliku bazy)")
+		"directory of uploaded wallpapers (default: the bg/ subdirectory next to the DB file)")
 	trustedProxy := fs.String("trusted-proxy", envOr("SHYG_TRUSTED_PROXY", ""),
-		"CIDR-y proxy, którym wolno ustawiać X-Forwarded-For i X-Forwarded-Proto (po przecinku)")
+		"proxy CIDRs allowed to set X-Forwarded-For and X-Forwarded-Proto (comma-separated)")
 	metricsAllow := fs.String("metrics-allow", envOr("SHYG_METRICS_ALLOW", ""),
-		"CIDR-y, z których /metrics odpowiada bez tokenu (po przecinku; domyślnie żadne — wymagany token)")
-	debug := fs.Bool("debug", false, "logi debug")
+		"CIDRs from which /metrics answers without a token (comma-separated; default none — token required)")
+	debug := fs.Bool("debug", false, "debug logs")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func run() error {
 	case "check":
 		return check(*cfgPath)
 	case "version":
-		fmt.Println("shyg", wersja)
+		fmt.Println("shyg", version)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q (serve|check|version)", command)
@@ -137,7 +137,7 @@ func source(fs *flag.FlagSet, name, envKey string) string {
 	return "domyslna"
 }
 
-// instanceOptions gathers the start-up options to show in the panel.
+// instanceDescription gathers the start-up options to show in the panel.
 //
 // ! The webhook is deliberately absent. It is a secret, so it goes through a
 // separate route (/api/notify) that masks it.
@@ -172,7 +172,7 @@ func envOr(key, defaults string) string {
 }
 
 func serve(o cliOptions) error {
-	server.Version = wersja
+	server.Version = version
 
 	if o.cacheDir == "" {
 		o.cacheDir = filepath.Join(filepath.Dir(o.dataPath), "icons")
@@ -235,7 +235,7 @@ func serve(o cliOptions) error {
 	}()
 
 	slog.Info("shyg starting", "addr", o.addr, "config", o.cfgPath, "db", o.dataPath,
-		"backgrounds", o.backgroundDir, "version", wersja)
+		"backgrounds", o.backgroundDir, "version", version)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -295,7 +295,7 @@ func check(cfgPath string) error {
 	for _, g := range cfg.Groups {
 		fmt.Printf("\n%s\n", g.Name)
 		for _, s := range g.Services {
-			fmt.Printf("  %-18s %-38s co %s, oczekiwane %v\n",
+			fmt.Printf("  %-18s %-38s every %s, expect %v\n",
 				s.Name, s.URL, s.Check.Interval, s.Check.Expect)
 		}
 	}

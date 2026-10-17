@@ -1,4 +1,4 @@
-// Shy Garlic — cała logika przeglądarki. Zero zależności, zero żądań na zewnątrz.
+// Shy Garlic — all the browser logic. Zero dependencies, zero requests to the outside.
 (() => {
   "use strict";
 
@@ -7,258 +7,258 @@
 
   const T = window.I18N || {};
   const LANG = window.LANG || "en";
-  const tr = (k, zapas) => T[k] || zapas || k;
-  const podstaw = (tekst, wartosc) => String(tekst).replace(/%[ds]/, String(wartosc));
+  const tr = (k, fallback) => T[k] || fallback || k;
+  const substitute = (text, value) => String(text).replace(/%[ds]/, String(value));
 
-  const OPISY = {
+  const STATE_DESCRIPTIONS = {
     up: tr("opis_up"),
     degraded: tr("opis_degraded"),
     down: tr("opis_down"),
     unknown: tr("opis_unknown"),
   };
-  const STANY = ["up", "degraded", "down", "unknown"];
+  const STATES = ["up", "degraded", "down", "unknown"];
 
-  const podsumowanie = $("#podsumowanie");
-  const polaczenie = $("#polaczenie");
-  const chipDziala = $("#chip-dziala");
-  const chipProblemy = $("#chip-problemy");
-  let karty = new Map();
-  let ostatniStan = {};
+  const summary = $("#podsumowanie");
+  const connection = $("#polaczenie");
+  const chipUp = $("#chip-dziala");
+  const chipProblems = $("#chip-problemy");
+  let cards = new Map();
+  let lastState = {};
 
-  function odswiezIndeks() {
-    karty = new Map($$(".karta").map((el) => [el.dataset.key, el]));
+  function refreshIndex() {
+    cards = new Map($$(".karta").map((el) => [el.dataset.key, el]));
   }
-  odswiezIndeks();
+  refreshIndex();
 
-  // ── pamięć przeglądarki ─────────────────────────────────────────────────
+  // ── browser storage ─────────────────────────────────────────────────────
   //
-  // localStorage rzuca wyjątkiem w trybie prywatnym i przy zablokowanych
-  // danych stron — panel ma wtedy działać dalej, tylko bez zapamiętywania.
-  const KLUCZ_WYGLADU = "shyg.wyglad";
-  const KLUCZ_EDYCJI = "shyg-edycja";
+  // localStorage throws in private mode and when site data is blocked —
+  // the panel is supposed to keep working then, just without remembering anything.
+  const APPEARANCE_KEY = "shyg.wyglad";
+  const EDIT_KEY = "shyg-edycja";
 
-  const pamiec = {
-    czytaj(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
-    pisz(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
-    usun(k) { try { localStorage.removeItem(k); } catch (_) {} },
+  const storage = {
+    read(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    write(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
+    remove(k) { try { localStorage.removeItem(k); } catch (_) {} },
   };
 
-  // ── wygląd ──────────────────────────────────────────────────────────────
+  // ── appearance ──────────────────────────────────────────────────────────
   //
-  // Źródłem prawdy dla instancji jest YAML (window.WYGLAD). localStorage
-  // nadpisuje go lokalnie — per przeglądarka. Po scaleniu każde pole
-  // przechodzi tę samą walidację co na serwerze; do CSS nie trafia ani jeden
-  // znak, którego nie ma w allowliście.
-  const PRESETY = ["aurora", "nebula", "graphite", "dawn", "fog", "photo"];
-  const TONY = ["dark", "light"];
-  // preset niesie jasność tła, więc i jedyny ton, w którym da się go czytać;
-  // `photo` go nie ma, bo jasność znamy dopiero po zmierzeniu obrazu
-  const TON_PRESETU = { aurora: "dark", nebula: "dark", graphite: "dark", dawn: "light", fog: "light" };
-  const tonDla = (preset) => TON_PRESETU[preset] || "dark";
-  const WIDOKI = ["grid", "bento", "list"];
-  const ROZMIARY = ["sm", "md", "lg"];
-  const NAZWA_TLA = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-  const TYPY_TLA = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"];
+  // The source of truth for the instance is the YAML (window.WYGLAD). localStorage
+  // overrides it locally — per browser. After merging, every field goes
+  // through the same validation as on the server; not a single character that is
+  // not in the allowlist reaches the CSS.
+  const PRESETS = ["aurora", "nebula", "graphite", "dawn", "fog", "photo"];
+  const TONES = ["dark", "light"];
+  // a preset carries its brightness, hence also the only tone in which it is readable;
+  // `photo` has none, because we only know the brightness after measuring the image
+  const PRESET_TONE = { aurora: "dark", nebula: "dark", graphite: "dark", dawn: "light", fog: "light" };
+  const toneFor = (preset) => PRESET_TONE[preset] || "dark";
+  const VIEWS = ["grid", "bento", "list"];
+  const SIZES = ["sm", "md", "lg"];
+  const BACKGROUND_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+  const BACKGROUND_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"];
 
-  const korzen = document.documentElement;
+  const root = document.documentElement;
 
-  function lokalnyWyglad() {
-    try { return JSON.parse(pamiec.czytaj(KLUCZ_WYGLADU) || "{}") || {}; } catch (_) { return {}; }
+  function localAppearance() {
+    try { return JSON.parse(storage.read(APPEARANCE_KEY) || "{}") || {}; } catch (_) { return {}; }
   }
 
-  function wyglądEfektywny() {
-    const w = Object.assign({}, window.WYGLAD || {}, lokalnyWyglad());
+  function effectiveAppearance() {
+    const w = Object.assign({}, window.WYGLAD || {}, localAppearance());
     const blur = Math.max(0, Math.min(30, Math.round(Number(w.blur))));
     const dim = Math.max(0, Math.min(80, Math.round(Number(w.dim))));
-    const preset = PRESETY.includes(w.preset) ? w.preset : "aurora";
-    const wynik = {
+    const preset = PRESETS.includes(w.preset) ? w.preset : "aurora";
+    const result = {
       preset: preset,
-      image: NAZWA_TLA.test(w.image || "") ? w.image : "",
+      image: BACKGROUND_NAME_RE.test(w.image || "") ? w.image : "",
       blur: Number.isFinite(blur) ? blur : 10,
       dim: Number.isFinite(dim) ? dim : 50,
-      // ton jest wyborem TYLKO przy własnej tapecie; preset niesie jasność
-      // z definicji, więc zapisany ton z innego tła jest tu bez znaczenia
-      tone: preset === "photo" ? (TONY.includes(w.tone) ? w.tone : "dark") : tonDla(preset),
-      view: WIDOKI.includes(w.view) ? w.view : "grid",
+      // tone is a choice ONLY for a custom wallpaper; a preset carries its brightness
+      // by definition, so a saved tone from another background is meaningless here
+      tone: preset === "photo" ? (TONES.includes(w.tone) ? w.tone : "dark") : toneFor(preset),
+      view: VIEWS.includes(w.view) ? w.view : "grid",
     };
-    // zdjęcie bez pliku to nie jest tło — tak samo prostuje to serwer
-    if (wynik.preset === "photo" && !wynik.image) {
-      wynik.preset = "aurora";
-      wynik.tone = tonDla("aurora");
+    // a photo without a file is not a background — the server straightens it the same way
+    if (result.preset === "photo" && !result.image) {
+      result.preset = "aurora";
+      result.tone = toneFor("aurora");
     }
-    return wynik;
+    return result;
   }
 
-  function zastosujWyglad(przejscie) {
-    const w = wyglądEfektywny();
-    const inneTlo = korzen.dataset.preset !== w.preset || korzen.dataset.ton !== w.tone;
+  function applyAppearance(withTransition) {
+    const w = effectiveAppearance();
+    const otherBackground = root.dataset.preset !== w.preset || root.dataset.ton !== w.tone;
 
-    korzen.dataset.preset = w.preset;
-    korzen.dataset.ton = w.tone;
+    root.dataset.preset = w.preset;
+    root.dataset.ton = w.tone;
     document.body.dataset.widok = w.view;
 
-    // jedyna legalna droga dynamiczna: CSSOM. CSP style-src 'self' nie
-    // pozwala ani na atrybut style=, ani na <style> w dokumencie.
-    korzen.style.setProperty("--tlo-rozmycie", w.blur + "px");
-    // Ułamek, nie procent — CSS mnoży go przez .56 na górny koniec gradientu.
-    korzen.style.setProperty("--dim", String(w.dim / 100));
-    korzen.style.setProperty("--tlo-inset", -(2 * w.blur + 4) + "px");
-    korzen.style.setProperty("--tlo-obraz",
+    // the only legitimate dynamic route: CSSOM. CSP style-src 'self' allows
+    // neither a style= attribute nor a <style> in the document.
+    root.style.setProperty("--tlo-rozmycie", w.blur + "px");
+    // A fraction, not a percent — CSS multiplies it by .56 for the top end of the gradient.
+    root.style.setProperty("--dim", String(w.dim / 100));
+    root.style.setProperty("--tlo-inset", -(2 * w.blur + 4) + "px");
+    root.style.setProperty("--tlo-obraz",
       w.preset === "photo" && w.image ? 'url("/bg/' + encodeURIComponent(w.image) + '")' : "none");
 
-    odswiezPicker(w);
-    odswiezWidok(w.view);
-    if (przejscie && inneTlo) przenikanie();
+    refreshPicker(w);
+    refreshView(w.view);
+    if (withTransition && otherBackground) crossfade();
   }
 
-  function zapiszWyglad(pola) {
-    pamiec.pisz(KLUCZ_WYGLADU, JSON.stringify(Object.assign(lokalnyWyglad(), pola)));
-    zastosujWyglad(true);
+  function saveAppearance(fields) {
+    storage.write(APPEARANCE_KEY, JSON.stringify(Object.assign(localAppearance(), fields)));
+    applyAppearance(true);
   }
 
-  // Nowa warstwa wchodzi płynnie nad starą; stara znika po animacji.
-  function przenikanie() {
-    const tlo = $("#tlo");
-    if (!tlo || tlo.children.length > 2) return;
-    const stara = tlo.lastElementChild;
-    if (!stara) return;
-    const nowa = stara.cloneNode(true);
-    nowa.classList.add("wchodzi");
-    tlo.append(nowa);
+  // The new layer fades in over the old one; the old one disappears after the animation.
+  function crossfade() {
+    const backgroundEl = $("#tlo");
+    if (!backgroundEl || backgroundEl.children.length > 2) return;
+    const oldLayer = backgroundEl.lastElementChild;
+    if (!oldLayer) return;
+    const newLayer = oldLayer.cloneNode(true);
+    newLayer.classList.add("wchodzi");
+    backgroundEl.append(newLayer);
     setTimeout(() => {
-      const poprzednia = nowa.previousElementSibling;
-      if (poprzednia) poprzednia.remove();
-      nowa.classList.remove("wchodzi");
+      const previous = newLayer.previousElementSibling;
+      if (previous) previous.remove();
+      newLayer.classList.remove("wchodzi");
     }, 900);
   }
 
-  // jednorazowa migracja starego przełącznika motywu
-  (function migracjaMotywu() {
-    const stary = pamiec.czytaj("shyg-motyw");
-    if (stary === null) return;
-    if (TONY.includes(stary)) {
-      pamiec.pisz(KLUCZ_WYGLADU, JSON.stringify(Object.assign(lokalnyWyglad(), { tone: stary })));
+  // one-off migration of the old theme switch
+  (function migrateTheme() {
+    const oldTheme = storage.read("shyg-motyw");
+    if (oldTheme === null) return;
+    if (TONES.includes(oldTheme)) {
+      storage.write(APPEARANCE_KEY, JSON.stringify(Object.assign(localAppearance(), { tone: oldTheme })));
     }
-    pamiec.usun("shyg-motyw");
+    storage.remove("shyg-motyw");
   })();
 
-  // ── picker tła ──────────────────────────────────────────────────────────
-  const pickerTla = $("#picker-tla");
-  const przyciskTla = $("#przycisk-tla");
+  // ── background picker ───────────────────────────────────────────────────
+  const backgroundPicker = $("#picker-tla");
+  const backgroundButton = $("#przycisk-tla");
   const menuPanel = $("#menu-uslugi-panel");
-  const menuPrzycisk = $("#menu-uslugi");
-  const zaslona = $("#zaslona");
-  const kafelTapety = $(".kafel-tapety");
-  const plikTapety = $("#plik-tapety");
-  const suwakRozmycia = $("#suwak-rozmycia");
-  const listaTel = $("#tlo-lista");
-  let tlaWlaczone = false;
-  let wgraneTla = [];
+  const menuButton = $("#menu-uslugi");
+  const scrim = $("#zaslona");
+  const wallpaperTile = $(".kafel-tapety");
+  const wallpaperFileInput = $("#plik-tapety");
+  const blurSlider = $("#suwak-rozmycia");
+  const backgroundList = $("#tlo-lista");
+  let backgroundsEnabled = false;
+  let uploadedBackgrounds = [];
 
-  function odswiezPicker(w) {
-    for (const kafel of $$(".kafel-presetu, .kafel-tapety")) {
-      kafel.setAttribute("aria-pressed", String(kafel.dataset.preset === w.preset));
+  function refreshPicker(w) {
+    for (const tile of $$(".kafel-presetu, .kafel-tapety")) {
+      tile.setAttribute("aria-pressed", String(tile.dataset.preset === w.preset));
     }
-    if (kafelTapety) {
-      kafelTapety.classList.toggle("pusty", wgraneTla.length === 0);
-      const sub = $(".kafel-sub", kafelTapety);
-      if (sub) sub.textContent = wgraneTla.length ? "" : tr("tapeta_upusc");
+    if (wallpaperTile) {
+      wallpaperTile.classList.toggle("pusty", uploadedBackgrounds.length === 0);
+      const sub = $(".kafel-sub", wallpaperTile);
+      if (sub) sub.textContent = uploadedBackgrounds.length ? "" : tr("tapeta_upusc");
     }
-    if (suwakRozmycia) suwakRozmycia.value = String(w.blur);
-    const wartosc = $("#wartosc-rozmycia");
-    if (wartosc) wartosc.textContent = w.blur + " px";
-    const suwakDim = $("#suwak-przyciemnienia");
-    if (suwakDim) suwakDim.value = String(w.dim);
-    const wartoscDim = $("#wartosc-przyciemnienia");
-    if (wartoscDim) wartoscDim.textContent = w.dim + "%";
-    // Ton i przyciemnienie mają sens tylko przy własnej tapecie: preset niesie
-    // jasność z definicji, a jego warstwa jest częścią projektu presetu.
-    // ! Wiersz tonu NIE jest już chowany w obrębie tapety — automat z pomiaru
-    // luminancji bywa w błędzie, a schowana kontrolka znaczy, że user tego nie
-    // naprawi.
-    const wierszTonu = $("#picker-ton");
-    if (wierszTonu) wierszTonu.hidden = w.preset !== "photo";
-    const wierszDim = $("#wiersz-przyciemnienia");
-    if (wierszDim) wierszDim.hidden = w.preset !== "photo";
+    if (blurSlider) blurSlider.value = String(w.blur);
+    const value = $("#wartosc-rozmycia");
+    if (value) value.textContent = w.blur + " px";
+    const dimInput = $("#suwak-przyciemnienia");
+    if (dimInput) dimInput.value = String(w.dim);
+    const dimValue = $("#wartosc-przyciemnienia");
+    if (dimValue) dimValue.textContent = w.dim + "%";
+    // Tone and dimming only make sense for a custom wallpaper: a preset carries
+    // its brightness by definition, and its layer is part of the preset design.
+    // ! The tone row is NO LONGER hidden within a wallpaper — the automatic pick from the
+    // luminance measurement can be wrong, and a hidden control means the user cannot
+    // fix it.
+    const toneRow = $("#picker-ton");
+    if (toneRow) toneRow.hidden = w.preset !== "photo";
+    const dimRow = $("#wiersz-przyciemnienia");
+    if (dimRow) dimRow.hidden = w.preset !== "photo";
     $("#ton-jasny").setAttribute("aria-pressed", String(w.tone === "dark"));
     $("#ton-ciemny").setAttribute("aria-pressed", String(w.tone === "light"));
-    for (const li of $$(".tlo-pozycja", listaTel)) {
-      const uzywana = li.dataset.nazwa === w.image && w.preset === "photo";
-      li.classList.toggle("uzywana", uzywana);
-      // sam kolor obwódki nie mówi nic czytnikowi ekranu — stąd tytuł
-      const wybierz = $("button[data-akcja='tapeta']", li);
-      if (wybierz) wybierz.title = uzywana ? li.dataset.nazwa + " · " + tr("tapeta_uzywana") : li.dataset.nazwa;
+    for (const li of $$(".tlo-pozycja", backgroundList)) {
+      const inUse = li.dataset.nazwa === w.image && w.preset === "photo";
+      li.classList.toggle("uzywana", inUse);
+      // the border colour alone says nothing to a screen reader — hence the title
+      const selectButton = $("button[data-akcja='tapeta']", li);
+      if (selectButton) selectButton.title = inUse ? li.dataset.nazwa + " · " + tr("tapeta_uzywana") : li.dataset.nazwa;
     }
-    // Skrót do warstwy instancji widzi tylko ten, kto ma prawo pisać do pliku.
+    // The shortcut to the instance layer is seen only by someone who may write to the file.
     $("#picker-do-ustawien").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
   }
 
-  function odswiezWidok(widok) {
+  function refreshView(view) {
     for (const b of $$("#przelacznik-widoku [data-widok]")) {
-      b.setAttribute("aria-selected", String(b.dataset.widok === widok));
+      b.setAttribute("aria-selected", String(b.dataset.widok === view));
     }
   }
 
-  function popoveryOtwarte() {
-    return (pickerTla && !pickerTla.hidden) || (menuPanel && !menuPanel.hidden);
+  function popoversOpen() {
+    return (backgroundPicker && !backgroundPicker.hidden) || (menuPanel && !menuPanel.hidden);
   }
 
-  function zamknijPopovery() {
-    if (pickerTla) pickerTla.hidden = true;
+  function closePopovers() {
+    if (backgroundPicker) backgroundPicker.hidden = true;
     if (menuPanel) menuPanel.hidden = true;
-    przyciskTla.setAttribute("aria-pressed", "false");
-    menuPrzycisk.setAttribute("aria-expanded", "false");
-    zaslona.hidden = true;
+    backgroundButton.setAttribute("aria-pressed", "false");
+    menuButton.setAttribute("aria-expanded", "false");
+    scrim.hidden = true;
   }
 
-  function przelaczPopover(panel, przycisk, atrybut) {
-    const otworz = panel.hidden;
-    zamknijPopovery();
-    if (!otworz) return;
+  function togglePopover(panel, button, attribute) {
+    const opening = panel.hidden;
+    closePopovers();
+    if (!opening) return;
     panel.hidden = false;
-    przycisk.setAttribute(atrybut, "true");
-    zaslona.hidden = false;
+    button.setAttribute(attribute, "true");
+    scrim.hidden = false;
   }
 
-  przyciskTla.addEventListener("click", () => {
-    przelaczPopover(pickerTla, przyciskTla, "aria-pressed");
-    if (!pickerTla.hidden) wczytajTla();
+  backgroundButton.addEventListener("click", () => {
+    togglePopover(backgroundPicker, backgroundButton, "aria-pressed");
+    if (!backgroundPicker.hidden) loadBackgrounds();
   });
-  menuPrzycisk.addEventListener("click", () => przelaczPopover(menuPanel, menuPrzycisk, "aria-expanded"));
-  zaslona.addEventListener("click", zamknijPopovery);
+  menuButton.addEventListener("click", () => togglePopover(menuPanel, menuButton, "aria-expanded"));
+  scrim.addEventListener("click", closePopovers);
 
-  $("#ton-jasny").addEventListener("click", () => zapiszWyglad({ tone: "dark" }));
-  $("#ton-ciemny").addEventListener("click", () => zapiszWyglad({ tone: "light" }));
+  $("#ton-jasny").addEventListener("click", () => saveAppearance({ tone: "dark" }));
+  $("#ton-ciemny").addEventListener("click", () => saveAppearance({ tone: "light" }));
 
-  suwakRozmycia.addEventListener("input", () => {
-    const v = Math.max(0, Math.min(30, parseInt(suwakRozmycia.value, 10) || 0));
-    korzen.style.setProperty("--tlo-rozmycie", v + "px");
-    korzen.style.setProperty("--tlo-inset", -(2 * v + 4) + "px");
+  blurSlider.addEventListener("input", () => {
+    const v = Math.max(0, Math.min(30, parseInt(blurSlider.value, 10) || 0));
+    root.style.setProperty("--tlo-rozmycie", v + "px");
+    root.style.setProperty("--tlo-inset", -(2 * v + 4) + "px");
     $("#wartosc-rozmycia").textContent = v + " px";
   });
-  suwakRozmycia.addEventListener("change", () => {
-    zapiszWyglad({ blur: Math.max(0, Math.min(30, parseInt(suwakRozmycia.value, 10) || 0)) });
+  blurSlider.addEventListener("change", () => {
+    saveAppearance({ blur: Math.max(0, Math.min(30, parseInt(blurSlider.value, 10) || 0)) });
   });
 
-  const suwakPrzyciemnienia = $("#suwak-przyciemnienia");
-  suwakPrzyciemnienia.addEventListener("input", () => {
-    $("#wartosc-przyciemnienia").textContent = suwakPrzyciemnienia.value + "%";
+  const dimSlider = $("#suwak-przyciemnienia");
+  dimSlider.addEventListener("input", () => {
+    $("#wartosc-przyciemnienia").textContent = dimSlider.value + "%";
   });
-  suwakPrzyciemnienia.addEventListener("change", () => {
-    zapiszWyglad({ dim: Math.max(0, Math.min(80, parseInt(suwakPrzyciemnienia.value, 10) || 0)) });
+  dimSlider.addEventListener("change", () => {
+    saveAppearance({ dim: Math.max(0, Math.min(80, parseInt(dimSlider.value, 10) || 0)) });
   });
 
-  // Dwie warstwy, dwa przyciski, żadnego zgadywania: ten czyści nadpiskę tej
-  // przeglądarki i wraca do tego, co stoi w pliku.
+  // Two layers, two buttons, no guessing: this one clears this browser's
+  // override and returns to what is in the file.
   $("#picker-reset").addEventListener("click", () => {
-    pamiec.usun(KLUCZ_WYGLADU);
-    zastosujWyglad(true);
-    powiadom(tr("zapisano"));
+    storage.remove(APPEARANCE_KEY);
+    applyAppearance(true);
+    notify(tr("zapisano"));
   });
 
-  // A ten prowadzi do warstwy instancji — picker sam do pliku nie pisze.
+  // And this one leads to the instance layer — the picker itself does not write to the file.
   $("#picker-do-ustawien").addEventListener("click", () => {
-    zamknijPopovery();
+    closePopovers();
     $("#ustawienia").click();
     setTimeout(() => {
       const tab = $('[role="tab"][aria-controls="panel-wyglad"]');
@@ -266,69 +266,69 @@
     }, 0);
   });
 
-  $("#picker-podmien").addEventListener("click", () => plikTapety.click());
-  plikTapety.addEventListener("change", () => {
-    const plik = plikTapety.files && plikTapety.files[0];
-    plikTapety.value = "";
-    if (plik) wgrajTapete(plik);
+  $("#picker-podmien").addEventListener("click", () => wallpaperFileInput.click());
+  wallpaperFileInput.addEventListener("change", () => {
+    const file = wallpaperFileInput.files && wallpaperFileInput.files[0];
+    wallpaperFileInput.value = "";
+    if (file) uploadWallpaper(file);
   });
 
-  // ── tapeta ──────────────────────────────────────────────────────────────
-  async function wczytajTla() {
-    if (!listaTel) return;
+  // ── wallpaper ───────────────────────────────────────────────────────────
+  async function loadBackgrounds() {
+    if (!backgroundList) return;
     try {
       const d = await api("GET", "/api/background");
-      wgraneTla = d.items || [];
-      listaTel.textContent = "";
-      for (const t of wgraneTla) {
+      uploadedBackgrounds = d.items || [];
+      backgroundList.textContent = "";
+      for (const t of uploadedBackgrounds) {
         const li = document.createElement("li");
         li.className = "tlo-pozycja";
         li.dataset.nazwa = t.name;
 
-        const wybierz = document.createElement("button");
-        wybierz.type = "button";
-        wybierz.dataset.akcja = "tapeta";
-        wybierz.dataset.nazwa = t.name;
-        wybierz.textContent = t.name;
+        const selectButton = document.createElement("button");
+        selectButton.type = "button";
+        selectButton.dataset.akcja = "tapeta";
+        selectButton.dataset.nazwa = t.name;
+        selectButton.textContent = t.name;
 
-        const usun = document.createElement("button");
-        usun.type = "button";
-        usun.className = "btn btn--icon btn--sm btn--danger tlo-usun";
-        usun.dataset.akcja = "usun-tapete";
-        usun.dataset.nazwa = t.name;
-        usun.title = tr("tapeta_usun");
-        usun.setAttribute("aria-label", tr("tapeta_usun") + " " + t.name);
-        // SVG, nie znak "×" — reszta panelu rysuje ikony, a glif w tym
-        // miejscu skakał w pionie zależnie od kroju.
-        usun.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" '
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "btn btn--icon btn--sm btn--danger tlo-usun";
+        removeButton.dataset.akcja = "usun-tapete";
+        removeButton.dataset.nazwa = t.name;
+        removeButton.title = tr("tapeta_usun");
+        removeButton.setAttribute("aria-label", tr("tapeta_usun") + " " + t.name);
+        // SVG, not the "×" character — the rest of the panel draws icons, and a glyph here
+        // jumped vertically depending on the typeface.
+        removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" '
           + 'stroke="currentColor" stroke-width="1.8" stroke-linecap="round">'
           + '<path d="M6 6l12 12M18 6l-12 12"></path></svg>';
 
-        li.append(wybierz, usun);
-        listaTel.append(li);
+        li.append(selectButton, removeButton);
+        backgroundList.append(li);
       }
-      zastosujWyglad(false);
+      applyAppearance(false);
     } catch (_) {}
   }
 
-  // Ton wyliczamy z jasności obrazu jeszcze przed wysłaniem — serwer nigdy
-  // nie dekoduje obrazów, więc luminancję ma skąd wziąć tylko przeglądarka.
-  // Przyjmuje plik przed wysłaniem albo adres tapety już leżącej na serwerze —
-  // obie drogi są nam potrzebne, bo ton musi się zgadzać także wtedy, gdy user
-  // przełącza się między wgranymi wcześniej obrazami.
-  function tonZObrazu(zrodlo) {
+  // We compute the tone from the image brightness before uploading — the server never
+  // decodes images, so only the browser has a source for the luminance.
+  // It accepts a file before upload or the address of a wallpaper already on the server —
+  // we need both paths, because the tone must match also when the user
+  // switches between previously uploaded images.
+  function toneFromImage(source) {
     return new Promise((resolve) => {
-      const zPliku = typeof zrodlo !== "string";
+      const fromFile = typeof source !== "string";
       let url = "";
-      if (zPliku) {
-        try { url = URL.createObjectURL(zrodlo); } catch (_) { return resolve(null); }
+      if (fromFile) {
+        try { url = URL.createObjectURL(source); } catch (_) { return resolve(null); }
       } else {
-        url = zrodlo;
+        url = source;
       }
-      const zwolnij = () => { if (zPliku) { try { URL.revokeObjectURL(url); } catch (_) {} } };
+      const release = () => { if (fromFile) { try { URL.revokeObjectURL(url); } catch (_) {} } };
       const img = new Image();
       img.onload = () => {
-        let ton = null;
+        let tone = null;
         try {
           const p = document.createElement("canvas");
           p.width = 24; p.height = 24;
@@ -338,86 +338,86 @@
           let lum = 0;
           for (let i = 0; i < px.length; i += 4) lum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
           lum /= (px.length / 4) * 255;
-          ton = lum > 0.55 ? "light" : "dark";
+          tone = lum > 0.55 ? "light" : "dark";
         } catch (_) {}
-        zwolnij();
-        resolve(ton);
+        release();
+        resolve(tone);
       };
-      img.onerror = () => { zwolnij(); resolve(null); };
+      img.onerror = () => { release(); resolve(null); };
       img.src = url;
     });
   }
 
-  // Przełączenie na leżącą już tapetę też musi przestawić ton — inaczej obraz
-  // zmienia się, a kolor tekstu zostaje po poprzednim.
-  async function ustawTapete(nazwa) {
-    if (!nazwa) return;
-    const pola = { preset: "photo", image: nazwa };
-    zapiszWyglad(pola);
-    const ton = await tonZObrazu("/bg/" + encodeURIComponent(nazwa));
-    if (ton && ton !== wyglądEfektywny().tone) zapiszWyglad({ tone: ton });
+  // Switching to an already uploaded wallpaper must change the tone too — otherwise the image
+  // changes while the text colour stays from the previous one.
+  async function setWallpaper(name) {
+    if (!name) return;
+    const fields = { preset: "photo", image: name };
+    saveAppearance(fields);
+    const tone = await toneFromImage("/bg/" + encodeURIComponent(name));
+    if (tone && tone !== effectiveAppearance().tone) saveAppearance({ tone: tone });
   }
 
-  async function wgrajTapete(plik) {
-    if (!tlaWlaczone) return powiadom(tr("tapeta_wylaczona"), "ostrzezenie");
-    // typ z nazwy jest tylko podpowiedzią — ostatnie słowo i tak ma serwer,
-    // który czyta go z zawartości pliku
-    if (plik.type && !TYPY_TLA.includes(plik.type)) {
-      return powiadom(tr("tapeta_zly_typ"), "ostrzezenie");
+  async function uploadWallpaper(file) {
+    if (!backgroundsEnabled) return notify(tr("tapeta_wylaczona"), "ostrzezenie");
+    // the type from the name is only a hint — the server has the last word anyway,
+    // reading it from the file content
+    if (file.type && !BACKGROUND_TYPES.includes(file.type)) {
+      return notify(tr("tapeta_zly_typ"), "ostrzezenie");
     }
     const limitMB = (window.WYGLAD && window.WYGLAD.limitMB) || 8;
-    if (plik.size > limitMB * 1024 * 1024) {
-      return powiadom(podstaw(tr("tapeta_za_duza"), limitMB), "ostrzezenie");
+    if (file.size > limitMB * 1024 * 1024) {
+      return notify(substitute(tr("tapeta_za_duza"), limitMB), "ostrzezenie");
     }
 
-    const ton = await tonZObrazu(plik);
-    const dane = new FormData();
-    dane.append("file", plik);
+    const tone = await toneFromImage(file);
+    const data = new FormData();
+    data.append("file", file);
     try {
-      const r = await fetch("/api/background", { method: "POST", body: dane });
-      let tresc = null;
-      try { tresc = await r.json(); } catch (_) {}
-      if (!r.ok) throw new Error((tresc && tresc.error) || tr("blad_zapisu_tla"));
-      await wczytajTla();
-      const pola = { preset: "photo", image: tresc.name };
-      if (ton) pola.tone = ton;
-      zapiszWyglad(pola);
-      powiadom(tr("tapeta_wgrana"));
+      const r = await fetch("/api/background", { method: "POST", body: data });
+      let body = null;
+      try { body = await r.json(); } catch (_) {}
+      if (!r.ok) throw new Error((body && body.error) || tr("blad_zapisu_tla"));
+      await loadBackgrounds();
+      const fields = { preset: "photo", image: body.name };
+      if (tone) fields.tone = tone;
+      saveAppearance(fields);
+      notify(tr("tapeta_wgrana"));
     } catch (err) {
-      powiadom(err.message || tr("blad_zapisu_tla"), "ostrzezenie");
+      notify(err.message || tr("blad_zapisu_tla"), "ostrzezenie");
     }
   }
 
-  function maPliki(e) {
+  function hasFiles(e) {
     const dt = e.dataTransfer;
     return !!dt && Array.from(dt.types || []).indexOf("Files") !== -1;
   }
-  document.addEventListener("dragover", (e) => { if (maPliki(e)) e.preventDefault(); });
+  document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
   document.addEventListener("drop", (e) => {
-    if (!maPliki(e)) return;
+    if (!hasFiles(e)) return;
     e.preventDefault();
-    const plik = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (plik) wgrajTapete(plik);
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) uploadWallpaper(file);
   });
 
-  // ── stan usług ──────────────────────────────────────────────────────────
-  // Serwer oznacza prefiksem „content: " powód degraded, gdy kod HTTP był dobry,
-  // a nie przeszła kontrola treści (check.contains / not_contains).
-  const czyTresc = (err) => typeof err === "string" && err.startsWith("content: ");
+  // ── service state ───────────────────────────────────────────────────────
+  // The server marks with the prefix "content: " a degraded reason when the HTTP code was fine
+  // but the content check failed (check.contains / not_contains).
+  const isContentError = (err) => typeof err === "string" && err.startsWith("content: ");
 
-  function etykietaStanu(s, r) {
+  function stateLabel(s, r) {
     if (s === "up" && typeof r.ms === "number") return r.ms + " ms";
     if (s === "degraded") {
-      if (czyTresc(r.err)) return tr("chip_tresc");
-      return r.code ? podstaw(tr("powod_http"), r.code) : tr("chip_degraded");
+      if (isContentError(r.err)) return tr("chip_tresc");
+      return r.code ? substitute(tr("powod_http"), r.code) : tr("chip_degraded");
     }
     if (s === "down") return tr("chip_down");
     return "—";
   }
 
-  function wiek(kiedy) {
-    if (!kiedy) return "";
-    const t = new Date(kiedy).getTime();
+  function age(when) {
+    if (!when) return "";
+    const t = new Date(when).getTime();
     if (!Number.isFinite(t)) return "";
     const s = Math.max(0, Math.round((Date.now() - t) / 1000));
     if (s < 60) return s + " s";
@@ -426,296 +426,296 @@
     return Math.round(m / 60) + " h";
   }
 
-  function rysuj(stan) {
-    ostatniStan = stan || {};
-    const licz = { up: 0, degraded: 0, down: 0, unknown: 0 };
+  function render(state) {
+    lastState = state || {};
+    const counts = { up: 0, degraded: 0, down: 0, unknown: 0 };
 
-    for (const [key, el] of karty) {
-      const r = ostatniStan[key] || { state: "unknown" };
-      const s = STANY.indexOf(r.state) !== -1 ? r.state : "unknown";
-      licz[s]++;
+    for (const [key, el] of cards) {
+      const r = lastState[key] || { state: "unknown" };
+      const s = STATES.indexOf(r.state) !== -1 ? r.state : "unknown";
+      counts[s]++;
 
       const box = $(".stan", el);
-      const etykieta = $(".etykieta", el);
+      const label = $(".etykieta", el);
       if (box.dataset.stan !== s) box.dataset.stan = s;
 
-      const tekst = etykietaStanu(s, r);
-      if (etykieta.textContent !== tekst) etykieta.textContent = tekst;
+      const text = stateLabel(s, r);
+      if (label.textContent !== text) label.textContent = text;
 
-      const kiedy = r.at ? new Date(r.at).toLocaleTimeString(LANG) : "—";
-      const powod = r.err ? ` (${r.err})` : "";
-      box.title = `${OPISY[s]}${powod} · ${tr("sprawdzone")} ${kiedy}`;
-      box.setAttribute("aria-label", `${OPISY[s]}${powod}`);
+      const when = r.at ? new Date(r.at).toLocaleTimeString(LANG) : "—";
+      const reason = r.err ? ` (${r.err})` : "";
+      box.title = `${STATE_DESCRIPTIONS[s]}${reason} · ${tr("sprawdzone")} ${when}`;
+      box.setAttribute("aria-label", `${STATE_DESCRIPTIONS[s]}${reason}`);
 
       const meta = $(".karta-meta span", el);
-      if (meta) meta.textContent = r.at ? " · " + wiek(r.at) : "";
+      if (meta) meta.textContent = r.at ? " · " + age(r.at) : "";
     }
 
-    const zle = licz.down + licz.degraded;
-    podsumowanie.textContent = "";
-    dodajLicznik(licz.up, tr("licznik_dziala"));
-    if (zle) dodajLicznik(zle, zle === 1 ? tr("licznik_uwagi_1") : tr("licznik_uwagi"), "zly");
-    if (licz.unknown) dodajLicznik(licz.unknown, tr("licznik_sprawdzam"));
+    const bad = counts.down + counts.degraded;
+    summary.textContent = "";
+    addCounter(counts.up, tr("licznik_dziala"));
+    if (bad) addCounter(bad, bad === 1 ? tr("licznik_uwagi_1") : tr("licznik_uwagi"), "zly");
+    if (counts.unknown) addCounter(counts.unknown, tr("licznik_sprawdzam"));
 
-    $("span:last-child", chipDziala).textContent = licz.up + " " + tr("chip_up");
-    $("span:last-child", chipProblemy).textContent =
-      zle + " " + (licz.degraded && !licz.down ? tr("chip_degraded") : tr("chip_down"));
-    chipProblemy.hidden = zle === 0;
-    if (zle === 0 && tylkoProblemy) przelaczProblemy(false);
+    $("span:last-child", chipUp).textContent = counts.up + " " + tr("chip_up");
+    $("span:last-child", chipProblems).textContent =
+      bad + " " + (counts.degraded && !counts.down ? tr("chip_degraded") : tr("chip_down"));
+    chipProblems.hidden = bad === 0;
+    if (bad === 0 && problemsOnly) toggleProblemsOnly(false);
   }
 
-  function dodajLicznik(liczba, opis, klasa) {
+  function addCounter(count, text, className) {
     const s = document.createElement("span");
-    if (klasa) s.className = klasa;
+    if (className) s.className = className;
     const b = document.createElement("b");
-    b.textContent = String(liczba);
-    s.append(b, " " + opis);
-    podsumowanie.append(s);
+    b.textContent = String(count);
+    s.append(b, " " + text);
+    summary.append(s);
   }
 
-  // ── wykresy historii ────────────────────────────────────────────────────
+  // ── history charts ──────────────────────────────────────────────────────
   //
-  // Jedna ścieżka na stan zamiast setek <rect> — przy 120 punktach × N usług
-  // to różnica rzędu wielkości w liczbie węzłów DOM. Skala liniowa do 95.
-  // percentyla, żeby jeden timeout nie spłaszczał reszty słupków.
-  const WYPELNIENIE = {
+  // One path per state instead of hundreds of <rect> — with 120 points × N services
+  // that is an order of magnitude fewer DOM nodes. The scale is linear up to the 95th
+  // percentile, so one timeout does not flatten the rest of the bars.
+  const FILL = {
     up: "var(--acc-bar)",
     degraded: "var(--spark-degraded)",
     down: "var(--spark-down)",
   };
 
-  function sciezkiSlupkow(punkty, W, H, luka) {
-    const czasy = punkty
+  function barPaths(points, W, H, gap) {
+    const times = points
       .filter((p) => p.state === "up" && typeof p.ms === "number")
       .map((p) => p.ms)
       .sort((a, b) => a - b);
-    const gora = Math.max(30, czasy.length ? czasy[Math.floor(czasy.length * 0.95)] * 1.25 : 100);
-    const krok = W / punkty.length;
-    const w = Math.max(0.6, krok - luka);
+    const scaleMax = Math.max(30, times.length ? times[Math.floor(times.length * 0.95)] * 1.25 : 100);
+    const step = W / points.length;
+    const w = Math.max(0.6, step - gap);
     const d = { up: "", degraded: "", down: "" };
 
-    punkty.forEach((p, i) => {
+    points.forEach((p, i) => {
       if (!(p.state in d)) return;
       const h = p.state === "up"
-        ? Math.max(2, Math.min(1, (p.ms || 0) / gora) * H)
+        ? Math.max(2, Math.min(1, (p.ms || 0) / scaleMax) * H)
         : H * 0.92;
-      d[p.state] += `M${(i * krok).toFixed(2)} ${(H - h).toFixed(2)}` +
+      d[p.state] += `M${(i * step).toFixed(2)} ${(H - h).toFixed(2)}` +
         `h${w.toFixed(2)}v${h.toFixed(2)}h-${w.toFixed(2)}z`;
     });
-    return { d, gora: Math.round(gora), krok };
+    return { d, scaleMax: Math.round(scaleMax), step };
   }
 
-  function rysujWykres(svg, punkty, luka) {
+  function drawChart(svg, points, gap) {
     if (!svg) return 0;
-    const pola = svg.viewBox && svg.viewBox.baseVal;
-    const W = (pola && pola.width) || 80;
-    const H = (pola && pola.height) || 18;
-    const puste = { up: "", degraded: "", down: "" };
-    const wynik = punkty.length ? sciezkiSlupkow(punkty, W, H, luka) : { d: puste, gora: 0, krok: 0 };
+    const fields = svg.viewBox && svg.viewBox.baseVal;
+    const W = (fields && fields.width) || 80;
+    const H = (fields && fields.height) || 18;
+    const emptyPaths = { up: "", degraded: "", down: "" };
+    const result = points.length ? barPaths(points, W, H, gap) : { d: emptyPaths, scaleMax: 0, step: 0 };
     for (const p of $$("path", svg)) {
-      p.setAttribute("d", wynik.d[p.dataset.stan] || "");
-      p.setAttribute("fill", WYPELNIENIE[p.dataset.stan] || "var(--unknown)");
+      p.setAttribute("d", result.d[p.dataset.stan] || "");
+      p.setAttribute("fill", FILL[p.dataset.stan] || "var(--unknown)");
     }
-    return wynik;
+    return result;
   }
 
-  async function wczytajHistorie(el) {
+  async function loadHistory(el) {
     const key = el.dataset.key;
     try {
       const r = await fetch(`/api/history?key=${encodeURIComponent(key)}&n=40`);
       if (!r.ok) return;
       const d = await r.json();
-      rysujWykres($(".wykres", el), d.points || [], 0.6);
+      drawChart($(".wykres", el), d.points || [], 0.6);
       if (d.samples > 0) {
         const box = $(".stan", el);
         box.dataset.uptime = d.uptime.toFixed(1);
-        const opis = `${tr("dostepnosc_24h")}: ${d.uptime.toFixed(1)}% (${d.samples} ${tr("sprawdzen")})`;
-        $(".wykres", el).setAttribute("aria-label", opis);
-        $(".wykres", el).setAttribute("title", opis);
+        const ariaLabel = `${tr("dostepnosc_24h")}: ${d.uptime.toFixed(1)}% (${d.samples} ${tr("sprawdzen")})`;
+        $(".wykres", el).setAttribute("aria-label", ariaLabel);
+        $(".wykres", el).setAttribute("title", ariaLabel);
         const meta = $(".karta-meta b", el);
         if (meta) meta.textContent = d.uptime.toFixed(1) + "%";
       }
     } catch (_) {}
   }
 
-  function wczytajWszystkieHistorie() {
-    for (const el of karty.values()) wczytajHistorie(el);
+  function loadAllHistory() {
+    for (const el of cards.values()) loadHistory(el);
   }
 
-  // ── strumień zdarzeń ────────────────────────────────────────────────────
-  let zrodlo = null;
-  function podlacz() {
-    if (zrodlo) zrodlo.close();
-    zrodlo = new EventSource("/events");
+  // ── event stream ────────────────────────────────────────────────────────
+  let eventSource = null;
+  function connect() {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource("/events");
 
-    // domyślny strumień (bez `event:`) to snapshot zdrowia — bez zmian
-    zrodlo.onmessage = (e) => {
-      zerwane(false);
-      try { rysuj(JSON.parse(e.data)); } catch (_) {}
+    // the default stream (without `event:`) is a health snapshot — unchanged
+    eventSource.onmessage = (e) => {
+      setDisconnected(false);
+      try { render(JSON.parse(e.data)); } catch (_) {}
     };
-    // wygląd instancji zmieniony w pliku albo z innej karty; lokalna
-    // nadpiska z localStorage nadal wygrywa
-    zrodlo.addEventListener("wyglad", (e) => {
+    // the instance appearance changed in the file or from another tab; the local
+    // override from localStorage still wins
+    eventSource.addEventListener("wyglad", (e) => {
       try {
         window.WYGLAD = Object.assign({}, window.WYGLAD, JSON.parse(e.data));
-        zastosujWyglad(true);
+        applyAppearance(true);
       } catch (_) {}
     });
-    zrodlo.addEventListener("uklad", (e) => {
-      try { naUkladzie(JSON.parse(e.data)); } catch (_) {}
+    eventSource.addEventListener("uklad", (e) => {
+      try { onLayout(JSON.parse(e.data)); } catch (_) {}
     });
-    // błąd/ostrzeżenia pliku: pojawiają się i znikają bez odświeżania
-    zrodlo.addEventListener("konfig", (e) => {
-      try { pokazBaner(JSON.parse(e.data)); } catch (_) {}
+    // file error/warnings: they appear and disappear without a refresh
+    eventSource.addEventListener("konfig", (e) => {
+      try { showBanner(JSON.parse(e.data)); } catch (_) {}
     });
-    zrodlo.onerror = () => zerwane(true);
+    eventSource.onerror = () => setDisconnected(true);
   }
 
-  // Baner stanu pliku. Teksty przychodzą gotowe z serwera (w języku karty);
-  // wszystko idzie przez textContent, nic przez innerHTML.
-  function pokazBaner(b) {
+  // File state banner. The texts come ready from the server (in the tab's language);
+  // everything goes through textContent, nothing through innerHTML.
+  function showBanner(b) {
     const el = $("#baner-config");
     if (!el) return;
     el.dataset.stan = b.state;
     el.hidden = b.state === "ok";
     $("#baner-tytul").textContent = b.title || "";
-    const blad = $("#baner-blad");
-    blad.textContent = b.error || "";
-    blad.hidden = !b.error;
-    const lista = $("#baner-lista");
-    lista.textContent = "";
+    const errorEl = $("#baner-blad");
+    errorEl.textContent = b.error || "";
+    errorEl.hidden = !b.error;
+    const list = $("#baner-lista");
+    list.textContent = "";
     for (const t of b.warnings || []) {
       const li = document.createElement("li");
       li.textContent = t;
-      lista.appendChild(li);
+      list.appendChild(li);
     }
-    lista.hidden = !(b.warnings && b.warnings.length);
+    list.hidden = !(b.warnings && b.warnings.length);
   }
 
-  function zerwane(tak) {
-    polaczenie.classList.toggle("zerwane", tak);
-    polaczenie.textContent = tak ? tr("brak_polaczenia") : tr("na_zywo");
-    chipDziala.classList.toggle("zerwane", tak);
-    chipProblemy.classList.toggle("zerwane", tak);
+  function setDisconnected(lost) {
+    connection.classList.toggle("zerwane", lost);
+    connection.textContent = lost ? tr("brak_polaczenia") : tr("na_zywo");
+    chipUp.classList.toggle("zerwane", lost);
+    chipProblems.classList.toggle("zerwane", lost);
   }
 
-  // ── filtrowanie ─────────────────────────────────────────────────────────
-  const filtr = $("#filtr");
-  const pusto = $("#pusto");
-  let tylkoProblemy = false;
+  // ── filtering ───────────────────────────────────────────────────────────
+  const filter = $("#filtr");
+  const emptyState = $("#pusto");
+  let problemsOnly = false;
 
-  // Wyszukiwanie ignoruje wielkość liter i ogonki („zdjecia" znajdzie „zdjęcia").
-  // ł/Ł nie rozkładają się w NFD, więc idą osobno.
-  function uproszczony(t) {
+  // The search ignores case and diacritics ("zdjecia" finds "zdjęcia").
+  // ł/Ł do not decompose in NFD, so they go separately.
+  function simplify(t) {
     return String(t || "").toLowerCase().replace(/ł/g, "l").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   }
 
-  function filtruj() {
-    const q = uproszczony(filtr.value.trim());
-    let widoczne = 0;
-    $$(".grupa").forEach((grupa) => {
-      let wGrupie = 0;
-      $$(".karta", grupa).forEach((k) => {
-        const stan = $(".stan", k).dataset.stan;
-        const pasuje = (!q || uproszczony(k.dataset.szukaj).includes(q)) &&
-          (!tylkoProblemy || stan === "down" || stan === "degraded");
-        k.hidden = !pasuje;
-        if (pasuje) wGrupie++;
+  function applyFilter() {
+    const q = simplify(filter.value.trim());
+    let visible = 0;
+    $$(".grupa").forEach((group) => {
+      let inGroup = 0;
+      $$(".karta", group).forEach((k) => {
+        const state = $(".stan", k).dataset.stan;
+        const matches = (!q || simplify(k.dataset.szukaj).includes(q)) &&
+          (!problemsOnly || state === "down" || state === "degraded");
+        k.hidden = !matches;
+        if (matches) inGroup++;
       });
-      // pusta grupa znika tylko przy aktywnym filtrze — bez niego musi dać się
-      // upuścić do niej kartę
-      grupa.hidden = (q || tylkoProblemy) && wGrupie === 0;
-      widoczne += wGrupie;
+      // an empty group disappears only when a filter is active — without one it must be possible
+      // to drop a card into it
+      group.hidden = (q || problemsOnly) && inGroup === 0;
+      visible += inGroup;
     });
-    pusto.hidden = widoczne > 0;
+    emptyState.hidden = visible > 0;
   }
 
-  function przelaczProblemy(wymus) {
-    tylkoProblemy = wymus !== undefined ? wymus : !tylkoProblemy;
-    chipProblemy.classList.toggle("wlaczony", tylkoProblemy);
-    chipProblemy.setAttribute("aria-pressed", String(tylkoProblemy));
-    filtruj();
+  function toggleProblemsOnly(force) {
+    problemsOnly = force !== undefined ? force : !problemsOnly;
+    chipProblems.classList.toggle("wlaczony", problemsOnly);
+    chipProblems.setAttribute("aria-pressed", String(problemsOnly));
+    applyFilter();
   }
 
-  filtr.addEventListener("input", filtruj);
-  filtr.addEventListener("keydown", (e) => {
+  filter.addEventListener("input", applyFilter);
+  filter.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { const p = $(".karta:not([hidden]) a"); if (p) p.click(); }
   });
 
-  // ── skróty klawiszowe ───────────────────────────────────────────────────
+  // ── keyboard shortcuts ──────────────────────────────────────────────────
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-    // Esc idzie kaskadą: detal → popovery → czyszczenie filtra
+    // Esc cascades: details → popovers → clearing the filter
     if (e.key === "Escape") {
-      if ($("dialog[open]")) return; // dialogi zamyka przeglądarka
-      if (popoveryOtwarte()) { zamknijPopovery(); return; }
-      if (filtr.value) { filtr.value = ""; filtruj(); filtr.blur(); }
+      if ($("dialog[open]")) return; // the browser closes dialogs
+      if (popoversOpen()) { closePopovers(); return; }
+      if (filter.value) { filter.value = ""; applyFilter(); filter.blur(); }
       return;
     }
 
     if (e.target.matches("input, textarea, select")) return;
     const k = e.key.toLowerCase();
-    if (e.key === "/") { e.preventDefault(); filtr.focus(); filtr.select(); }
-    else if (k === "e") przelaczEdycje();
-    else if (k === "n") { e.preventDefault(); otworzUsluge(null); }
-    else if (k === "b") { e.preventDefault(); przyciskTla.click(); }
-    else if (e.key === "1") zapiszWyglad({ view: "grid" });
-    else if (e.key === "2") zapiszWyglad({ view: "bento" });
-    else if (e.key === "3") zapiszWyglad({ view: "list" });
+    if (e.key === "/") { e.preventDefault(); filter.focus(); filter.select(); }
+    else if (k === "e") toggleEditMode();
+    else if (k === "n") { e.preventDefault(); openServiceDialog(null); }
+    else if (k === "b") { e.preventDefault(); backgroundButton.click(); }
+    else if (e.key === "1") saveAppearance({ view: "grid" });
+    else if (e.key === "2") saveAppearance({ view: "bento" });
+    else if (e.key === "3") saveAppearance({ view: "list" });
   });
 
-  // ── tryb edycji ─────────────────────────────────────────────────────────
-  let dockerJest = false;
-  const przyciskEdycji = $("#tryb-edycji");
-  // stan edycji tytułu żyje tu, bo przelaczEdycje(true) woła się przy starcie,
-  // zanim dojdzie wykonanie do reszty kodu tytułu
-  let edytujeTytul = false;
-  let anulujTytul = null;
+  // ── edit mode ───────────────────────────────────────────────────────────
+  let dockerAvailable = false;
+  const editButton = $("#tryb-edycji");
+  // the title edit state lives here, because toggleEditMode(true) is called at start-up,
+  // before execution reaches the rest of the title code
+  let editingTitle = false;
+  let cancelTitleEdit = null;
 
-  function przelaczEdycje(wymus) {
-    const wl = wymus !== undefined ? wymus : !document.body.classList.contains("edycja");
-    document.body.classList.toggle("edycja", wl);
-    przyciskEdycji.setAttribute("aria-pressed", String(wl));
-    $("#dodaj-grupe").hidden = !wl;
-    if (!wl && anulujTytul) anulujTytul();
-    pamiec.pisz(KLUCZ_EDYCJI, wl ? "1" : "0");
+  function toggleEditMode(force) {
+    const on = force !== undefined ? force : !document.body.classList.contains("edycja");
+    document.body.classList.toggle("edycja", on);
+    editButton.setAttribute("aria-pressed", String(on));
+    $("#dodaj-grupe").hidden = !on;
+    if (!on && cancelTitleEdit) cancelTitleEdit();
+    storage.write(EDIT_KEY, on ? "1" : "0");
   }
-  przyciskEdycji.addEventListener("click", () => przelaczEdycje());
-  if (pamiec.czytaj(KLUCZ_EDYCJI) === "1") przelaczEdycje(true);
+  editButton.addEventListener("click", () => toggleEditMode());
+  if (storage.read(EDIT_KEY) === "1") toggleEditMode(true);
 
   // ── API ─────────────────────────────────────────────────────────────────
-  async function api(metoda, sciezka, dane) {
-    const r = await fetch(sciezka, {
-      method: metoda,
-      headers: dane ? { "Content-Type": "application/json" } : {},
-      body: dane ? JSON.stringify(dane) : undefined,
+  async function api(method, path, data) {
+    const r = await fetch(path, {
+      method: method,
+      headers: data ? { "Content-Type": "application/json" } : {},
+      body: data ? JSON.stringify(data) : undefined,
     });
-    let tresc = null;
-    try { tresc = await r.json(); } catch (_) {}
-    if (!r.ok) throw new Error((tresc && tresc.error) || `HTTP ${r.status}`);
-    return tresc;
+    let body = null;
+    try { body = await r.json(); } catch (_) {}
+    if (!r.ok) throw new Error((body && body.error) || `HTTP ${r.status}`);
+    return body;
   }
 
-  async function wczytajInfo() {
+  async function loadInfo() {
     try {
       const d = await api("GET", "/api/info");
-      dockerJest = !!d.docker;
-      tlaWlaczone = !!d.backgrounds;
+      dockerAvailable = !!d.docker;
+      backgroundsEnabled = !!d.backgrounds;
 
       const docker = $("#menu-docker");
-      // Wyłączone świadomie w pliku = pozycja znika. Przypominanie o funkcji,
-      // którą user sam wyłączył, to szum. Brak gniazda = blednie, bo to stan
-      // środowiska i warto, żeby było widać, że taka funkcja istnieje.
+      // Disabled on purpose in the file = the item disappears. Reminding about a feature
+      // the user turned off themselves is noise. A missing socket = dimmed, because it is a state of the
+      // environment and it is worth showing that such a feature exists.
       docker.hidden = !!d.dockerWylaczony;
-      docker.setAttribute("aria-disabled", String(!dockerJest));
-      docker.title = dockerJest ? "" : tr("docker_niedostepny");
+      docker.setAttribute("aria-disabled", String(!dockerAvailable));
+      docker.title = dockerAvailable ? "" : tr("docker_niedostepny");
       const badge = $("#menu-docker-badge");
       badge.hidden = !d.dockerNew;
-      if (d.dockerNew) badge.textContent = podstaw(tr("menu_docker_nowe"), d.dockerNew);
+      if (d.dockerNew) badge.textContent = substitute(tr("menu_docker_nowe"), d.dockerNew);
 
-      kafelTapety.hidden = !tlaWlaczone;
-      $("#picker-podmien").hidden = !tlaWlaczone;
+      wallpaperTile.hidden = !backgroundsEnabled;
+      $("#picker-podmien").hidden = !backgroundsEnabled;
       $("#picker-do-ustawien").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
 
       $("#powiad-stan").textContent = d.notify ? tr("powiad_wlaczone") : tr("powiad_wylaczone");
@@ -724,498 +724,498 @@
   }
 
   // ── toast ───────────────────────────────────────────────────────────────
-  const komunikat = $("#komunikat");
-  let timerKomunikatu = null;
+  const toast = $("#komunikat");
+  let toastTimer = null;
 
-  function powiadom(tekst, wariant) {
-    if (!tekst) return;
-    clearTimeout(timerKomunikatu);
-    komunikat.textContent = tekst;
-    komunikat.className = "komunikat" + (wariant ? " " + wariant : "");
-    komunikat.hidden = false;
-    timerKomunikatu = setTimeout(() => { komunikat.hidden = true; }, 2600);
+  function notify(text, variant) {
+    if (!text) return;
+    clearTimeout(toastTimer);
+    toast.textContent = text;
+    toast.className = "komunikat" + (variant ? " " + variant : "");
+    toast.hidden = false;
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
   }
 
-  function powiadomBlad(err) {
+  function notifyError(err) {
     const msg = (err && err.message) || String(err);
-    powiadom(msg, msg === tr("konflikt_pliku") ? "ostrzezenie" : "");
+    notify(msg, msg === tr("konflikt_pliku") ? "ostrzezenie" : "");
   }
 
-  // ── mini-dialogi zamiast prompt() i confirm() ───────────────────────────
-  const oknoNazwy = $("#okno-nazwy");
-  const formaNazwy = $("#form-nazwy");
-  const poleNazwy = $("#pole-nazwy");
+  // ── mini-dialogs instead of prompt() and confirm() ──────────────────────
+  const nameDialog = $("#okno-nazwy");
+  const nameForm = $("#form-nazwy");
+  const nameField = $("#pole-nazwy");
 
-  function zapytajONazwe(tytul, wartosc) {
-    $("#tytul-nazwy").textContent = tytul;
+  function askForName(title, value) {
+    $("#tytul-nazwy").textContent = title;
     $("#blad-nazwy").hidden = true;
-    poleNazwy.value = wartosc || "";
-    oknoNazwy.showModal();
-    poleNazwy.focus();
-    poleNazwy.select();
+    nameField.value = value || "";
+    nameDialog.showModal();
+    nameField.focus();
+    nameField.select();
 
     return new Promise((resolve) => {
-      let wynik = null;
-      const naSubmit = (e) => {
+      let result = null;
+      const onSubmit = (e) => {
         e.preventDefault();
-        const v = poleNazwy.value.trim();
+        const v = nameField.value.trim();
         if (!v) return;
-        wynik = v;
-        oknoNazwy.close();
+        result = v;
+        nameDialog.close();
       };
-      const naClose = () => {
-        formaNazwy.removeEventListener("submit", naSubmit);
-        oknoNazwy.removeEventListener("close", naClose);
-        resolve(wynik);
+      const onClose = () => {
+        nameForm.removeEventListener("submit", onSubmit);
+        nameDialog.removeEventListener("close", onClose);
+        resolve(result);
       };
-      formaNazwy.addEventListener("submit", naSubmit);
-      oknoNazwy.addEventListener("close", naClose);
+      nameForm.addEventListener("submit", onSubmit);
+      nameDialog.addEventListener("close", onClose);
     });
   }
 
-  const oknoPotwierdzenia = $("#okno-potwierdzenia");
+  const confirmDialog = $("#okno-potwierdzenia");
 
-  function potwierdz(tekst) {
-    $("#tekst-potwierdzenia").textContent = tekst;
-    oknoPotwierdzenia.showModal();
+  function confirmAction(text) {
+    $("#tekst-potwierdzenia").textContent = text;
+    confirmDialog.showModal();
     return new Promise((resolve) => {
-      let wynik = false;
-      const naTak = () => { wynik = true; oknoPotwierdzenia.close(); };
-      const naClose = () => {
-        $("#potwierdz-tak").removeEventListener("click", naTak);
-        oknoPotwierdzenia.removeEventListener("close", naClose);
-        resolve(wynik);
+      let result = false;
+      const onYes = () => { result = true; confirmDialog.close(); };
+      const onClose = () => {
+        $("#potwierdz-tak").removeEventListener("click", onYes);
+        confirmDialog.removeEventListener("close", onClose);
+        resolve(result);
       };
-      $("#potwierdz-tak").addEventListener("click", naTak);
-      oknoPotwierdzenia.addEventListener("close", naClose);
+      $("#potwierdz-tak").addEventListener("click", onYes);
+      confirmDialog.addEventListener("close", onClose);
     });
   }
 
-  // ── ikony ───────────────────────────────────────────────────────────────
+  // ── icons ───────────────────────────────────────────────────────────────
   //
-  // Ikona idzie wyłącznie przez nasz /icon/ — przeglądarka nigdy nie pyta
-  // CDN-a. Gdy pliku nie ma, zostaje kafelek z pierwszą literą.
-  function literaZamiastIkony(img) {
-    const pojemnik = img.closest(".ikona");
-    if (!pojemnik) return;
-    const karta = img.closest(".karta");
-    const nazwa = (karta && karta.dataset.nazwa) || img.alt || "?";
-    pojemnik.textContent = "";
+  // The icon goes only through our /icon/ — the browser never asks
+  // a CDN. When the file is missing, a tile with the first letter remains.
+  function showLetterFallback(img) {
+    const container = img.closest(".ikona");
+    if (!container) return;
+    const card = img.closest(".karta");
+    const name = (card && card.dataset.nazwa) || img.alt || "?";
+    container.textContent = "";
     const l = document.createElement("span");
     l.className = "litera";
-    l.textContent = nazwa.trim().charAt(0).toUpperCase() || "?";
-    pojemnik.append(l);
+    l.textContent = name.trim().charAt(0).toUpperCase() || "?";
+    container.append(l);
   }
 
   document.addEventListener("error", (e) => {
     const img = e.target;
-    if (img instanceof HTMLImageElement && img.closest(".ikona")) literaZamiastIkony(img);
+    if (img instanceof HTMLImageElement && img.closest(".ikona")) showLetterFallback(img);
   }, true);
 
-  // ── szczegóły usługi ────────────────────────────────────────────────────
-  const oknoDetali = $("#okno-detali");
-  let aktualnyKlucz = null;
+  // ── service details ─────────────────────────────────────────────────────
+  const detailsDialog = $("#okno-detali");
+  let currentKey = null;
 
-  function kafel(etykieta, wartosc, jednostka) {
+  function tile(label, value, unit) {
     const d = document.createElement("div");
     d.className = "kafel";
     const e = document.createElement("span");
     e.className = "etykieta-staty";
-    e.textContent = etykieta;
+    e.textContent = label;
     const b = document.createElement("b");
-    b.textContent = wartosc;
+    b.textContent = value;
     d.append(e, b);
-    if (jednostka) {
+    if (unit) {
       const j = document.createElement("span");
       j.className = "jednostka";
-      j.textContent = " " + jednostka;
+      j.textContent = " " + unit;
       d.append(j);
     }
     return d;
   }
 
-  // Nakładka przezroczystych prostokątów z <title> — jedyne miejsce, gdzie
-  // użytkownik widzi powód pojedynczej próbki bez wchodzenia głębiej.
-  function nalozOpisySlupkow(svg, punkty, krok) {
-    for (const stary of $$(".detale-slupek", svg)) stary.remove();
-    const pola = svg.viewBox && svg.viewBox.baseVal;
-    const H = (pola && pola.height) || 90;
-    punkty.forEach((p, i) => {
+  // An overlay of transparent rectangles with <title> — the only place where the
+  // user sees the reason for a single sample without going deeper.
+  function overlayBarTitles(svg, points, step) {
+    for (const oldBar of $$(".detale-slupek", svg)) oldBar.remove();
+    const fields = svg.viewBox && svg.viewBox.baseVal;
+    const H = (fields && fields.height) || 90;
+    points.forEach((p, i) => {
       const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
       r.setAttribute("class", "detale-slupek");
-      r.setAttribute("x", (i * krok).toFixed(2));
+      r.setAttribute("x", (i * step).toFixed(2));
       r.setAttribute("y", "0");
-      r.setAttribute("width", Math.max(0.6, krok).toFixed(2));
+      r.setAttribute("width", Math.max(0.6, step).toFixed(2));
       r.setAttribute("height", String(H));
       r.setAttribute("fill", "transparent");
       const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      t.textContent = `${new Date(p.at).toLocaleString(LANG)} · ${OPISY[p.state] || p.state}` +
+      t.textContent = `${new Date(p.at).toLocaleString(LANG)} · ${STATE_DESCRIPTIONS[p.state] || p.state}` +
         (p.state === "up" ? ` · ${p.ms} ms`
           : p.err ? ` · ${p.err}`
-            : p.code ? ` · ${podstaw(tr("powod_http"), p.code)}` : "");
+            : p.code ? ` · ${substitute(tr("powod_http"), p.code)}` : "");
       r.append(t);
       svg.append(r);
     });
   }
 
-  // err przed code: przy zniezgodnej treści kod to 200, a powód siedzi w err
-  function powodZmiany(z) {
+  // err before code: with a content mismatch the code is 200, and the reason sits in err
+  function changeReason(z) {
     if (z.err) return z.err;
-    if (z.code) return podstaw(tr("powod_http"), z.code);
+    if (z.code) return substitute(tr("powod_http"), z.code);
     return tr("brak_powodu");
   }
 
-  // regułę kontroli składamy z kawałków, bez innerHTML
-  function opisKontroli(d) {
-    const czesci = [];
-    if (d.path) czesci.push(podstaw(tr("kontrola_get"), d.path));
-    if (d.contains) czesci.push(podstaw(tr("kontrola_zawiera"), d.contains));
-    if (d.notContains) czesci.push(podstaw(tr("kontrola_nie_zawiera"), d.notContains));
-    return czesci.join(" · ");
+  // we assemble the check rule from pieces, without innerHTML
+  function checkDescription(d) {
+    const parts = [];
+    if (d.path) parts.push(substitute(tr("kontrola_get"), d.path));
+    if (d.contains) parts.push(substitute(tr("kontrola_zawiera"), d.contains));
+    if (d.notContains) parts.push(substitute(tr("kontrola_nie_zawiera"), d.notContains));
+    return parts.join(" · ");
   }
 
-  // zwraca adres tylko dla http(s); wszystko inne (javascript:, data:, tcp://…) → ""
-  function bezpiecznyHref(adres) {
+  // returns the address only for http(s); everything else (javascript:, data:, tcp://…) → ""
+  function safeHref(address) {
     try {
-      const u = new URL(String(adres || ""));
+      const u = new URL(String(address || ""));
       return u.protocol === "http:" || u.protocol === "https:" ? u.href : "";
     } catch (_) {
       return "";
     }
   }
 
-  // chipy tagów — textContent, nigdy innerHTML: tagi są z pliku użytkownika
-  function wypelnijTagi(el, tagi) {
+  // tag chips — textContent, never innerHTML: the tags come from the user's file
+  function fillTags(el, tags) {
     el.textContent = "";
-    for (const t of tagi || []) {
+    for (const t of tags || []) {
       const c = document.createElement("span");
       c.className = "tag";
       c.textContent = t;
       el.append(c);
     }
-    el.hidden = !(tagi && tagi.length);
+    el.hidden = !(tags && tags.length);
   }
 
-  async function otworzDetale(klucz) {
-    aktualnyKlucz = klucz;
+  async function openDetails(key) {
+    currentKey = key;
     try {
-      const d = await api("GET", `/api/service?key=${encodeURIComponent(klucz)}&n=120`);
+      const d = await api("GET", `/api/service?key=${encodeURIComponent(key)}&n=120`);
 
       $("#detale-nazwa").textContent = d.name;
       const link = $("#detale-url");
       link.textContent = d.url;
-      // ! tylko http(s) trafia do href — `javascript:` z pliku YAML to XSS
-      const href = bezpiecznyHref(d.url);
-      const otworz = $("#detale-otworz");
-      for (const a of [link, otworz]) {
+      // ! only http(s) reaches href — `javascript:` from the YAML file is XSS
+      const href = safeHref(d.url);
+      const openLink = $("#detale-otworz");
+      for (const a of [link, openLink]) {
         if (href) a.href = href; else a.removeAttribute("href");
       }
-      otworz.hidden = !href;
+      openLink.hidden = !href;
 
-      const opisD = $("#detale-opis");
-      opisD.textContent = d.description || "";
-      opisD.hidden = !d.description;
-      wypelnijTagi($("#detale-tagi"), d.tags);
+      const descriptionEl = $("#detale-opis");
+      descriptionEl.textContent = d.description || "";
+      descriptionEl.hidden = !d.description;
+      fillTags($("#detale-tagi"), d.tags);
 
-      const ikona = $("#detale-ikona");
-      ikona.textContent = "";
-      renderujIkone(ikona, { src: d.iconSrc, wc: d.iconWariantCiemny, wj: d.iconWariantJasny }, d.name || "", 28);
+      const icon = $("#detale-ikona");
+      icon.textContent = "";
+      renderIcon(icon, { src: d.iconSrc, dark: d.iconWariantCiemny, light: d.iconWariantJasny }, d.name || "", 28);
 
-      const stan = d.now && d.now.state ? d.now.state : "unknown";
+      const state = d.now && d.now.state ? d.now.state : "unknown";
       const box = $("#detale-stan");
-      box.dataset.stan = stan;
-      $("#detale-stan .etykieta").textContent = etykietaStanu(stan, d.now || {});
+      box.dataset.stan = state;
+      $("#detale-stan .etykieta").textContent = stateLabel(state, d.now || {});
 
-      // powód bieżącego stanu (np. „content: missing …") — tylko gdy coś nie gra
-      const powod = $("#detale-powod");
-      const nieGra = (stan === "degraded" || stan === "down") && d.now && d.now.err;
-      powod.textContent = nieGra ? `${tr("powod_stanu")}: ${d.now.err}` : "";
-      powod.dataset.stan = stan;
-      powod.hidden = !nieGra;
-      const kontrola = $("#detale-kontrola");
-      kontrola.textContent = opisKontroli(d);
-      kontrola.hidden = !kontrola.textContent;
+      // reason for the current state (e.g. "content: missing …") — only when something is wrong
+      const reason = $("#detale-powod");
+      const hasProblem = (state === "degraded" || state === "down") && d.now && d.now.err;
+      reason.textContent = hasProblem ? `${tr("powod_stanu")}: ${d.now.err}` : "";
+      reason.dataset.stan = state;
+      reason.hidden = !hasProblem;
+      const checkEl = $("#detale-kontrola");
+      checkEl.textContent = checkDescription(d);
+      checkEl.hidden = !checkEl.textContent;
 
-      const staty = $("#detale-staty");
-      staty.textContent = "";
-      const proc = (x) => (x.samples ? x.uptime.toFixed(1) : "—");
-      staty.append(
-        kafel(tr("doba"), proc(d.day), d.day.samples ? "%" : tr("brak_danych")),
-        kafel(tr("tydzien"), proc(d.week), d.week.samples ? "%" : tr("brak_danych")),
-        kafel(tr("mediana"), d.day.p50 || "—", "ms"),
-        kafel("p95", d.day.p95 || "—", "ms"),
-        kafel(tr("najwolniej"), d.day.max || "—", "ms"),
+      const stats = $("#detale-staty");
+      stats.textContent = "";
+      const percent = (x) => (x.samples ? x.uptime.toFixed(1) : "—");
+      stats.append(
+        tile(tr("doba"), percent(d.day), d.day.samples ? "%" : tr("brak_danych")),
+        tile(tr("tydzien"), percent(d.week), d.week.samples ? "%" : tr("brak_danych")),
+        tile(tr("mediana"), d.day.p50 || "—", "ms"),
+        tile("p95", d.day.p95 || "—", "ms"),
+        tile(tr("najwolniej"), d.day.max || "—", "ms"),
       );
 
-      const punkty = d.points || [];
-      const wykres = $("#detale-wykres");
-      const wynik = rysujWykres(wykres, punkty, 1.4);
-      nalozOpisySlupkow(wykres, punkty, wynik.krok);
-      $("#detale-skala").textContent = punkty.length
-        ? `${punkty.length} × ${d.interval} · 0–${wynik.gora} ms`
+      const points = d.points || [];
+      const chart = $("#detale-wykres");
+      const result = drawChart(chart, points, 1.4);
+      overlayBarTitles(chart, points, result.step);
+      $("#detale-skala").textContent = points.length
+        ? `${points.length} × ${d.interval} · 0–${result.scaleMax} ms`
         : tr("brak_danych");
 
-      const lista = $("#detale-zmiany");
-      lista.textContent = "";
+      const list = $("#detale-zmiany");
+      list.textContent = "";
       if (!d.changes || !d.changes.length) {
         const li = document.createElement("li");
         li.textContent = tr("brak_zmian_stanu");
-        lista.append(li);
+        list.append(li);
       } else {
         for (const z of d.changes) {
           const li = document.createElement("li");
           li.dataset.na = z.to;
-          const kiedy = document.createElement("span");
-          kiedy.className = "kiedy";
-          kiedy.textContent = new Date(z.at).toLocaleString(LANG, {
+          const when = document.createElement("span");
+          when.className = "kiedy";
+          when.textContent = new Date(z.at).toLocaleString(LANG, {
             day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
           });
-          const co = document.createElement("span");
-          co.textContent = `${OPISY[z.from] || z.from} → ${OPISY[z.to] || z.to}`;
-          const powod = document.createElement("span");
-          powod.className = "powod";
-          powod.textContent = powodZmiany(z);
-          li.append(kiedy, co, powod);
-          lista.append(li);
+          const what = document.createElement("span");
+          what.textContent = `${STATE_DESCRIPTIONS[z.from] || z.from} → ${STATE_DESCRIPTIONS[z.to] || z.to}`;
+          const reason = document.createElement("span");
+          reason.className = "powod";
+          reason.textContent = changeReason(z);
+          li.append(when, what, reason);
+          list.append(li);
         }
       }
 
-      oknoDetali.showModal();
+      detailsDialog.showModal();
     } catch (err) {
-      powiadomBlad(err);
+      notifyError(err);
     }
   }
 
   $("#detale-sprawdz").addEventListener("click", async () => {
-    if (!aktualnyKlucz) return;
+    if (!currentKey) return;
     const b = $("#detale-sprawdz");
-    const napis = b.textContent;
+    const originalText = b.textContent;
     b.disabled = true;
     b.textContent = tr("sprawdzam");
     try {
-      await api("POST", `/api/check?key=${encodeURIComponent(aktualnyKlucz)}`);
-      await otworzDetale(aktualnyKlucz);
+      await api("POST", `/api/check?key=${encodeURIComponent(currentKey)}`);
+      await openDetails(currentKey);
     } catch (err) {
-      powiadomBlad(err);
+      notifyError(err);
     } finally {
       b.disabled = false;
-      b.textContent = napis;
+      b.textContent = originalText;
     }
   });
 
-  // ── podgląd zmiany przed zapisem ────────────────────────────────────────
+  // ── change preview before saving ────────────────────────────────────────
   //
-  // Każda zmiana pliku przechodzi tędy: najpierw pytamy serwer „co by się
-  // stało" (?dry=1), pokazujemy diff, i dopiero po potwierdzeniu zapisujemy.
-  const oknoDiff = $("#okno-diff");
+  // Every file change goes through here: first we ask the server "what would
+  // happen" (?dry=1), show the diff, and only after confirmation do we save.
+  const diffDialog = $("#okno-diff");
 
-  function rysujDiff(tekst) {
+  function renderDiff(text) {
     const el = $("#tresc-diff");
     el.textContent = "";
-    for (const linia of (tekst || "").split("\n")) {
-      if (linia === "") continue;
+    for (const line of (text || "").split("\n")) {
+      if (line === "") continue;
       const span = document.createElement("span");
-      const z = linia[0];
-      span.className = z === "+" ? "plus" : z === "-" ? "minus" : linia.startsWith("@@") ? "hunk" : "ctx";
-      span.textContent = linia;
+      const z = line[0];
+      span.className = z === "+" ? "plus" : z === "-" ? "minus" : line.startsWith("@@") ? "hunk" : "ctx";
+      span.textContent = line;
       el.append(span);
     }
   }
 
-  function pokazDiff(podglad, tylkoPodglad) {
-    rysujDiff(podglad.diff);
-    const licznik = $("#licznik-diff");
-    licznik.textContent = "";
-    if (!podglad.diff) {
-      licznik.textContent = tr("bez_zmian");
+  function showDiff(preview, previewOnly) {
+    renderDiff(preview.diff);
+    const counter = $("#licznik-diff");
+    counter.textContent = "";
+    if (!preview.diff) {
+      counter.textContent = tr("bez_zmian");
     } else {
-      const plus = document.createElement("b"); plus.className = "plus"; plus.textContent = "+" + podglad.added;
-      const minus = document.createElement("b"); minus.className = "minus"; minus.textContent = "−" + podglad.removed;
-      licznik.append(plus, " " + tr("linii_dodanych") + " · ", minus, " " + tr("linii_usunietych"));
+      const plus = document.createElement("b"); plus.className = "plus"; plus.textContent = "+" + preview.added;
+      const minus = document.createElement("b"); minus.className = "minus"; minus.textContent = "−" + preview.removed;
+      counter.append(plus, " " + tr("linii_dodanych") + " · ", minus, " " + tr("linii_usunietych"));
     }
-    $("#tytul-diff").textContent = podglad.summary || tr("podglad_zmian");
-    $("#diff-zapisz").hidden = !!tylkoPodglad || !podglad.diff;
-    $("#diff-anuluj").textContent = tylkoPodglad ? tr("zamknij") : tr("anuluj");
+    $("#tytul-diff").textContent = preview.summary || tr("podglad_zmian");
+    $("#diff-zapisz").hidden = !!previewOnly || !preview.diff;
+    $("#diff-anuluj").textContent = previewOnly ? tr("zamknij") : tr("anuluj");
 
-    oknoDiff.showModal();
+    diffDialog.showModal();
     return new Promise((resolve) => {
-      const zamknij = (wynik) => {
+      const closeDialog = (result) => {
         $("#diff-zapisz").onclick = null;
         $("#diff-anuluj").onclick = null;
-        oknoDiff.close();
-        resolve(wynik);
+        diffDialog.close();
+        resolve(result);
       };
-      $("#diff-zapisz").onclick = () => zamknij(true);
-      $("#diff-anuluj").onclick = () => zamknij(false);
+      $("#diff-zapisz").onclick = () => closeDialog(true);
+      $("#diff-anuluj").onclick = () => closeDialog(false);
     });
   }
 
-  // zmien = podgląd + potwierdzenie + zapis. Zwraca true, gdy zapisano.
-  async function zmien(metoda, sciezka, dane) {
-    const sep = sciezka.includes("?") ? "&" : "?";
-    const podglad = await api(metoda, sciezka + sep + "dry=1", dane);
-    if (!podglad.diff) {
-      await pokazDiff(podglad, true);
+  // applyChange = preview + confirmation + save. Returns true when saved.
+  async function applyChange(method, path, data) {
+    const sep = path.includes("?") ? "&" : "?";
+    const preview = await api(method, path + sep + "dry=1", data);
+    if (!preview.diff) {
+      await showDiff(preview, true);
       return false;
     }
-    if (!(await pokazDiff(podglad))) return false;
-    await api(metoda, sciezka, dane);
+    if (!(await showDiff(preview))) return false;
+    await api(method, path, data);
     return true;
   }
 
-  // ── okno usługi ─────────────────────────────────────────────────────────
-  const okno = $("#okno-uslugi");
-  const formaUslugi = $("#form-uslugi");
-  const bladUslugi = $("#blad-uslugi");
-  let edytowana = null; // {grupa, nazwa} albo null przy dodawaniu
-  let rozmiarUslugi = "md";
-  // wartości pól opis/tagi w chwili otwarcia — wysyłamy tylko to, co się zmieniło
-  let poczatkowyOpis = "";
-  let poczatkoweTagi = "";
-  // Sekcja „Sprawdzanie" przy edycji: karta tych pól nie niesie, więc
-  // dociągamy je z /api/service. Dopóki nie przyjdą (null), pola są
-  // zablokowane, a zapis ich nie wysyła — puste pola skasowałyby ustawienia
-  // z pliku (GH #6).
-  let poczatkoweSprawdzanie = null;
-  let numerSprawdzania = 0;
-  const POLA_SPRAWDZANIA = ["interval", "timeout", "expect", "insecure"];
+  // ── service dialog ──────────────────────────────────────────────────────
+  const serviceDialog = $("#okno-uslugi");
+  const serviceForm = $("#form-uslugi");
+  const serviceError = $("#blad-uslugi");
+  let editedService = null; // {group, name} or null when adding
+  let serviceSize = "md";
+  // values of the description/tags fields at the moment of opening — we send only what changed
+  let initialDescription = "";
+  let initialTags = "";
+  // The "Check" section when editing: the card does not carry these fields, so
+  // we fetch them from /api/service. Until they arrive (null), the fields are
+  // locked, and the save does not send them — empty fields would wipe the settings
+  // from the file (GH #6).
+  let initialCheck = null;
+  let checkLoadSeq = 0;
+  const CHECK_FIELDS = ["interval", "timeout", "expect", "insecure"];
 
-  function polaSprawdzania() {
-    const f = formaUslugi;
+  function checkFields() {
+    const f = serviceForm;
     return { interval: f.interval.value.trim(), timeout: f.timeout.value.trim(),
       expect: f.expect.value.trim(), insecure: f.insecure.checked };
   }
 
-  function zablokujSprawdzanie(tak) {
-    for (const k of POLA_SPRAWDZANIA) formaUslugi[k].disabled = tak;
+  function lockCheckFields(locked) {
+    for (const k of CHECK_FIELDS) serviceForm[k].disabled = locked;
   }
 
-  async function wczytajSprawdzanie(klucz) {
-    const numer = ++numerSprawdzania;
-    poczatkoweSprawdzanie = null;
-    zablokujSprawdzanie(true);
+  async function loadCheck(key) {
+    const seq = ++checkLoadSeq;
+    initialCheck = null;
+    lockCheckFields(true);
     let d;
     try {
-      d = await api("GET", `/api/service?key=${encodeURIComponent(klucz)}&n=1`);
-    } catch (_) { return; } // pola zostają zablokowane — reszta edycji działa
-    if (numer !== numerSprawdzania) return; // okno otwarto już dla innej usługi
-    const f = formaUslugi;
-    // wartość domyślna = placeholder; pokazujemy ją jako puste pole
-    const bezDomyslnej = (v, pole) => (v === pole.placeholder ? "" : v);
-    f.interval.value = bezDomyslnej(d.interval || "", f.interval);
-    f.timeout.value = bezDomyslnej(d.timeout || "", f.timeout);
-    f.expect.value = bezDomyslnej((d.expect || []).join(", "), f.expect);
+      d = await api("GET", `/api/service?key=${encodeURIComponent(key)}&n=1`);
+    } catch (_) { return; } // the fields stay locked — the rest of the edit works
+    if (seq !== checkLoadSeq) return; // the dialog was already opened for another service
+    const f = serviceForm;
+    // default value = placeholder; we show it as an empty field
+    const withoutDefault = (v, field) => (v === field.placeholder ? "" : v);
+    f.interval.value = withoutDefault(d.interval || "", f.interval);
+    f.timeout.value = withoutDefault(d.timeout || "", f.timeout);
+    f.expect.value = withoutDefault((d.expect || []).join(", "), f.expect);
     f.insecure.checked = !!d.insecure;
-    poczatkoweSprawdzanie = polaSprawdzania();
-    zablokujSprawdzanie(false);
+    initialCheck = checkFields();
+    lockCheckFields(false);
   }
 
-  function tagiZKarty(karta) {
+  function cardTags(card) {
     try {
-      const t = JSON.parse(karta.dataset.tagi || "[]");
+      const t = JSON.parse(card.dataset.tagi || "[]");
       return Array.isArray(t) ? t.map(String) : [];
     } catch (_) { return []; }
   }
-  const tagiZPola = (v) => v.split(",").map((x) => x.trim()).filter(Boolean);
+  const fieldTags = (v) => v.split(",").map((x) => x.trim()).filter(Boolean);
 
-  function grupy() {
+  function groupNames() {
     return $$(".grupa").map((g) => g.dataset.grupa);
   }
 
-  function ustawRozmiar(rozmiar) {
-    rozmiarUslugi = ROZMIARY.includes(rozmiar) ? rozmiar : "md";
-    for (const r of ROZMIARY) {
-      $("#rozmiar-" + r).setAttribute("aria-pressed", String(r === rozmiarUslugi));
+  function setSize(size) {
+    serviceSize = SIZES.includes(size) ? size : "md";
+    for (const r of SIZES) {
+      $("#rozmiar-" + r).setAttribute("aria-pressed", String(r === serviceSize));
     }
   }
-  for (const r of ROZMIARY) {
-    $("#rozmiar-" + r).addEventListener("click", () => ustawRozmiar(r));
+  for (const r of SIZES) {
+    $("#rozmiar-" + r).addEventListener("click", () => setSize(r));
   }
 
-  function otworzUsluge(karta, domyslnaGrupa) {
-    edytowana = karta ? { grupa: karta.dataset.grupa, nazwa: karta.dataset.nazwa } : null;
-    bladUslugi.hidden = true;
-    formaUslugi.reset();
-    zamknijPopovery();
+  function openServiceDialog(card, defaultGroup) {
+    editedService = card ? { group: card.dataset.grupa, name: card.dataset.nazwa } : null;
+    serviceError.hidden = true;
+    serviceForm.reset();
+    closePopovers();
 
-    const wybor = $("#wybor-grupy");
-    wybor.textContent = "";
-    for (const g of grupy()) {
+    const groupSelect = $("#wybor-grupy");
+    groupSelect.textContent = "";
+    for (const g of groupNames()) {
       const o = document.createElement("option");
       o.value = g; o.textContent = g;
-      wybor.append(o);
+      groupSelect.append(o);
     }
 
-    $("#tytul-uslugi").textContent = karta ? tr("edytuj_usluge") : tr("nowa_usluga");
-    if (karta) {
-      formaUslugi.name.value = karta.dataset.nazwa;
-      formaUslugi.url.value = karta.dataset.adres;
-      wybor.value = karta.dataset.grupa;
-      wybor.disabled = false; // zmiana grupy = przeniesienie usługi
-      ustawIkonaZWariantem(karta.dataset.ikona || "");
-      ustawRozmiar(karta.dataset.rozmiar);
-      formaUslugi.description.value = karta.dataset.opis || "";
-      formaUslugi.tags.value = tagiZKarty(karta).join(", ");
-      wczytajSprawdzanie(karta.dataset.key);
+    $("#tytul-uslugi").textContent = card ? tr("edytuj_usluge") : tr("nowa_usluga");
+    if (card) {
+      serviceForm.name.value = card.dataset.nazwa;
+      serviceForm.url.value = card.dataset.adres;
+      groupSelect.value = card.dataset.grupa;
+      groupSelect.disabled = false; // changing the group = moving the service
+      setIconWithVariants(card.dataset.ikona || "");
+      setSize(card.dataset.rozmiar);
+      serviceForm.description.value = card.dataset.opis || "";
+      serviceForm.tags.value = cardTags(card).join(", ");
+      loadCheck(card.dataset.key);
     } else {
-      numerSprawdzania++;
-      poczatkoweSprawdzanie = null;
-      zablokujSprawdzanie(false);
-      wybor.disabled = false;
-      if (domyslnaGrupa) wybor.value = domyslnaGrupa;
-      ustawIkone("");
-      ustawRozmiar("md");
+      checkLoadSeq++;
+      initialCheck = null;
+      lockCheckFields(false);
+      groupSelect.disabled = false;
+      if (defaultGroup) groupSelect.value = defaultGroup;
+      setIcon("");
+      setSize("md");
     }
-    poczatkowyOpis = formaUslugi.description.value;
-    poczatkoweTagi = formaUslugi.tags.value;
-    szukajIkon("");
-    okno.showModal();
-    formaUslugi.name.focus();
+    initialDescription = serviceForm.description.value;
+    initialTags = serviceForm.tags.value;
+    searchIcons("");
+    serviceDialog.showModal();
+    serviceForm.name.focus();
   }
 
-  // renderujIkone dokłada do `el` obraz ikony. Gdy ikona ma osobne warianty na
-  // ciemny/jasny motyw (wc/wj — ścieżki na naszym serwerze), dokłada OBA i to
-  // czysty CSS (.ikona-motyw--*, patrz style.css) decyduje, który się pokaże
-  // wg atrybutu data-ton na <html> — bez tego dodatkowego JS-a ciemne logo
-  // ginęło na ciemnym motywie, bo zawsze leciała jedna, stała grafika.
-  function renderujIkone(el, { src, wc, wj }, alt, rozmiar) {
-    rozmiar = rozmiar || 24;
-    const zrob = (klasa, źródło) => {
+  // renderIcon appends the icon image to `el`. When the icon has separate variants for the
+  // dark/light theme (dark/light — paths on our server), it appends BOTH and it is
+  // pure CSS (.ikona-motyw--*, see style.css) that decides which one shows, by
+  // the data-ton attribute on <html> — without this extra JS the dark logo
+  // vanished on the dark theme, because one fixed graphic always came.
+  function renderIcon(el, { src, dark, light }, alt, size) {
+    size = size || 24;
+    const make = (className, source) => {
       const img = document.createElement("img");
-      img.src = źródło; img.alt = alt || ""; img.loading = "lazy";
-      img.width = rozmiar; img.height = rozmiar;
-      if (!klasa) return img;
-      const owin = document.createElement("span");
-      owin.className = "ikona-motyw " + klasa;
-      owin.append(img);
-      return owin;
+      img.src = source; img.alt = alt || ""; img.loading = "lazy";
+      img.width = size; img.height = size;
+      if (!className) return img;
+      const wrapper = document.createElement("span");
+      wrapper.className = "ikona-motyw " + className;
+      wrapper.append(img);
+      return wrapper;
     };
-    if (wc && wj) {
-      el.append(zrob("ikona-motyw--ciemny", wc), zrob("ikona-motyw--jasny", wj));
+    if (dark && light) {
+      el.append(make("ikona-motyw--ciemny", dark), make("ikona-motyw--jasny", light));
     } else if (src) {
-      el.append(zrob(null, src));
+      el.append(make(null, src));
     }
   }
 
-  function ustawIkone(nazwa, wariant) {
-    $("#pole-ikony").value = nazwa;
-    const podglad = $("#ikona-podglad");
-    podglad.textContent = "";
-    if (nazwa) {
-      const wc = wariant && wariant[0], wj = wariant && wariant[1];
-      renderujIkone(podglad, { src: `/icon/${encodeURIComponent(nazwa)}.svg`, wc, wj }, "", 28);
+  function setIcon(name, variant) {
+    $("#pole-ikony").value = name;
+    const preview = $("#ikona-podglad");
+    preview.textContent = "";
+    if (name) {
+      const dark = variant && variant[0], light = variant && variant[1];
+      renderIcon(preview, { src: `/icon/${encodeURIComponent(name)}.svg`, dark, light }, "", 28);
     } else {
       const s = document.createElement("span");
       s.className = "litera";
-      s.textContent = (formaUslugi.name.value || "?").trim().charAt(0).toUpperCase() || "?";
-      podglad.append(s);
+      s.textContent = (serviceForm.name.value || "?").trim().charAt(0).toUpperCase() || "?";
+      preview.append(s);
     }
   }
 
-  // /api/icons returns variant FILE NAMES, while renderujIkone needs paths on
+  // /api/icons returns variant FILE NAMES, while renderIcon needs paths on
   // our server. Bare names went out as relative src and every icon with
   // variants cost two 404s (SHYG-53).
-  function sciezkiWariantow(d) {
+  function variantPaths(d) {
     const out = {};
     for (const [n, w] of Object.entries((d && d.warianty) || {})) {
       out[n] = w.map((x) => `/icon/${encodeURIComponent(x)}`);
@@ -1223,272 +1223,272 @@
     return out;
   }
 
-  // ustawIkonaZWariantem to ustawIkone dla ikony, o której na starcie nie
-  // wiemy, czy ma warianty (np. otwarcie edycji istniejącej usługi) —
-  // dopytuje /api/icons o konkretną nazwę, żeby dostać wc/wj.
-  async function ustawIkonaZWariantem(nazwa) {
-    if (!nazwa) return ustawIkone("");
-    let wariant;
+  // setIconWithVariants is setIcon for an icon that we do not know at the start
+  // whether it has variants (e.g. opening the edit of an existing service) —
+  // it asks /api/icons about the specific name to get dark/light.
+  async function setIconWithVariants(name) {
+    if (!name) return setIcon("");
+    let variant;
     try {
-      const d = await api("GET", `/api/icons?q=${encodeURIComponent(nazwa)}&limit=5`);
-      wariant = sciezkiWariantow(d)[nazwa];
+      const d = await api("GET", `/api/icons?q=${encodeURIComponent(name)}&limit=5`);
+      variant = variantPaths(d)[name];
     } catch (_) {}
-    ustawIkone(nazwa, wariant);
+    setIcon(name, variant);
   }
 
-  let timerIkon = null;
+  let iconTimer = null;
   $("#szukaj-ikony").addEventListener("input", (e) => {
-    clearTimeout(timerIkon);
-    timerIkon = setTimeout(() => szukajIkon(e.target.value), 120);
+    clearTimeout(iconTimer);
+    iconTimer = setTimeout(() => searchIcons(e.target.value), 120);
   });
 
-  async function szukajIkon(q) {
-    const siatka = $("#siatka-ikon");
+  async function searchIcons(q) {
+    const grid = $("#siatka-ikon");
     try {
       const d = await api("GET", `/api/icons?q=${encodeURIComponent(q)}&limit=48`);
-      siatka.textContent = "";
-      const warianty = sciezkiWariantow(d);
+      grid.textContent = "";
+      const variants = variantPaths(d);
       for (const n of d.icons) {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "btn btn--tile kafel-ikony";
         b.setAttribute("aria-pressed", "false");
         b.title = n;
-        const w = warianty[n];
-        renderujIkone(b, { src: `/icon/${encodeURIComponent(n)}.svg`, wc: w && w[0], wj: w && w[1] }, n, 24);
+        const w = variants[n];
+        renderIcon(b, { src: `/icon/${encodeURIComponent(n)}.svg`, dark: w && w[0], light: w && w[1] }, n, 24);
         b.addEventListener("click", () => {
-          ustawIkone(n, w);
-          $$(".kafel-ikony", siatka).forEach((x) => x.setAttribute("aria-pressed", "false"));
+          setIcon(n, w);
+          $$(".kafel-ikony", grid).forEach((x) => x.setAttribute("aria-pressed", "false"));
           b.setAttribute("aria-pressed", "true");
         });
-        siatka.append(b);
+        grid.append(b);
       }
     } catch (_) {}
   }
 
-  formaUslugi.addEventListener("submit", async (e) => {
+  serviceForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const f = formaUslugi;
-    const tokeny = (f.expect.value || "").split(",").map((x) => x.trim()).filter(Boolean);
-    // literówka nie może po cichu skasować kodów (puste = domyślne)
-    if (!f.expect.disabled && tokeny.some((x) => !/^[1-5]\d\d$/.test(x))) {
-      bladUslugi.textContent = tr("blad_kody_http");
-      bladUslugi.hidden = false;
+    const f = serviceForm;
+    const tokens = (f.expect.value || "").split(",").map((x) => x.trim()).filter(Boolean);
+    // a typo must not silently wipe the codes (empty = default)
+    if (!f.expect.disabled && tokens.some((x) => !/^[1-5]\d\d$/.test(x))) {
+      serviceError.textContent = tr("blad_kody_http");
+      serviceError.hidden = false;
       return;
     }
-    const kody = tokeny.map((x) => parseInt(x, 10));
-    const dane = {
-      group: edytowana ? edytowana.grupa : f.group.value,
-      newGroup: edytowana ? f.group.value : undefined,
-      name: edytowana ? edytowana.nazwa : f.name.value.trim(),
-      newName: edytowana ? f.name.value.trim() : undefined,
+    const codes = tokens.map((x) => parseInt(x, 10));
+    const data = {
+      group: editedService ? editedService.group : f.group.value,
+      newGroup: editedService ? f.group.value : undefined,
+      name: editedService ? editedService.name : f.name.value.trim(),
+      newName: editedService ? f.name.value.trim() : undefined,
       url: f.url.value.trim(),
       icon: $("#pole-ikony").value,
-      size: rozmiarUslugi,
+      size: serviceSize,
     };
-    // Sprawdzanie: przy dodawaniu całe, przy edycji tylko pola zmienione od
-    // otwarcia okna. Puste pole przy edycji = wróć do wartości domyślnej.
-    const spr = polaSprawdzania();
-    for (const k of POLA_SPRAWDZANIA) {
-      if (!edytowana || (poczatkoweSprawdzanie && spr[k] !== poczatkoweSprawdzanie[k])) {
-        dane[k] = k === "expect" ? kody : spr[k];
+    // Check: when adding the whole, when editing only the fields changed since
+    // the dialog was opened. An empty field when editing = go back to the default value.
+    const check = checkFields();
+    for (const k of CHECK_FIELDS) {
+      if (!editedService || (initialCheck && check[k] !== initialCheck[k])) {
+        data[k] = k === "expect" ? codes : check[k];
       }
     }
-    // Opis i tagi wysyłamy tylko po zmianie: pole odziedziczone z `<<: *defaults`
-    // nie da się zapisać lokalnie, a niezmienione nie powinno nic dopisywać.
-    if (f.description.value !== poczatkowyOpis) dane.description = f.description.value.trim();
-    if (f.tags.value !== poczatkoweTagi) dane.tags = tagiZPola(f.tags.value);
+    // We send description and tags only after a change: a field inherited from `<<: *defaults`
+    // cannot be saved locally, and an unchanged one should not append anything.
+    if (f.description.value !== initialDescription) data.description = f.description.value.trim();
+    if (f.tags.value !== initialTags) data.tags = fieldTags(f.tags.value);
     try {
-      const zapisano = await zmien(edytowana ? "PATCH" : "POST", "/api/services", dane);
-      okno.close();
-      if (zapisano) location.reload();
+      const saved = await applyChange(editedService ? "PATCH" : "POST", "/api/services", data);
+      serviceDialog.close();
+      if (saved) location.reload();
     } catch (err) {
-      bladUslugi.textContent = err.message;
-      bladUslugi.hidden = false;
+      serviceError.textContent = err.message;
+      serviceError.hidden = false;
     }
   });
 
-  // ── akcje na kartach, grupach i tłach ───────────────────────────────────
+  // ── actions on cards, groups and backgrounds ────────────────────────────
   document.addEventListener("click", async (e) => {
-    const przycisk = e.target.closest("[data-akcja]");
-    if (!przycisk) return;
-    const akcja = przycisk.dataset.akcja;
+    const button = e.target.closest("[data-akcja]");
+    if (!button) return;
+    const action = button.dataset.akcja;
 
-    // „otwórz" to zwykły link — niech przeglądarka zrobi swoje
-    if (akcja === "otworz") return;
+    // "open" is a plain link — let the browser do its thing
+    if (action === "otworz") return;
 
     e.preventDefault();
-    const karta = przycisk.closest(".karta");
+    const card = button.closest(".karta");
 
-    if (akcja === "szczegoly") return otworzDetale(karta.dataset.key);
+    if (action === "szczegoly") return openDetails(card.dataset.key);
 
-    if (akcja === "edytuj") return otworzUsluge(karta);
+    if (action === "edytuj") return openServiceDialog(card);
 
-    if (akcja === "usun") {
+    if (action === "usun") {
       try {
-        const ok = await zmien("DELETE",
-          `/api/services?group=${encodeURIComponent(karta.dataset.grupa)}&name=${encodeURIComponent(karta.dataset.nazwa)}`);
+        const ok = await applyChange("DELETE",
+          `/api/services?group=${encodeURIComponent(card.dataset.grupa)}&name=${encodeURIComponent(card.dataset.nazwa)}`);
         if (ok) location.reload();
-      } catch (err) { powiadomBlad(err); }
+      } catch (err) { notifyError(err); }
     }
 
-    if (akcja === "dodaj-do") return otworzUsluge(null, przycisk.dataset.grupa);
+    if (action === "dodaj-do") return openServiceDialog(null, button.dataset.grupa);
 
-    if (akcja === "zmien-grupe") {
-      const stara = przycisk.dataset.grupa;
-      const nowa = await zapytajONazwe(tr("zmien_nazwe_grupy"), stara);
-      if (!nowa || nowa === stara) return;
+    if (action === "zmien-grupe") {
+      const oldName = button.dataset.grupa;
+      const newName = await askForName(tr("zmien_nazwe_grupy"), oldName);
+      if (!newName || newName === oldName) return;
       try {
-        const ok = await zmien("PATCH", "/api/groups", { name: stara, newName: nowa });
+        const ok = await applyChange("PATCH", "/api/groups", { name: oldName, newName: newName });
         if (ok) location.reload();
-      } catch (err) { powiadomBlad(err); }
+      } catch (err) { notifyError(err); }
     }
 
-    if (akcja === "usun-grupe") {
-      const g = przycisk.dataset.grupa;
+    if (action === "usun-grupe") {
+      const g = button.dataset.grupa;
       try {
-        const ok = await zmien("DELETE", `/api/groups?name=${encodeURIComponent(g)}`);
+        const ok = await applyChange("DELETE", `/api/groups?name=${encodeURIComponent(g)}`);
         if (ok) location.reload();
-      } catch (err) { powiadomBlad(err); }
+      } catch (err) { notifyError(err); }
     }
 
-    if (akcja === "widok") return zapiszWyglad({ view: przycisk.dataset.widok });
+    if (action === "widok") return saveAppearance({ view: button.dataset.widok });
 
-    if (akcja === "preset") {
-      const preset = przycisk.dataset.preset;
-      // ton idzie razem z presetem — ręczny wybór z poprzedniego tła nie może
-      // przeżyć zmiany na tło o innej jasności
-      if (preset !== "photo") return zapiszWyglad({ preset: preset, tone: tonDla(preset) });
-      if (!wgraneTla.length) return plikTapety.click();
-      const teraz = wyglądEfektywny();
-      return ustawTapete(teraz.image || wgraneTla[0].name);
+    if (action === "preset") {
+      const preset = button.dataset.preset;
+      // the tone goes together with the preset — a manual choice from the previous background must not
+      // survive a change to a background of a different brightness
+      if (preset !== "photo") return saveAppearance({ preset: preset, tone: toneFor(preset) });
+      if (!uploadedBackgrounds.length) return wallpaperFileInput.click();
+      const current = effectiveAppearance();
+      return setWallpaper(current.image || uploadedBackgrounds[0].name);
     }
 
-    if (akcja === "tapeta") return ustawTapete(przycisk.dataset.nazwa);
+    if (action === "tapeta") return setWallpaper(button.dataset.nazwa);
 
-    if (akcja === "usun-tapete") {
-      const nazwa = przycisk.dataset.nazwa;
+    if (action === "usun-tapete") {
+      const name = button.dataset.nazwa;
       try {
-        await api("DELETE", `/api/background/${encodeURIComponent(nazwa)}`);
-        await wczytajTla();
-        powiadom(tr("zapisano"));
+        await api("DELETE", `/api/background/${encodeURIComponent(name)}`);
+        await loadBackgrounds();
+        notify(tr("zapisano"));
       } catch (err) {
-        powiadom(err.message || tr("tapeta_uzywana_blad"), "ostrzezenie");
+        notify(err.message || tr("tapeta_uzywana_blad"), "ostrzezenie");
       }
     }
   });
 
-  $("#menu-nowa-usluga").addEventListener("click", () => otworzUsluge(null));
-  $("#menu-nowa-grupa").addEventListener("click", () => nowaGrupa());
-  $("#dodaj-grupe").addEventListener("click", () => nowaGrupa());
+  $("#menu-nowa-usluga").addEventListener("click", () => openServiceDialog(null));
+  $("#menu-nowa-grupa").addEventListener("click", () => newGroup());
+  $("#dodaj-grupe").addEventListener("click", () => newGroup());
 
-  async function nowaGrupa() {
-    zamknijPopovery();
-    const nazwa = await zapytajONazwe(tr("nazwa_grupy_tytul"));
-    if (!nazwa) return;
+  async function newGroup() {
+    closePopovers();
+    const name = await askForName(tr("nazwa_grupy_tytul"));
+    if (!name) return;
     try {
-      const ok = await zmien("POST", "/api/groups", { name: nazwa });
+      const ok = await applyChange("POST", "/api/groups", { name: name });
       if (ok) location.reload();
-    } catch (err) { powiadomBlad(err); }
+    } catch (err) { notifyError(err); }
   }
 
   $$("[data-zamknij]").forEach((b) =>
     b.addEventListener("click", () => b.closest("dialog").close()));
 
-  // ── podpowiadanie z Dockera ─────────────────────────────────────────────
-  const oknoDocker = $("#okno-docker");
+  // ── Docker suggestions ──────────────────────────────────────────────────
+  const dockerDialog = $("#okno-docker");
 
-  // Klucze wypisane dosłownie, a nie sklejane z `k.why` — inaczej test
-  // spójności i18n nie ma jak sprawdzić, czy tłumaczenia w ogóle istnieją.
-  const POWODY = {
+  // Keys written out literally, not concatenated from `k.why` — otherwise the i18n
+  // consistency test has no way to check whether the translations exist at all.
+  const REASONS = {
     label: tr("why_label"),
     port: tr("why_port"),
     noport: tr("why_noport"),
   };
 
   $("#menu-docker").addEventListener("click", async () => {
-    zamknijPopovery();
-    if (!dockerJest) return powiadom(tr("docker_niedostepny"), "ostrzezenie");
+    closePopovers();
+    if (!dockerAvailable) return notify(tr("docker_niedostepny"), "ostrzezenie");
 
-    const lista = $("#lista-kandydatow");
-    const blad = $("#blad-docker");
-    lista.textContent = "";
-    blad.hidden = true;
+    const list = $("#lista-kandydatow");
+    const errorEl = $("#blad-docker");
+    list.textContent = "";
+    errorEl.hidden = true;
     try {
       const d = await api("GET", "/api/discover");
 
-      const wybor = $("#docker-grupa");
-      wybor.textContent = "";
-      for (const g of d.groups || grupy()) {
+      const groupSelect = $("#docker-grupa");
+      groupSelect.textContent = "";
+      for (const g of d.groups || groupNames()) {
         const o = document.createElement("option");
         o.value = g; o.textContent = g;
-        wybor.append(o);
+        groupSelect.append(o);
       }
 
       if (!d.candidates || !d.candidates.length) {
         const li = document.createElement("li");
         li.textContent = tr("docker_brak");
-        lista.append(li);
+        list.append(li);
       }
 
       for (const k of d.candidates || []) {
         const li = document.createElement("li");
         if (k.known) li.classList.add("znana");
 
-        const ptak = document.createElement("input");
-        ptak.type = "checkbox";
-        ptak.checked = !k.known && !!k.url;
-        ptak.disabled = k.known || !k.url;
-        ptak.dataset.nazwa = k.name;
-        ptak.dataset.url = k.url || "";
-        ptak.dataset.ikona = k.icon || "";
-        ptak.dataset.grupa = k.group || "";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = !k.known && !!k.url;
+        checkbox.disabled = k.known || !k.url;
+        checkbox.dataset.nazwa = k.name;
+        checkbox.dataset.url = k.url || "";
+        checkbox.dataset.ikona = k.icon || "";
+        checkbox.dataset.grupa = k.group || "";
 
-        const ikona = document.createElement("span");
-        ikona.className = "ikona";
+        const icon = document.createElement("span");
+        icon.className = "ikona";
         const img = document.createElement("img");
         img.src = `/icon/${encodeURIComponent(k.icon || "")}`;
         img.alt = k.name || "";
         img.width = 24; img.height = 24;
-        ikona.append(img);
+        icon.append(img);
 
-        const opis = document.createElement("div");
-        const nazwa = document.createElement("span");
-        nazwa.className = "nazwa-k";
-        nazwa.textContent = k.name;
-        const adres = document.createElement("span");
-        adres.className = "adres";
-        adres.textContent = k.url || k.image;
-        opis.append(nazwa, adres);
+        const infoBox = document.createElement("div");
+        const name = document.createElement("span");
+        name.className = "nazwa-k";
+        name.textContent = k.name;
+        const address = document.createElement("span");
+        address.className = "adres";
+        address.textContent = k.url || k.image;
+        infoBox.append(name, address);
 
-        const powod = document.createElement("span");
-        powod.className = "powod";
-        powod.textContent = k.known ? tr("docker_juz_jest") : (POWODY[k.why] || k.why);
+        const reason = document.createElement("span");
+        reason.className = "powod";
+        reason.textContent = k.known ? tr("docker_juz_jest") : (REASONS[k.why] || k.why);
 
-        li.append(ptak, ikona, opis, powod);
-        lista.append(li);
+        li.append(checkbox, icon, infoBox, reason);
+        list.append(li);
       }
-      oknoDocker.showModal();
+      dockerDialog.showModal();
     } catch (err) {
-      blad.textContent = err.message;
-      blad.hidden = false;
-      oknoDocker.showModal();
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+      dockerDialog.showModal();
     }
   });
 
   $("#docker-dodaj").addEventListener("click", async () => {
-    const zaznaczone = $$("#lista-kandydatow input[type=checkbox]:checked");
-    if (!zaznaczone.length) return;
-    const grupa = $("#docker-grupa").value;
-    const uslugi = zaznaczone.map((p) => ({
-      group: p.dataset.grupa || grupa,
+    const checked = $$("#lista-kandydatow input[type=checkbox]:checked");
+    if (!checked.length) return;
+    const group = $("#docker-grupa").value;
+    const services = checked.map((p) => ({
+      group: p.dataset.grupa || group,
       name: p.dataset.nazwa,
       url: p.dataset.url,
       icon: p.dataset.ikona,
     }));
     try {
-      const ok = await zmien("POST", "/api/services/bulk", { group: grupa, services: uslugi });
-      oknoDocker.close();
+      const ok = await applyChange("POST", "/api/services/bulk", { group: group, services: services });
+      dockerDialog.close();
       if (ok) location.reload();
     } catch (err) {
       $("#blad-docker").textContent = err.message;
@@ -1496,60 +1496,60 @@
     }
   });
 
-  // ── ustawienia ──────────────────────────────────────────────────────────
-  const oknoUstawien = $("#okno-ustawien");
-  const bladUstawien = $("#blad-ustawien");
-  const okUstawien = $("#ok-ustawien");
+  // ── settings ────────────────────────────────────────────────────────────
+  const settingsDialog = $("#okno-ustawien");
+  const settingsError = $("#blad-ustawien");
+  const settingsOk = $("#ok-ustawien");
 
-  function pokazBlad(msg) {
-    okUstawien.hidden = true;
-    bladUstawien.textContent = msg;
-    bladUstawien.hidden = false;
+  function showError(msg) {
+    settingsOk.hidden = true;
+    settingsError.textContent = msg;
+    settingsError.hidden = false;
   }
 
-  function pokazOk(msg) {
-    bladUstawien.hidden = true;
-    okUstawien.textContent = msg;
-    okUstawien.hidden = false;
+  function showOk(msg) {
+    settingsError.hidden = true;
+    settingsOk.textContent = msg;
+    settingsOk.hidden = false;
   }
 
-  // Zakładki. Widoczność przez atrybut hidden, nie przez klasę — jedna prawda
-  // o tym, co widać, i ta sama, którą czyta czytnik ekranu.
-  function pokazZakladke(id) {
-    for (const tab of $$('[role="tab"]', oknoUstawien)) {
-      const cel = tab.getAttribute("aria-controls");
-      const wybrany = cel === id;
-      tab.setAttribute("aria-selected", String(wybrany));
-      const panel = $("#" + cel, oknoUstawien);
-      if (panel) panel.hidden = !wybrany;
+  // Tabs. Visibility through the hidden attribute, not through a class — one truth
+  // about what is visible, and the same one that the screen reader reads.
+  function showTab(id) {
+    for (const tab of $$('[role="tab"]', settingsDialog)) {
+      const target = tab.getAttribute("aria-controls");
+      const selected = target === id;
+      tab.setAttribute("aria-selected", String(selected));
+      const panel = $("#" + target, settingsDialog);
+      if (panel) panel.hidden = !selected;
     }
   }
-  for (const tab of $$('[role="tab"]', oknoUstawien)) {
-    tab.addEventListener("click", () => pokazZakladke(tab.getAttribute("aria-controls")));
+  for (const tab of $$('[role="tab"]', settingsDialog)) {
+    tab.addEventListener("click", () => showTab(tab.getAttribute("aria-controls")));
   }
 
   $("#ustawienia").addEventListener("click", async () => {
-    bladUstawien.hidden = true;
-    okUstawien.hidden = true;
-    zamknijPopovery();
-    pokazZakladke("panel-wyglad");
-    wypelnijWygladInstancji();
-    await wczytajKonta();
-    await wczytajInfo();
-    await wczytajPowiadomienia();
-    await wczytajInstancje();
-    await wczytajTokeny();
-    await wczytajWersje();
-    await wczytajYaml();
-    oknoUstawien.showModal();
+    settingsError.hidden = true;
+    settingsOk.hidden = true;
+    closePopovers();
+    showTab("panel-wyglad");
+    fillInstanceAppearance();
+    await loadAccounts();
+    await loadInfo();
+    await loadNotifications();
+    await loadInstance();
+    await loadTokens();
+    await loadVersions();
+    await loadYaml();
+    settingsDialog.showModal();
   });
 
-  // ── zakładka Wygląd: warstwa instancji, czyli zapis do YAML-a ─────────────
+  // ── Appearance tab: the instance layer, i.e. writing to the YAML ──────────
 
-  function wypelnijWygladInstancji() {
+  function fillInstanceAppearance() {
     const w = window.WYGLAD || {};
-    for (const kafel of $$("#inst-presety .kafel-presetu")) {
-      kafel.setAttribute("aria-pressed", String(kafel.dataset.preset === w.preset));
+    for (const tile of $$("#inst-presety .kafel-presetu")) {
+      tile.setAttribute("aria-pressed", String(tile.dataset.preset === w.preset));
     }
     $("#inst-blur").value = String(w.blur == null ? 10 : w.blur);
     $("#inst-blur-wartosc").textContent = $("#inst-blur").value + " px";
@@ -1557,10 +1557,10 @@
     $("#inst-dim-wartosc").textContent = $("#inst-dim").value + "%";
   }
 
-  for (const kafel of $$("#inst-presety .kafel-presetu")) {
-    kafel.addEventListener("click", () => {
+  for (const tile of $$("#inst-presety .kafel-presetu")) {
+    tile.addEventListener("click", () => {
       for (const k of $$("#inst-presety .kafel-presetu")) k.setAttribute("aria-pressed", "false");
-      kafel.setAttribute("aria-pressed", "true");
+      tile.setAttribute("aria-pressed", "true");
     });
   }
   $("#inst-blur").addEventListener("input", () => {
@@ -1570,53 +1570,53 @@
     $("#inst-dim-wartosc").textContent = $("#inst-dim").value + "%";
   });
 
-  // Zapis idzie tą samą drogą co każda inna edycja pliku: podgląd diffa,
-  // wersja w SQLite, commit do gita.
+  // The save goes the same way as every other file edit: diff preview,
+  // version in SQLite, commit to git.
   $("#inst-zapisz").addEventListener("click", async () => {
-    const wybrany = $('#inst-presety .kafel-presetu[aria-pressed="true"]');
+    const selectedTile = $('#inst-presety .kafel-presetu[aria-pressed="true"]');
     try {
-      const ok = await zmien("PUT", "/api/appearance", {
-        preset: wybrany ? wybrany.dataset.preset : (window.WYGLAD || {}).preset,
+      const ok = await applyChange("PUT", "/api/appearance", {
+        preset: selectedTile ? selectedTile.dataset.preset : (window.WYGLAD || {}).preset,
         blur: parseInt($("#inst-blur").value, 10),
         dim: parseInt($("#inst-dim").value, 10),
       });
       if (!ok) return;
-      pokazOk(tr("wyglad_zapisany"));
-    } catch (err) { pokazBlad(err.message || String(err)); }
+      showOk(tr("wyglad_zapisany"));
+    } catch (err) { showError(err.message || String(err)); }
   });
 
-  // ── zakładka Powiadomienia ────────────────────────────────────────────────
+  // ── Notifications tab ─────────────────────────────────────────────────────
 
-  // format wiadomości: lista i podpowiedź kształtu adresu dla wybranego
-  const polaFormatu = $("#webhook-format");
-  let zaladowanyFormat = "";
+  // message format: the list and a hint of the address shape for the selected one
+  const formatField = $("#webhook-format");
+  let loadedFormat = "";
 
-  function pokazPodpowiedzFormatu(zeSrodowiska) {
-    const podpowiedz = $("#webhook-format-podpowiedz");
-    podpowiedz.textContent = zeSrodowiska
+  function showFormatHint(fromEnv) {
+    const hint = $("#webhook-format-podpowiedz");
+    hint.textContent = fromEnv
       ? tr("webhook_format_ze_srodowiska")
-      : tr("format_podpowiedz_" + polaFormatu.value);
+      : tr("format_podpowiedz_" + formatField.value);
   }
-  polaFormatu.addEventListener("change", () => pokazPodpowiedzFormatu(polaFormatu.disabled));
+  formatField.addEventListener("change", () => showFormatHint(formatField.disabled));
 
-  async function wczytajPowiadomienia() {
+  async function loadNotifications() {
     const d = await api("GET", "/api/notify");
-    // Format ze środowiska jest własnością deployu, tak samo jak adres.
-    zaladowanyFormat = d.format;
-    polaFormatu.value = d.format;
-    polaFormatu.disabled = d.formatZrodlo === "srodowisko";
-    pokazPodpowiedzFormatu(polaFormatu.disabled);
-    const pole = $("#webhook-adres");
-    pole.value = "";
-    pole.placeholder = d.webhook || "https://…";
-    // Adres ze środowiska jest własnością deployu — pole ma być martwe, a user
-    // ma wiedzieć dlaczego, zamiast klikać w coś, co i tak nie zadziała.
-    const zeSrodowiska = d.zrodlo === "srodowisko";
-    pole.disabled = zeSrodowiska;
-    $("#webhook-zapisz").disabled = zeSrodowiska && polaFormatu.disabled;
-    // Adres stoi już w polu jako placeholder — status ma mówić co innego,
-    // inaczej ten sam ciąg wisi dwa razy pod sobą.
-    $("#powiad-stan").textContent = zeSrodowiska
+    // The format from the environment is the property of the deploy, just like the address.
+    loadedFormat = d.format;
+    formatField.value = d.format;
+    formatField.disabled = d.formatZrodlo === "srodowisko";
+    showFormatHint(formatField.disabled);
+    const field = $("#webhook-adres");
+    field.value = "";
+    field.placeholder = d.webhook || "https://…";
+    // The address from the environment is the property of the deploy — the field is to be dead, and the
+    // user should know why, instead of clicking on something that will not work anyway.
+    const fromEnv = d.zrodlo === "srodowisko";
+    field.disabled = fromEnv;
+    $("#webhook-zapisz").disabled = fromEnv && formatField.disabled;
+    // The address already stands in the field as a placeholder — the status should say something else,
+    // otherwise the same string hangs twice one under another.
+    $("#powiad-stan").textContent = fromEnv
       ? tr("webhook_ze_srodowiska")
       : (d.wlaczony ? tr("powiad_wlaczone") : tr("webhook_zrodlo_brak"));
     $("#webhook-prog").value = String(d.prog);
@@ -1624,90 +1624,90 @@
   }
 
   $("#webhook-zapisz").addEventListener("click", async () => {
-    const ciało = { prog: parseInt($("#webhook-prog").value, 10) };
-    const adres = $("#webhook-adres").value.trim();
-    // Puste pole znaczy „nie zmieniaj" — do wyczyszczenia jest osobny gest,
-    // inaczej samo otwarcie zakładki kasowałoby webhook przy zapisie progu.
-    if (adres) ciało.webhook = adres;
-    // format wysyłamy tylko po zmianie: stary adres mógł powstać przed regułami
-    // kształtu, a zapis samego progu nie ma go na nowo walidować
-    if (!polaFormatu.disabled && polaFormatu.value !== zaladowanyFormat) ciało.format = polaFormatu.value;
+    const body = { prog: parseInt($("#webhook-prog").value, 10) };
+    const address = $("#webhook-adres").value.trim();
+    // An empty field means "do not change" — clearing is a separate gesture,
+    // otherwise merely opening the tab would wipe the webhook when saving the threshold.
+    if (address) body.webhook = address;
+    // we send the format only after a change: the old address may have been created before the shape
+    // rules, and saving just the threshold should not validate it anew
+    if (!formatField.disabled && formatField.value !== loadedFormat) body.format = formatField.value;
     try {
-      await api("PUT", "/api/notify", ciało);
-      await wczytajPowiadomienia();
-      pokazOk(tr("webhook_zapisany"));
-    } catch (err) { pokazBlad(err.message || String(err)); }
+      await api("PUT", "/api/notify", body);
+      await loadNotifications();
+      showOk(tr("webhook_zapisany"));
+    } catch (err) { showError(err.message || String(err)); }
   });
 
-  // ── zakładka Instancja ────────────────────────────────────────────────────
+  // ── Instance tab ──────────────────────────────────────────────────────────
 
-  async function wczytajInstancje() {
+  async function loadInstance() {
     const d = await api("GET", "/api/instance");
     const tbody = $("#tabela-instancji tbody");
     tbody.replaceChildren();
     for (const o of (d.opcje || [])) {
-      const wiersz = document.createElement("tr");
-      // textContent, nie innerHTML: wartości to ścieżki plików i CIDR-y
-      // podane przez operatora.
-      for (const [tekst, klasa] of [
+      const row = document.createElement("tr");
+      // textContent, not innerHTML: the values are file paths and CIDRs
+      // supplied by the operator.
+      for (const [text, className] of [
         [o.klucz, "instancja-klucz"],
         [o.wartosc || "—", "instancja-wartosc"],
         [tr("zrodlo_" + o.zrodlo), "instancja-zrodlo"],
       ]) {
         const td = document.createElement("td");
-        td.className = klasa;
-        td.textContent = tekst;
-        wiersz.append(td);
+        td.className = className;
+        td.textContent = text;
+        row.append(td);
       }
-      tbody.append(wiersz);
+      tbody.append(row);
     }
   }
 
-  // ── tokeny API (tylko do odczytu) ─────────────────────────────────────────
+  // ── API tokens (read-only) ────────────────────────────────────────────────
 
-  const nowyTokenBox = $("#nowy-token");
-  const nowyTokenPole = $("#nowy-token-wartosc");
+  const newTokenBox = $("#nowy-token");
+  const newTokenField = $("#nowy-token-wartosc");
 
-  function ukryjNowyToken() {
-    nowyTokenBox.hidden = true;
-    nowyTokenPole.value = "";
+  function hideNewToken() {
+    newTokenBox.hidden = true;
+    newTokenField.value = "";
   }
 
-  async function wczytajTokeny() {
-    const lista = $("#lista-tokenow");
-    lista.textContent = "";
-    ukryjNowyToken();
+  async function loadTokens() {
+    const list = $("#lista-tokenow");
+    list.textContent = "";
+    hideNewToken();
     try {
       const d = await api("GET", "/api/tokens");
       if (!d.tokens.length) {
         const li = document.createElement("li");
         li.textContent = tr("tokeny_brak");
-        lista.append(li);
+        list.append(li);
         return;
       }
       for (const t of d.tokens) {
         const li = document.createElement("li");
-        const opis = document.createElement("span");
-        const nazwa = document.createElement("strong");
-        nazwa.textContent = t.name;
+        const info = document.createElement("span");
+        const name = document.createElement("strong");
+        name.textContent = t.name;
         const meta = document.createElement("span");
         meta.className = "token-meta";
-        const uzyty = t.lastUsed
-          ? podstaw(tr("tokeny_uzyty"), new Date(t.lastUsed).toLocaleString(LANG))
+        const used = t.lastUsed
+          ? substitute(tr("tokeny_uzyty"), new Date(t.lastUsed).toLocaleString(LANG))
           : tr("tokeny_nieuzyty");
-        meta.textContent = `${t.hint}… · ${uzyty}`;
-        opis.append(nazwa, meta);
+        meta.textContent = `${t.hint}… · ${used}`;
+        info.append(name, meta);
         const b = document.createElement("button");
         b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("tokeny_odwolaj");
         b.addEventListener("click", async () => {
-          if (!(await potwierdz(podstaw(tr("tokeny_potwierdz"), t.name)))) return;
-          try { await api("DELETE", `/api/tokens/${t.id}`); await wczytajTokeny(); pokazOk(tr("tokeny_odwolany")); }
-          catch (err) { pokazBlad(err.message); }
+          if (!(await confirmAction(substitute(tr("tokeny_potwierdz"), t.name)))) return;
+          try { await api("DELETE", `/api/tokens/${t.id}`); await loadTokens(); showOk(tr("tokeny_odwolany")); }
+          catch (err) { showError(err.message); }
         });
-        li.append(opis, b);
-        lista.append(li);
+        li.append(info, b);
+        list.append(li);
       }
-    } catch (err) { pokazBlad(err.message); }
+    } catch (err) { showError(err.message); }
   }
 
   $("#form-tokenu").addEventListener("submit", async (e) => {
@@ -1716,61 +1716,61 @@
     try {
       const d = await api("POST", "/api/tokens", { name: f.name.value.trim() });
       f.reset();
-      await wczytajTokeny();
-      // wartość trafia do pola dopiero po odświeżeniu listy (ono czyści pole),
-      // i tylko tam — nigdzie indziej w DOM-ie ani w pamięci przeglądarki
-      nowyTokenPole.value = d.token;
-      nowyTokenBox.hidden = false;
-      nowyTokenPole.focus();
-      nowyTokenPole.select();
-      bladUstawien.hidden = true;
-      pokazOk(tr("tokeny_utworzony"));
-    } catch (err) { pokazBlad(err.message); }
+      await loadTokens();
+      // the value goes into the field only after the list refresh (which clears the field),
+      // and only there — nowhere else in the DOM or in browser memory
+      newTokenField.value = d.token;
+      newTokenBox.hidden = false;
+      newTokenField.focus();
+      newTokenField.select();
+      settingsError.hidden = true;
+      showOk(tr("tokeny_utworzony"));
+    } catch (err) { showError(err.message); }
   });
 
   $("#kopiuj-token").addEventListener("click", async () => {
-    const wartosc = nowyTokenPole.value;
-    if (!wartosc) return;
+    const value = newTokenField.value;
+    if (!value) return;
     let ok = false;
-    // navigator.clipboard istnieje tylko w bezpiecznym kontekście (https,
-    // localhost); panel w LAN po http musi zejść do execCommand
+    // navigator.clipboard exists only in a secure context (https,
+    // localhost); the panel on a LAN over http has to fall back to execCommand
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(wartosc);
+        await navigator.clipboard.writeText(value);
         ok = true;
       }
     } catch (_) {}
     if (!ok) {
-      nowyTokenPole.focus();
-      nowyTokenPole.select();
+      newTokenField.focus();
+      newTokenField.select();
       try { ok = document.execCommand("copy"); } catch (_) {}
     }
-    if (ok) pokazOk(tr("skopiowano"));
+    if (ok) showOk(tr("skopiowano"));
   });
 
-  async function wczytajKonta() {
-    const lista = $("#lista-kont");
-    lista.textContent = "";
+  async function loadAccounts() {
+    const list = $("#lista-kont");
+    list.textContent = "";
     try {
       const d = await api("GET", "/api/users");
       for (const u of d.users) {
         const li = document.createElement("li");
-        const nazwa = document.createElement("span");
-        nazwa.textContent = u.login + (u.login === d.me ? ` (${tr("ty")})` : "");
-        li.append(nazwa);
+        const name = document.createElement("span");
+        name.textContent = u.login + (u.login === d.me ? ` (${tr("ty")})` : "");
+        li.append(name);
         if (u.login !== d.me) {
           const b = document.createElement("button");
           b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("usun_male");
           b.addEventListener("click", async () => {
-            if (!(await potwierdz(podstaw(tr("potwierdz_usun_konto"), u.login)))) return;
-            try { await api("DELETE", `/api/users/${u.id}`); wczytajKonta(); }
-            catch (err) { pokazBlad(err.message); }
+            if (!(await confirmAction(substitute(tr("potwierdz_usun_konto"), u.login)))) return;
+            try { await api("DELETE", `/api/users/${u.id}`); loadAccounts(); }
+            catch (err) { showError(err.message); }
           });
           li.append(b);
         }
-        lista.append(li);
+        list.append(li);
       }
-    } catch (err) { pokazBlad(err.message); }
+    } catch (err) { showError(err.message); }
   }
 
   $("#form-konta").addEventListener("submit", async (e) => {
@@ -1778,8 +1778,8 @@
     const f = e.target;
     try {
       await api("POST", "/api/users", { login: f.login.value.trim(), password: f.password.value });
-      f.reset(); bladUstawien.hidden = true; wczytajKonta();
-    } catch (err) { pokazBlad(err.message); }
+      f.reset(); settingsError.hidden = true; loadAccounts();
+    } catch (err) { showError(err.message); }
   });
 
   $("#form-hasla").addEventListener("submit", async (e) => {
@@ -1787,731 +1787,731 @@
     const f = e.target;
     try {
       await api("POST", "/api/password", { old: f.old.value, new: f.new.value });
-      f.reset(); pokazOk(tr("haslo_zmienione"));
-    } catch (err) { pokazBlad(err.message); }
+      f.reset(); showOk(tr("haslo_zmienione"));
+    } catch (err) { showError(err.message); }
   });
 
-  // ── edytor pliku: kolorowanie i pełny ekran ─────────────────────────────
+  // ── file editor: highlighting and fullscreen ────────────────────────────
   //
-  // Kolory rysuje <pre> pod przezroczystym <textarea>. Pole zostaje przez to
-  // prawdziwym <textarea>, więc cofanie, wklejanie i zaznaczanie działają
-  // natywnie — czego edytory na contenteditable nie potrafią.
+  // The colours are drawn by a <pre> under a transparent <textarea>. Because of that the field stays
+  // a real <textarea>, so undo, paste and selection work
+  // natively — which contenteditable editors cannot do.
 
-  const polePliku = $("#surowy-yaml");
-  const warstwaKolorow = $("#podswietlenie-yaml");
-  const pudloEdytora = $("#edytor-yaml");
+  const fileField = $("#surowy-yaml");
+  const colorLayer = $("#podswietlenie-yaml");
+  const editorBox = $("#edytor-yaml");
 
-  // Powyżej tego progu rezygnujemy z kolorowania i pokazujemy goły tekst.
-  // Config panelu ma kilkadziesiąt linii; ten limit istnieje na wypadek, gdyby
-  // ktoś wskazał `-config` na coś zupełnie innego.
-  const LIMIT_KOLOROWANIA = 200000;
+  // Above this threshold we give up highlighting and show plain text.
+  // The panel config has a few dozen lines; this limit exists in case
+  // someone pointed `-config` at something completely different.
+  const HIGHLIGHT_LIMIT = 200000;
 
   const escHtml = (t) => t.replace(/[&<>]/g, (z) => (z === "&" ? "&amp;" : z === "<" ? "&lt;" : "&gt;"));
-  const zeSpanem = (klasa, tekst) => '<span class="' + klasa + '">' + escHtml(tekst) + "</span>";
+  const withSpan = (className, text) => '<span class="' + className + '">' + escHtml(text) + "</span>";
 
-  // Wartość po dwukropku albo po myślniku listy.
-  function tokenWartosci(fragment) {
+  // The value after a colon or after a list dash.
+  function valueToken(fragment) {
     if (!fragment) return "";
-    const odstep = fragment.match(/^\s*/)[0];
-    const tresc = fragment.slice(odstep.length);
-    if (!tresc) return escHtml(fragment);
+    const leading = fragment.match(/^\s*/)[0];
+    const content = fragment.slice(leading.length);
+    if (!content) return escHtml(fragment);
 
-    let klasa = "tok-tekst";
-    if (/^[&*]/.test(tresc) || tresc.startsWith("<<")) klasa = "tok-kotwica";
-    else if (/^[-+]?\d+(\.\d+)?[a-z%]*$/i.test(tresc)) klasa = "tok-liczba";
-    else if (/^(true|false|null|yes|no|on|off|~)$/i.test(tresc)) klasa = "tok-slowo";
-    return escHtml(odstep) + zeSpanem(klasa, tresc);
+    let className = "tok-tekst";
+    if (/^[&*]/.test(content) || content.startsWith("<<")) className = "tok-kotwica";
+    else if (/^[-+]?\d+(\.\d+)?[a-z%]*$/i.test(content)) className = "tok-liczba";
+    else if (/^(true|false|null|yes|no|on|off|~)$/i.test(content)) className = "tok-slowo";
+    return escHtml(leading) + withSpan(className, content);
   }
 
-  function tokenyKodu(kod) {
-    let wynik = "";
-    let reszta = kod;
+  function codeTokens(code) {
+    let result = "";
+    let rest = code;
 
-    const wciecie = reszta.match(/^\s*/)[0];
-    wynik += escHtml(wciecie);
-    reszta = reszta.slice(wciecie.length);
+    const indent = rest.match(/^\s*/)[0];
+    result += escHtml(indent);
+    rest = rest.slice(indent.length);
 
-    // myślnik listy razem z odstępem po nim
-    const myslnik = reszta.match(/^-(\s+|$)/);
-    if (myslnik) {
-      wynik += zeSpanem("tok-myslnik", "-") + escHtml(myslnik[1]);
-      reszta = reszta.slice(myslnik[0].length);
+    // list dash together with the space after it
+    const dash = rest.match(/^-(\s+|$)/);
+    if (dash) {
+      result += withSpan("tok-myslnik", "-") + escHtml(dash[1]);
+      rest = rest.slice(dash[0].length);
     }
 
-    // klucz — wszystko do pierwszego dwukropka, po którym stoi spacja albo koniec
-    const klucz = reszta.match(/^([^:\s][^:]*?):(\s|$)/);
-    if (klucz) {
-      // `<<` to klucz scalenia, nie zwykła nazwa pola — niech wygląda jak alias,
-      // na który wskazuje
-      const klasa = klucz[1] === "<<" ? "tok-kotwica" : "tok-klucz";
-      wynik += zeSpanem(klasa, klucz[1] + ":") + escHtml(klucz[2]);
-      reszta = reszta.slice(klucz[0].length);
+    // key — everything up to the first colon followed by a space or the end
+    const keyMatch = rest.match(/^([^:\s][^:]*?):(\s|$)/);
+    if (keyMatch) {
+      // `<<` is a merge key, not an ordinary field name — let it look like the alias
+      // it points to
+      const className = keyMatch[1] === "<<" ? "tok-kotwica" : "tok-klucz";
+      result += withSpan(className, keyMatch[1] + ":") + escHtml(keyMatch[2]);
+      rest = rest.slice(keyMatch[0].length);
     }
 
-    return wynik + tokenWartosci(reszta);
+    return result + valueToken(rest);
   }
 
-  function tokenyLinii(linia) {
-    // Komentarz odcinamy dopiero po sprawdzeniu cudzysłowów — `url: "http://x/#y"`
-    // nie ma komentarza, choć zawiera krzyżyk.
-    let cudzyslow = null;
-    for (let i = 0; i < linia.length; i++) {
-      const znak = linia[i];
-      if (cudzyslow) {
-        if (znak === cudzyslow && linia[i - 1] !== "\\") cudzyslow = null;
+  function lineTokens(line) {
+    // We cut off the comment only after checking the quotes — `url: "http://x/#y"`
+    // has no comment, although it contains a hash.
+    let quote = null;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (quote) {
+        if (char === quote && line[i - 1] !== "\\") quote = null;
         continue;
       }
-      if (znak === '"' || znak === "'") { cudzyslow = znak; continue; }
-      if (znak === "#" && (i === 0 || /\s/.test(linia[i - 1]))) {
-        return tokenyKodu(linia.slice(0, i)) + zeSpanem("tok-komentarz", linia.slice(i));
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+        return codeTokens(line.slice(0, i)) + withSpan("tok-komentarz", line.slice(i));
       }
     }
-    return tokenyKodu(linia);
+    return codeTokens(line);
   }
 
-  function odswiezKolory() {
-    if (!polePliku || !warstwaKolorow) return;
-    const kod = warstwaKolorow.firstElementChild;
-    if (polePliku.value.length > LIMIT_KOLOROWANIA) {
-      pudloEdytora.classList.add("bez-kolorow");
-      kod.textContent = "";
+  function refreshColors() {
+    if (!fileField || !colorLayer) return;
+    const codeEl = colorLayer.firstElementChild;
+    if (fileField.value.length > HIGHLIGHT_LIMIT) {
+      editorBox.classList.add("bez-kolorow");
+      codeEl.textContent = "";
       return;
     }
-    pudloEdytora.classList.remove("bez-kolorow");
-    // Końcowa nowa linia jest celowa: bez niej <pre> zjada ostatni pusty
-    // wiersz i warstwy rozjeżdżają się o jedną linię.
-    kod.innerHTML = polePliku.value.split("\n").map(tokenyLinii).join("\n") + "\n";
-    synchronizujPrzewijanie();
+    editorBox.classList.remove("bez-kolorow");
+    // The trailing newline is deliberate: without it <pre> swallows the last empty
+    // row and the layers drift apart by one line.
+    codeEl.innerHTML = fileField.value.split("\n").map(lineTokens).join("\n") + "\n";
+    syncScroll();
   }
 
-  function synchronizujPrzewijanie() {
-    warstwaKolorow.scrollTop = polePliku.scrollTop;
-    warstwaKolorow.scrollLeft = polePliku.scrollLeft;
+  function syncScroll() {
+    colorLayer.scrollTop = fileField.scrollTop;
+    colorLayer.scrollLeft = fileField.scrollLeft;
   }
 
-  let czekaKlatka = 0;
-  function zaplanujOdswiezenie() {
-    if (czekaKlatka) return;
-    czekaKlatka = requestAnimationFrame(() => { czekaKlatka = 0; odswiezKolory(); });
+  let framePending = 0;
+  function scheduleRefresh() {
+    if (framePending) return;
+    framePending = requestAnimationFrame(() => { framePending = 0; refreshColors(); });
   }
 
-  if (polePliku) {
-    polePliku.addEventListener("input", zaplanujOdswiezenie);
-    polePliku.addEventListener("scroll", synchronizujPrzewijanie);
+  if (fileField) {
+    fileField.addEventListener("input", scheduleRefresh);
+    fileField.addEventListener("scroll", syncScroll);
   }
 
-  // Pełny ekran bez drugiego <dialog>: jeden modal to jedna pułapka fokusu
-  // i jeden stan do zamknięcia.
-  function pelnyEkranEdytora(wlacz) {
-    const chce = wlacz === undefined ? !oknoUstawien.classList.contains("pelny-ekran") : wlacz;
-    oknoUstawien.classList.toggle("pelny-ekran", chce);
-    $("#yaml-pelny-ekran").setAttribute("aria-pressed", String(chce));
-    if (chce) polePliku.focus();
-    synchronizujPrzewijanie();
+  // Fullscreen without a second <dialog>: one modal is one focus trap
+  // and one state to close.
+  function setEditorFullscreen(enable) {
+    const enabled = enable === undefined ? !settingsDialog.classList.contains("pelny-ekran") : enable;
+    settingsDialog.classList.toggle("pelny-ekran", enabled);
+    $("#yaml-pelny-ekran").setAttribute("aria-pressed", String(enabled));
+    if (enabled) fileField.focus();
+    syncScroll();
   }
 
-  $("#yaml-pelny-ekran").addEventListener("click", () => pelnyEkranEdytora());
+  $("#yaml-pelny-ekran").addEventListener("click", () => setEditorFullscreen());
 
-  // ! Natywny <dialog> na Esc zamyka wszystko. W pełnym ekranie znaczyłoby to
-  // utratę niezapisanych zmian jednym klawiszem, więc pierwszy Esc tylko
-  // wychodzi z pełnego ekranu.
-  oknoUstawien.addEventListener("cancel", (e) => {
-    if (oknoUstawien.classList.contains("pelny-ekran")) {
+  // ! The native <dialog> closes everything on Esc. In fullscreen that would mean
+  // losing unsaved changes with one key, so the first Esc only
+  // leaves fullscreen.
+  settingsDialog.addEventListener("cancel", (e) => {
+    if (settingsDialog.classList.contains("pelny-ekran")) {
       e.preventDefault();
-      pelnyEkranEdytora(false);
+      setEditorFullscreen(false);
     }
   });
-  oknoUstawien.addEventListener("close", () => pelnyEkranEdytora(false));
+  settingsDialog.addEventListener("close", () => setEditorFullscreen(false));
 
-  async function wczytajYaml() {
+  async function loadYaml() {
     try {
       const d = await api("GET", "/api/config");
-      polePliku.value = d.yaml;
-      odswiezKolory();
-    } catch (err) { pokazBlad(err.message); }
+      fileField.value = d.yaml;
+      refreshColors();
+    } catch (err) { showError(err.message); }
   }
 
-  $("#przeladuj-yaml").addEventListener("click", wczytajYaml);
+  $("#przeladuj-yaml").addEventListener("click", loadYaml);
   $("#zapisz-yaml").addEventListener("click", async () => {
     try {
-      const ok = await zmien("PUT", "/api/config", { yaml: $("#surowy-yaml").value });
+      const ok = await applyChange("PUT", "/api/config", { yaml: $("#surowy-yaml").value });
       if (ok) location.reload();
-    } catch (err) { pokazBlad(err.message); }
+    } catch (err) { showError(err.message); }
   });
 
   $("#powiad-test").addEventListener("click", async () => {
     try {
       await api("POST", "/api/notify/test");
-      pokazOk(tr("test_wyslany"));
-    } catch (err) { pokazBlad(err.message); }
+      showOk(tr("test_wyslany"));
+    } catch (err) { showError(err.message); }
   });
 
-  // ── historia zmian ──────────────────────────────────────────────────────
-  async function wczytajWersje() {
-    const lista = $("#lista-wersji");
-    lista.textContent = "";
+  // ── change history ──────────────────────────────────────────────────────
+  async function loadVersions() {
+    const list = $("#lista-wersji");
+    list.textContent = "";
     try {
       const d = await api("GET", "/api/versions");
       $("#git-info").textContent = d.git ? "· " + tr("git_aktywny") : "";
       if (!d.versions || !d.versions.length) {
         const li = document.createElement("li");
         li.textContent = tr("brak_historii");
-        lista.append(li);
+        list.append(li);
         return;
       }
       for (const w of d.versions) {
         const li = document.createElement("li");
 
-        const kiedy = document.createElement("span");
-        kiedy.className = "kiedy";
-        kiedy.textContent = new Date(w.at).toLocaleString(LANG, {
+        const when = document.createElement("span");
+        when.className = "kiedy";
+        when.textContent = new Date(w.at).toLocaleString(LANG, {
           day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
         });
 
-        const co = document.createElement("span");
-        co.className = "co";
-        co.textContent = w.summary + (w.author ? ` · ${w.author}` : "");
+        const what = document.createElement("span");
+        what.className = "co";
+        what.textContent = w.summary + (w.author ? ` · ${w.author}` : "");
 
-        const zmiany = document.createElement("span");
-        zmiany.className = "zmiany";
-        zmiany.textContent = `+${w.added} −${w.removed}`;
+        const changes = document.createElement("span");
+        changes.className = "zmiany";
+        changes.textContent = `+${w.added} −${w.removed}`;
 
-        const pokaz = document.createElement("button");
-        pokaz.type = "button";
-        pokaz.textContent = tr("pokaz");
-        pokaz.addEventListener("click", async () => {
+        const showButton = document.createElement("button");
+        showButton.type = "button";
+        showButton.textContent = tr("pokaz");
+        showButton.addEventListener("click", async () => {
           try {
             const v = await api("GET", `/api/versions/${w.id}`);
-            await pokazDiff({ diff: v.diff, summary: v.summary, added: w.added, removed: w.removed }, true);
-          } catch (err) { pokazBlad(err.message); }
+            await showDiff({ diff: v.diff, summary: v.summary, added: w.added, removed: w.removed }, true);
+          } catch (err) { showError(err.message); }
         });
 
-        const przywroc = document.createElement("button");
-        przywroc.type = "button";
-        przywroc.textContent = tr("przywroc");
-        przywroc.addEventListener("click", async () => {
+        const restoreButton = document.createElement("button");
+        restoreButton.type = "button";
+        restoreButton.textContent = tr("przywroc");
+        restoreButton.addEventListener("click", async () => {
           try {
-            const ok = await zmien("POST", `/api/versions/${w.id}/restore`, {});
+            const ok = await applyChange("POST", `/api/versions/${w.id}/restore`, {});
             if (ok) location.reload();
-          } catch (err) { pokazBlad(err.message); }
+          } catch (err) { showError(err.message); }
         });
 
-        li.append(kiedy, co, zmiany, pokaz, przywroc);
-        lista.append(li);
+        li.append(when, what, changes, showButton, restoreButton);
+        list.append(li);
       }
-    } catch (err) { pokazBlad(err.message); }
+    } catch (err) { showError(err.message); }
   }
 
-  // ── tytuł panelu: edycja w miejscu ──────────────────────────────────────
+  // ── panel title: in-place editing ───────────────────────────────────────
   //
-  // Zapis idzie wprost przez api(), bez okna z diffem — to jedno pole, a wpis
-  // w historii pozwala je cofnąć. Enter i blur zapisują, Esc wraca do starego.
-  const tytulEl = $("#tytul-panelu");
-  const tytulPrzycisk = $("#tytul-edytuj");
-  const bladTytulu = $("#blad-tytulu");
-  function ustawTytul(tekst) {
-    tytulEl.textContent = tekst;
-    document.title = tekst;
+  // The save goes straight through api(), without the diff dialog — it is a single field, and an entry
+  // in the history lets you undo it. Enter and blur save, Esc goes back to the old one.
+  const titleEl = $("#tytul-panelu");
+  const titleButton = $("#tytul-edytuj");
+  const titleError = $("#blad-tytulu");
+  function setTitle(text) {
+    titleEl.textContent = text;
+    document.title = text;
   }
 
-  function otworzTytul() {
-    if (edytujeTytul) return;
-    edytujeTytul = true;
-    const stary = tytulEl.textContent;
-    const pole = document.createElement("input");
-    pole.type = "text";
-    pole.className = "tytul-pole";
-    pole.value = stary;
-    pole.autocomplete = "off";
-    pole.spellcheck = false;
-    pole.setAttribute("aria-label", tr("tytul_pole_aria"));
-    tytulEl.textContent = "";
-    tytulEl.append(pole);
-    tytulPrzycisk.hidden = true;
-    pole.focus();
-    pole.select();
+  function startTitleEdit() {
+    if (editingTitle) return;
+    editingTitle = true;
+    const oldTitle = titleEl.textContent;
+    const field = document.createElement("input");
+    field.type = "text";
+    field.className = "tytul-pole";
+    field.value = oldTitle;
+    field.autocomplete = "off";
+    field.spellcheck = false;
+    field.setAttribute("aria-label", tr("tytul_pole_aria"));
+    titleEl.textContent = "";
+    titleEl.append(field);
+    titleButton.hidden = true;
+    field.focus();
+    field.select();
 
-    let zakonczone = false;
-    let zapisuje = false;
+    let finished = false;
+    let saving = false;
 
-    const zakoncz = (tekst) => {
-      zakonczone = true;
-      edytujeTytul = false;
-      anulujTytul = null;
-      bladTytulu.hidden = true;
-      tytulPrzycisk.hidden = false;
-      pole.remove();
-      tytulEl.textContent = tekst;
+    const finish = (text) => {
+      finished = true;
+      editingTitle = false;
+      cancelTitleEdit = null;
+      titleError.hidden = true;
+      titleButton.hidden = false;
+      field.remove();
+      titleEl.textContent = text;
     };
-    const anuluj = () => { if (!zakonczone) zakoncz(stary); };
-    anulujTytul = anuluj;
+    const cancel = () => { if (!finished) finish(oldTitle); };
+    cancelTitleEdit = cancel;
 
-    const zapisz = async () => {
-      if (zakonczone || zapisuje) return;
-      const nowy = pole.value.trim();
-      if (nowy === stary) return zakoncz(stary);
-      zapisuje = true;
+    const save = async () => {
+      if (finished || saving) return;
+      const newTitle = field.value.trim();
+      if (newTitle === oldTitle) return finish(oldTitle);
+      saving = true;
       try {
-        const d = await api("PUT", "/api/title", { title: pole.value });
+        const d = await api("PUT", "/api/title", { title: field.value });
         document.title = d.title;
-        zakoncz(d.title);
-        powiadom(tr("zapisano"));
+        finish(d.title);
+        notify(tr("zapisano"));
       } catch (err) {
-        // błąd zostaje przy polu; pole zostaje otwarte, żeby dało się poprawić
-        pole.setAttribute("aria-invalid", "true");
-        bladTytulu.textContent = err.message;
-        bladTytulu.hidden = false;
+        // the error stays by the field; the field stays open so that it can be corrected
+        field.setAttribute("aria-invalid", "true");
+        titleError.textContent = err.message;
+        titleError.hidden = false;
       } finally {
-        zapisuje = false;
+        saving = false;
       }
     };
 
-    pole.addEventListener("input", () => {
-      pole.removeAttribute("aria-invalid");
-      bladTytulu.hidden = true;
+    field.addEventListener("input", () => {
+      field.removeAttribute("aria-invalid");
+      titleError.hidden = true;
     });
-    pole.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); zapisz(); }
-      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); anuluj(); }
+    field.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); save(); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
     });
-    pole.addEventListener("blur", () => zapisz());
+    field.addEventListener("blur", () => save());
   }
-  tytulPrzycisk.addEventListener("click", otworzTytul);
+  titleButton.addEventListener("click", startTitleEdit);
 
-  // ── zmiana kolejności: przeciąganie i klawiatura ────────────────────────
+  // ── reordering: dragging and keyboard ───────────────────────────────────
   //
-  // Pointer Events, nie HTML5 draggable: działa jednakowo myszą i palcem, a
-  // dokumentowe dragover od wgrywania tapet (wyżej) zostaje nietknięte.
+  // Pointer Events, not HTML5 draggable: works the same with mouse and finger, and
+  // the document-level dragover from wallpaper uploads (above) stays untouched.
   //
-  // Oryginał nie znika z DOM-u — przesuwa się po nim i sam jest znacznikiem
-  // miejsca upuszczenia (klasa .przeciagana), a pod kursorem jedzie jego
-  // kopia (.duch). Dzięki temu pozycję po upuszczeniu czyta się wprost z DOM-u,
-  // a cofnięcie to jedno insertBefore.
-  const PROG_RUCHU = 6;     // px; poniżej tego puszczenie przycisku to zwykłe kliknięcie
-  const STREFA_SCROLLA = 80; // px od krawędzi okna
-  const DOTYK_TRZYMANIE_MS = 300; // palec na karcie: tyle trzeba przytrzymać, zanim zacznie się przeciąganie
-  const DOTYK_TOLERANCJA = 8;     // px; większy ruch przed upływem czasu = zwykłe przewijanie strony
-  const ogloszenia = $("#ogloszenia");
-  const fmt = (tekst, ...arg) => { let i = 0; return String(tekst).replace(/%[ds]/g, () => arg[i++]); };
+  // The original does not disappear from the DOM — it moves around it and is itself the marker
+  // of the drop place (class .przeciagana), and under the cursor rides its
+  // copy (.duch). Thanks to that the position after the drop is read straight from the DOM,
+  // and undoing is a single insertBefore.
+  const MOVE_THRESHOLD = 6;     // px; below this, releasing the button is a plain click
+  const SCROLL_ZONE = 80; // px from the window edge
+  const TOUCH_HOLD_MS = 300; // finger on a card: how long it must be held before dragging starts
+  const TOUCH_TOLERANCE = 8;     // px; larger movement before the time elapses = plain page scrolling
+  const announcer = $("#ogloszenia");
+  const fmt = (text, ...arg) => { let i = 0; return String(text).replace(/%[ds]/g, () => arg[i++]); };
 
-  let przeciaganie = null; // stan trwającego przeciągania
-  let zapisujeRuch = false;
+  let dragState = null; // state of the drag in progress
+  let savingMove = false;
 
-  function ogloś(tekst) {
-    ogloszenia.textContent = "";
-    // dwa takty, żeby czytnik powtórzył identyczny komunikat przy kolejnym ruchu
-    setTimeout(() => { ogloszenia.textContent = tekst; }, 30);
+  function announce(text) {
+    announcer.textContent = "";
+    // two ticks, so that the screen reader repeats an identical message on the next move
+    setTimeout(() => { announcer.textContent = text; }, 30);
   }
 
-  const kartyGrupy = (ul) => $$(":scope > .karta", ul);
-  const indeksKarty = (karta) => kartyGrupy(karta.parentElement).indexOf(karta);
-  const indeksGrupy = (grupa) => $$("#tresc > .grupa").indexOf(grupa);
+  const groupCards = (ul) => $$(":scope > .karta", ul);
+  const cardIndex = (card) => groupCards(card.parentElement).indexOf(card);
+  const groupIndex = (group) => $$("#tresc > .grupa").indexOf(group);
 
-  function filtrAktywny() { return !!filtr.value.trim() || tylkoProblemy; }
+  function filterActive() { return !!filter.value.trim() || problemsOnly; }
 
-  // stan DOM-u, do którego wracamy przy błędzie albo Esc
-  function zapamietajMiejsce(el) {
-    const karta = el.classList.contains("karta");
-    return { rodzic: el.parentElement, nastepny: el.nextElementSibling,
-             karta, grupa: el.dataset.grupa, key: el.dataset.key };
+  // DOM state we return to on an error or Esc
+  function rememberPlace(el) {
+    const card = el.classList.contains("karta");
+    return { parent: el.parentElement, next: el.nextElementSibling,
+             isCard: card, group: el.dataset.grupa, key: el.dataset.key };
   }
-  function przywrocMiejsce(el, m) {
-    m.rodzic.insertBefore(el, m.nastepny);
-    if (m.karta) { el.dataset.grupa = m.grupa; el.dataset.key = m.key; }
-    odswiezIndeks();
-  }
-
-  // Karta przeniesiona do innej grupy zmienia klucz (grupa/nazwa); health po
-  // stronie serwera też się przepina przy przeładowaniu configu.
-  function nadajGrupe(karta, nazwaGrupy) {
-    karta.dataset.grupa = nazwaGrupy;
-    karta.dataset.key = nazwaGrupy + "/" + karta.dataset.nazwa;
-    odswiezIndeks();
+  function restorePlace(el, m) {
+    m.parent.insertBefore(el, m.next);
+    if (m.isCard) { el.dataset.grupa = m.group; el.dataset.key = m.key; }
+    refreshIndex();
   }
 
-  async function zapiszKarte(karta, z, doGrupy, indeks) {
-    zapisujeRuch = true;
+  // A card moved to another group changes its key (group/name); health on the
+  // server side is also re-attached on config reload.
+  function assignGroup(card, groupName) {
+    card.dataset.grupa = groupName;
+    card.dataset.key = groupName + "/" + card.dataset.nazwa;
+    refreshIndex();
+  }
+
+  async function saveCardMove(card, z, toGroup, index) {
+    savingMove = true;
     try {
       await api("POST", "/api/services/move",
-        { group: z.grupa, name: karta.dataset.nazwa, toGroup: doGrupy, index: indeks });
-      powiadom(tr("kolejnosc_ok"));
+        { group: z.group, name: card.dataset.nazwa, toGroup: toGroup, index: index });
+      notify(tr("kolejnosc_ok"));
       return true;
     } catch (err) {
-      przywrocMiejsce(karta, z);
-      powiadomBlad(err);
+      restorePlace(card, z);
+      notifyError(err);
       return false;
     } finally {
-      zapisujeRuch = false;
+      savingMove = false;
     }
   }
 
-  async function zapiszGrupe(sekcja, z, indeks) {
-    zapisujeRuch = true;
+  async function saveGroupMove(section, z, index) {
+    savingMove = true;
     try {
-      await api("POST", "/api/groups/move", { name: sekcja.dataset.grupa, index: indeks });
-      powiadom(tr("kolejnosc_ok"));
+      await api("POST", "/api/groups/move", { name: section.dataset.grupa, index: index });
+      notify(tr("kolejnosc_ok"));
       return true;
     } catch (err) {
-      przywrocMiejsce(sekcja, z);
-      powiadomBlad(err);
+      restorePlace(section, z);
+      notifyError(err);
       return false;
     } finally {
-      zapisujeRuch = false;
+      savingMove = false;
     }
   }
 
-  // wspólne zakończenie ruchu kartą — dla myszy, palca i klawiatury
-  async function zakonczRuchKarty(karta, z) {
-    const doGrupy = karta.closest(".grupa").dataset.grupa;
-    const indeks = indeksKarty(karta);
-    const zmieniona = doGrupy !== z.grupa;
-    const samoMiejsce = !zmieniona && karta.nextElementSibling === z.nastepny;
-    if (samoMiejsce) return false;
-    if (zmieniona) nadajGrupe(karta, doGrupy);
-    const ok = await zapiszKarte(karta, z, doGrupy, indeks);
+  // common finish of a card move — for mouse, finger and keyboard
+  async function finishCardMove(card, z) {
+    const toGroup = card.closest(".grupa").dataset.grupa;
+    const index = cardIndex(card);
+    const changed = toGroup !== z.group;
+    const samePlace = !changed && card.nextElementSibling === z.next;
+    if (samePlace) return false;
+    if (changed) assignGroup(card, toGroup);
+    const ok = await saveCardMove(card, z, toGroup, index);
     if (ok) {
-      const n = kartyGrupy(karta.parentElement).length;
-      ogloś(fmt(tr("pozycja_usluga"), karta.dataset.nazwa, indeks + 1, n, doGrupy));
+      const n = groupCards(card.parentElement).length;
+      announce(fmt(tr("pozycja_usluga"), card.dataset.nazwa, index + 1, n, toGroup));
     }
     return ok;
   }
 
-  async function zakonczRuchGrupy(sekcja, z) {
-    if (sekcja.nextElementSibling === z.nastepny) return false;
-    const indeks = indeksGrupy(sekcja);
-    const ok = await zapiszGrupe(sekcja, z, indeks);
-    if (ok) ogloś(fmt(tr("pozycja_grupa"), sekcja.dataset.grupa, indeks + 1, $$("#tresc > .grupa").length));
+  async function finishGroupMove(section, z) {
+    if (section.nextElementSibling === z.next) return false;
+    const index = groupIndex(section);
+    const ok = await saveGroupMove(section, z, index);
+    if (ok) announce(fmt(tr("pozycja_grupa"), section.dataset.grupa, index + 1, $$("#tresc > .grupa").length));
     return ok;
   }
 
-  // ── wyznaczanie miejsca upuszczenia ─────────────────────────────────────
-  function srodek(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  // ── resolving the drop place ────────────────────────────────────────────
+  function center(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
 
-  // Najbliższa grupa pod kursorem w pionie; poza wszystkimi — ta najbliższa.
-  function grupaPodKursorem(y) {
-    let najlepsza = null, odl = Infinity;
+  // The nearest group under the cursor vertically; outside all of them — the nearest one.
+  function groupUnderCursor(y) {
+    let best = null, dist = Infinity;
     for (const g of $$("#tresc > .grupa:not([hidden])")) {
       const r = g.getBoundingClientRect();
       const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
-      if (d < odl) { odl = d; najlepsza = g; }
+      if (d < dist) { dist = d; best = g; }
     }
-    return najlepsza;
+    return best;
   }
 
-  // Miejsce karty wynika z tego, NAD CZYM jest kursor, a nie z tego, która karta
-  // jest najbliżej: karta przeciągana zostaje w DOM-ie jako znacznik, więc po
-  // każdym przesunięciu układ się zmienia, a wybór „najbliższego środka" potrafił
-  // wtedy skakać między dwoma stabilnymi pozycjami zależnie od drogi kursora.
-  //  - kursor nad znacznikiem albo w szczelinie między kartami → bez zmian,
-  //  - nad inną kartą: lewa połowa = przed nią, prawa = za nią (w widoku listy
-  //    górna/dolna połowa); po zamianie kursor ląduje nad znacznikiem, więc jest stabilnie,
-  //  - poza kartami: w wierszu z kartami przed pierwszą/za ostatnią, nad
-  //    pierwszym wierszem na początek, pod ostatnim na koniec.
-  function polozKarte(karta, x, y) {
-    const sekcja = grupaPodKursorem(y);
-    if (!sekcja) return;
-    const ul = $(":scope > .siatka", sekcja);
-    const wszystkie = kartyGrupy(ul).filter((k) => !k.hidden);
-    const inne = wszystkie.filter((k) => k !== karta);
-    const wstaw = (przed) => {
-      const cel = przed || $(":scope > .kafel-dodaj", ul);
-      if (karta.parentElement === ul && karta.nextElementSibling === cel) return;
-      ul.insertBefore(karta, cel);
+  // The card's place follows from WHAT the cursor is OVER, not from which card
+  // is nearest: the dragged card stays in the DOM as a marker, so after
+  // every move the layout changes, and choosing the "nearest centre" used to
+  // jump between two stable positions depending on the cursor's path.
+  //   - cursor over the marker or in a gap between cards → no change,
+  //   - over another card: left half = before it, right half = after it (in list view
+  //     top/bottom half); after the swap the cursor lands over the marker, so it is stable,
+  //   - outside cards: in a row with cards before the first/after the last, above the
+  //     first row to the start, below the last to the end.
+  function placeCard(card, x, y) {
+    const section = groupUnderCursor(y);
+    if (!section) return;
+    const ul = $(":scope > .siatka", section);
+    const allCards = groupCards(ul).filter((k) => !k.hidden);
+    const others = allCards.filter((k) => k !== card);
+    const insert = (before) => {
+      const target = before || $(":scope > .kafel-dodaj", ul);
+      if (card.parentElement === ul && card.nextElementSibling === target) return;
+      ul.insertBefore(card, target);
     };
-    if (!inne.length) { wstaw(null); return; }
+    if (!others.length) { insert(null); return; }
 
-    const rr = new Map(wszystkie.map((k) => [k, k.getBoundingClientRect()]));
+    const rects = new Map(allCards.map((k) => [k, k.getBoundingClientRect()]));
     const w = (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-    const nad = wszystkie.find((k) => w(rr.get(k)));
-    if (nad === karta) return;
-    if (nad) {
-      const r = rr.get(nad), s = srodek(r);
-      const lista = [...rr.values()].every((q) => Math.abs(q.left - r.left) < 2);
-      const wczesniej = lista ? y < s.y : x < s.x;
-      wstaw(wczesniej ? nad : (inne[inne.indexOf(nad) + 1] || null));
+    const over = allCards.find((k) => w(rects.get(k)));
+    if (over === card) return;
+    if (over) {
+      const r = rects.get(over), s = center(r);
+      const list = [...rects.values()].every((q) => Math.abs(q.left - r.left) < 2);
+      const earlier = list ? y < s.y : x < s.x;
+      insert(earlier ? over : (others[others.indexOf(over) + 1] || null));
       return;
     }
-    // kursor poza kartami
-    const wRzedzie = inne.filter((k) => y >= rr.get(k).top && y <= rr.get(k).bottom);
-    if (wRzedzie.length) {
-      if (x > rr.get(wRzedzie[wRzedzie.length - 1]).right) {
-        wstaw(inne[inne.indexOf(wRzedzie[wRzedzie.length - 1]) + 1] || null);
-      } else if (x < rr.get(wRzedzie[0]).left) {
-        wstaw(wRzedzie[0]);
+    // cursor outside cards
+    const inRow = others.filter((k) => y >= rects.get(k).top && y <= rects.get(k).bottom);
+    if (inRow.length) {
+      if (x > rects.get(inRow[inRow.length - 1]).right) {
+        insert(others[others.indexOf(inRow[inRow.length - 1]) + 1] || null);
+      } else if (x < rects.get(inRow[0]).left) {
+        insert(inRow[0]);
       }
       return;
     }
-    const gora = Math.min(...inne.map((k) => rr.get(k).top));
-    const dol = Math.max(...inne.map((k) => rr.get(k).bottom));
-    if (y < gora) wstaw(inne[0]);
-    else if (y > dol) wstaw(null);
-    else if (karta.parentElement !== ul) wstaw(null); // szczelina między wierszami w obcej grupie
+    const topEdge = Math.min(...others.map((k) => rects.get(k).top));
+    const bottom = Math.max(...others.map((k) => rects.get(k).bottom));
+    if (y < topEdge) insert(others[0]);
+    else if (y > bottom) insert(null);
+    else if (card.parentElement !== ul) insert(null); // a gap between rows in a foreign group
   }
 
-  function polozGrupe(sekcja, y) {
-    const inne = $$("#tresc > .grupa:not([hidden])").filter((g) => g !== sekcja);
-    let przed = $("#pusto");
-    for (const g of inne) {
+  function placeGroup(section, y) {
+    const others = $$("#tresc > .grupa:not([hidden])").filter((g) => g !== section);
+    let before = $("#pusto");
+    for (const g of others) {
       const r = g.getBoundingClientRect();
-      if (y < r.top + r.height / 2) { przed = g; break; }
+      if (y < r.top + r.height / 2) { before = g; break; }
     }
-    if (sekcja.nextElementSibling === przed) return;
-    $("#tresc").insertBefore(sekcja, przed);
+    if (section.nextElementSibling === before) return;
+    $("#tresc").insertBefore(section, before);
   }
 
-  // ── przebieg przeciągania ───────────────────────────────────────────────
-  function startPrzeciagania(p) {
+  // ── drag flow ───────────────────────────────────────────────────────────
+  function startDrag(p) {
     const el = p.el;
     const r = el.getBoundingClientRect();
-    const duch = p.typ === "grupa" ? document.createElement("section") : el.cloneNode(true);
-    if (p.typ === "grupa") {
-      duch.className = "grupa duch";
-      duch.append($(":scope > h2", el).cloneNode(true));
+    const ghost = p.type === "grupa" ? document.createElement("section") : el.cloneNode(true);
+    if (p.type === "grupa") {
+      ghost.className = "grupa duch";
+      ghost.append($(":scope > h2", el).cloneNode(true));
     } else {
-      duch.classList.add("duch");
+      ghost.classList.add("duch");
     }
-    duch.removeAttribute("data-key");
-    duch.setAttribute("aria-hidden", "true");
-    duch.style.width = r.width + "px";
-    if (p.typ !== "grupa") duch.style.height = r.height + "px";
-    document.body.append(duch);
+    ghost.removeAttribute("data-key");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.style.width = r.width + "px";
+    if (p.type !== "grupa") ghost.style.height = r.height + "px";
+    document.body.append(ghost);
 
-    p.duch = duch;
+    p.ghost = ghost;
     p.dx = p.x0 - r.left;
     p.dy = p.y0 - r.top;
-    p.aktywne = true;
-    if (p.dotyk) duch.classList.add("duch--dotyk");
+    p.active = true;
+    if (p.touch) ghost.classList.add("duch--dotyk");
     document.body.classList.add("przeciaganie");
     el.classList.add("przeciagana");
-    ruchDucha(p);
-    petlaScrolla();
+    moveGhost(p);
+    autoScrollLoop();
   }
 
-  function ruchDucha(p) {
-    // w widoku listy uchwyt siedzi przy prawej krawędzi wiersza — bez
-    // przycięcia duch wyjeżdżałby za ekran, gdy kursor jedzie w lewo
-    const szer = p.duch.offsetWidth;
-    const lewo = Math.max(0, Math.min(p.x - p.dx, window.innerWidth - szer));
-    p.duch.style.transform = `translate3d(${lewo}px, ${p.y - p.dy}px, 0)`;
+  function moveGhost(p) {
+    // in list view the handle sits at the right edge of the row — without
+    // clamping the ghost would run off screen when the cursor moves left
+    const width = p.ghost.offsetWidth;
+    const left = Math.max(0, Math.min(p.x - p.dx, window.innerWidth - width));
+    p.ghost.style.transform = `translate3d(${left}px, ${p.y - p.dy}px, 0)`;
   }
 
-  function polozWgKursora(p) {
-    if (p.typ === "grupa") polozGrupe(p.el, p.y);
-    else polozKarte(p.el, p.x, p.y);
+  function placeByCursor(p) {
+    if (p.type === "grupa") placeGroup(p.el, p.y);
+    else placeCard(p.el, p.x, p.y);
   }
 
-  function sprzatnijPrzeciaganie() {
-    const p = przeciaganie;
+  function cleanupDrag() {
+    const p = dragState;
     if (!p) return;
-    przeciaganie = null;
-    document.removeEventListener("pointermove", naRuchu, true);
-    document.removeEventListener("pointerup", naPuszczeniu, true);
-    document.removeEventListener("pointercancel", naPrzerwaniu, true);
-    document.removeEventListener("keydown", naKlawiszuPodczas, true);
-    document.removeEventListener("touchmove", naDotykuRuch);
-    document.removeEventListener("contextmenu", naMenuKontekstowym, true);
-    window.removeEventListener("blur", naPrzerwaniu);
-    clearTimeout(p.czasDotyku);
-    if (p.duch) p.duch.remove();
+    dragState = null;
+    document.removeEventListener("pointermove", onMove, true);
+    document.removeEventListener("pointerup", onRelease, true);
+    document.removeEventListener("pointercancel", onAbort, true);
+    document.removeEventListener("keydown", onKeyDuringDrag, true);
+    document.removeEventListener("touchmove", onTouchMove);
+    document.removeEventListener("contextmenu", onContextMenu, true);
+    window.removeEventListener("blur", onAbort);
+    clearTimeout(p.touchTimer);
+    if (p.ghost) p.ghost.remove();
     document.body.classList.remove("przeciaganie");
     p.el.classList.remove("przeciagana");
   }
 
-  function naRuchu(e) {
-    const p = przeciaganie;
+  function onMove(e) {
+    const p = dragState;
     if (!p || e.pointerId !== p.id) return;
     p.x = e.clientX; p.y = e.clientY;
-    if (p.oczekuje) {
-      // palec ruszył się przed końcem przytrzymania — to przewijanie, oddajemy je przeglądarce
-      if (Math.hypot(p.x - p.x0, p.y - p.y0) > DOTYK_TOLERANCJA) sprzatnijPrzeciaganie();
+    if (p.pending) {
+      // the finger moved before the hold finished — it is scrolling, we hand it over to the browser
+      if (Math.hypot(p.x - p.x0, p.y - p.y0) > TOUCH_TOLERANCE) cleanupDrag();
       return;
     }
-    if (!p.aktywne) {
-      if (Math.hypot(p.x - p.x0, p.y - p.y0) < PROG_RUCHU) return;
-      startPrzeciagania(p);
+    if (!p.active) {
+      if (Math.hypot(p.x - p.x0, p.y - p.y0) < MOVE_THRESHOLD) return;
+      startDrag(p);
     }
     e.preventDefault();
-    ruchDucha(p);
-    polozWgKursora(p);
+    moveGhost(p);
+    placeByCursor(p);
   }
 
-  async function naPuszczeniu(e) {
-    const p = przeciaganie;
+  async function onRelease(e) {
+    const p = dragState;
     if (!p || e.pointerId !== p.id) return;
-    const { el, typ, miejsce, aktywne, uchwyt } = p;
-    sprzatnijPrzeciaganie();
-    if (!aktywne) return; // nie przekroczono progu (albo za krótkie przytrzymanie) — zwykłe kliknięcie
-    stlumKlik(); // po prawdziwym przeciągnięciu przeglądarka i tak wyśle click — nie otwieramy linku
-    if (typ === "grupa") await zakonczRuchGrupy(el, miejsce);
-    else await zakonczRuchKarty(el, miejsce);
-    // fokus wraca na uchwyt tylko, gdy to jego użyto; po złapaniu za kartę nie zostawiamy obwódki
-    if (uchwyt) uchwyt.focus({ preventScroll: true });
+    const { el, type, place, active, handle } = p;
+    cleanupDrag();
+    if (!active) return; // the threshold was not crossed (or the hold was too short) — a plain click
+    suppressClick(); // after a real drag the browser will send a click anyway — we do not open the link
+    if (type === "grupa") await finishGroupMove(el, place);
+    else await finishCardMove(el, place);
+    // focus returns to the handle only when it was used; after grabbing the card we leave no outline
+    if (handle) handle.focus({ preventScroll: true });
   }
 
-  function naPrzerwaniu() {
-    const p = przeciaganie;
+  function onAbort() {
+    const p = dragState;
     if (!p) return;
-    const { el, miejsce, aktywne } = p;
-    sprzatnijPrzeciaganie();
-    if (aktywne) przywrocMiejsce(el, miejsce);
+    const { el, place, active } = p;
+    cleanupDrag();
+    if (active) restorePlace(el, place);
   }
 
-  function naKlawiszuPodczas(e) {
+  function onKeyDuringDrag(e) {
     if (e.key !== "Escape") return;
     e.preventDefault();
     e.stopPropagation();
-    naPrzerwaniu();
+    onAbort();
   }
 
-  // Autoscroll przy krawędzi okna. Pętla rAF działa tylko w trakcie przeciągania.
-  function petlaScrolla() {
-    const p = przeciaganie;
-    if (!p || !p.aktywne) return;
+  // Autoscroll at the window edge. The rAF loop runs only during dragging.
+  function autoScrollLoop() {
+    const p = dragState;
+    if (!p || !p.active) return;
     const h = window.innerHeight;
-    let krok = 0;
-    if (p.y < STREFA_SCROLLA) krok = -Math.ceil((STREFA_SCROLLA - p.y) / 4);
-    else if (p.y > h - STREFA_SCROLLA) krok = Math.ceil((p.y - (h - STREFA_SCROLLA)) / 4);
-    if (krok) {
-      const przed = window.scrollY;
-      window.scrollBy(0, Math.max(-30, Math.min(30, krok)));
-      // treść pojechała pod nieruchomym kursorem — miejsce upuszczenia się zmieniło
-      if (window.scrollY !== przed) polozWgKursora(p);
+    let scrollStep = 0;
+    if (p.y < SCROLL_ZONE) scrollStep = -Math.ceil((SCROLL_ZONE - p.y) / 4);
+    else if (p.y > h - SCROLL_ZONE) scrollStep = Math.ceil((p.y - (h - SCROLL_ZONE)) / 4);
+    if (scrollStep) {
+      const prevScroll = window.scrollY;
+      window.scrollBy(0, Math.max(-30, Math.min(30, scrollStep)));
+      // the content moved under a still cursor — the drop place has changed
+      if (window.scrollY !== prevScroll) placeByCursor(p);
     }
-    requestAnimationFrame(petlaScrolla);
+    requestAnimationFrame(autoScrollLoop);
   }
 
-  // Click po prawdziwym przeciągnięciu (puszczenie nad tym samym linkiem) wycinamy.
-  let klikStlumionyDo = 0;
-  function stlumKlik() { klikStlumionyDo = performance.now() + 400; }
+  // We cut out the click after a real drag (release over the same link).
+  let clickSuppressedUntil = 0;
+  function suppressClick() { clickSuppressedUntil = performance.now() + 400; }
   document.addEventListener("click", (e) => {
-    if (performance.now() > klikStlumionyDo) return;
-    klikStlumionyDo = 0;
+    if (performance.now() > clickSuppressedUntil) return;
+    clickSuppressedUntil = 0;
     e.preventDefault();
     e.stopPropagation();
   }, true);
 
-  // Natywne przeciąganie linku/obrazka z karty przejęłoby gest i anulowało
-  // pointer events. Dotyczy tylko kart i nagłówków grup — dokumentowe
-  // dragover/drop od wgrywania tapet (wyżej) zostaje nietknięte.
+  // Native dragging of a link/image from a card would take over the gesture and cancel
+  // pointer events. It applies only to cards and group headings — the document-level
+  // dragover/drop from wallpaper uploads (above) stays untouched.
   document.addEventListener("dragstart", (e) => {
     if (e.target.closest && e.target.closest(".karta, .grupa > h2")) e.preventDefault();
   }, true);
 
-  function naDotykuRuch(e) {
-    if (przeciaganie && przeciaganie.aktywne && e.cancelable) e.preventDefault(); // stop przewijania
+  function onTouchMove(e) {
+    if (dragState && dragState.active && e.cancelable) e.preventDefault(); // stop scrolling
   }
-  function naMenuKontekstowym(e) { e.preventDefault(); } // długie przytrzymanie linku na Androidzie
+  function onContextMenu(e) { e.preventDefault(); } // long press on a link on Android
 
-  // Co użytkownik złapał: uchwyt (zawsze) albo powierzchnię karty / nagłówka grupy.
-  function zrodloPrzeciagania(e) {
-    const cel = e.target.closest && e.target;
-    if (!cel) return null;
-    const uchwyt = cel.closest('[data-akcja="uchwyt"]');
-    if (uchwyt) {
-      const typ = uchwyt.dataset.typ;
-      const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
-      return el ? { typ, el, uchwyt, powierzchnia: false } : null;
+  // What the user grabbed: the handle (always) or the surface of a card / group heading.
+  function dragSource(e) {
+    const target = e.target.closest && e.target;
+    if (!target) return null;
+    const handle = target.closest('[data-akcja="uchwyt"]');
+    if (handle) {
+      const type = handle.dataset.typ;
+      const el = handle.closest(type === "grupa" ? ".grupa" : ".karta");
+      return el ? { type, el, handle, surface: false } : null;
     }
-    // przyciski i pola w karcie robią swoje; modyfikatory = otwarcie w nowej karcie
-    if (cel.closest("button, input, select, textarea, label, summary, [data-akcja]")) return null;
+    // buttons and fields in the card do their own thing; modifiers = opening in a new tab
+    if (target.closest("button, input, select, textarea, label, summary, [data-akcja]")) return null;
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return null;
-    const karta = cel.closest(".karta");
-    if (karta) return { typ: "usluga", el: karta, uchwyt: null, powierzchnia: true };
-    const naglowek = cel.closest(".grupa > h2");
-    if (naglowek) return { typ: "grupa", el: naglowek.parentElement, uchwyt: null, powierzchnia: true };
+    const card = target.closest(".karta");
+    if (card) return { type: "usluga", el: card, handle: null, surface: true };
+    const heading = target.closest(".grupa > h2");
+    if (heading) return { type: "grupa", el: heading.parentElement, handle: null, surface: true };
     return null;
   }
 
   document.addEventListener("pointerdown", (e) => {
-    if (przeciaganie || zapisujeRuch) return;
+    if (dragState || savingMove) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (!document.body.classList.contains("edycja")) return;
-    const z = zrodloPrzeciagania(e);
+    const z = dragSource(e);
     if (!z) return;
-    if (filtrAktywny()) { powiadom(tr("przenosz_filtr"), "ostrzezenie"); return; }
-    const dotykNaKarcie = z.powierzchnia && e.pointerType === "touch";
-    przeciaganie = {
-      typ: z.typ, el: z.el, uchwyt: z.uchwyt, id: e.pointerId, aktywne: false,
-      oczekuje: dotykNaKarcie,
+    if (filterActive()) { notify(tr("przenosz_filtr"), "ostrzezenie"); return; }
+    const touchOnCard = z.surface && e.pointerType === "touch";
+    dragState = {
+      type: z.type, el: z.el, handle: z.handle, id: e.pointerId, active: false,
+      pending: touchOnCard,
       x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
-      miejsce: zapamietajMiejsce(z.el),
+      place: rememberPlace(z.el),
     };
-    const p = przeciaganie;
-    document.addEventListener("pointermove", naRuchu, true);
-    document.addEventListener("pointerup", naPuszczeniu, true);
-    document.addEventListener("pointercancel", naPrzerwaniu, true);
-    document.addEventListener("keydown", naKlawiszuPodczas, true);
-    window.addEventListener("blur", naPrzerwaniu);
+    const p = dragState;
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onRelease, true);
+    document.addEventListener("pointercancel", onAbort, true);
+    document.addEventListener("keydown", onKeyDuringDrag, true);
+    window.addEventListener("blur", onAbort);
     if (e.pointerType === "touch") {
-      document.addEventListener("touchmove", naDotykuRuch, { passive: false });
-      document.addEventListener("contextmenu", naMenuKontekstowym, true);
+      document.addEventListener("touchmove", onTouchMove, { passive: false });
+      document.addEventListener("contextmenu", onContextMenu, true);
     }
-    if (dotykNaKarcie) {
-      p.czasDotyku = setTimeout(() => {
-        if (przeciaganie !== p || !p.oczekuje) return;
-        p.oczekuje = false;
+    if (touchOnCard) {
+      p.touchTimer = setTimeout(() => {
+        if (dragState !== p || !p.pending) return;
+        p.pending = false;
         p.x0 = p.x; p.y0 = p.y;
-        p.dotyk = true;
-        startPrzeciagania(p);
+        p.touch = true;
+        startDrag(p);
         if (navigator.vibrate) navigator.vibrate(10);
-      }, DOTYK_TRZYMANIE_MS);
+      }, TOUCH_HOLD_MS);
     }
   });
 
-  // Klawiatura: Alt + strzałki na uchwycie. Góra/lewo = wcześniej, dół/prawo = później.
+  // Keyboard: Alt + arrows on the handle. Up/left = earlier, down/right = later.
   document.addEventListener("keydown", async (e) => {
-    const uchwyt = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
-    if (!uchwyt || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    const krok = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
-    if (!krok) return;
-    e.preventDefault(); // Alt+← to też „wstecz" w przeglądarce
-    if (przeciaganie || zapisujeRuch) return;
-    if (filtrAktywny()) { powiadom(tr("przenosz_filtr"), "ostrzezenie"); return; }
+    const handle = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
+    if (!handle || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const direction = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
+    if (!direction) return;
+    e.preventDefault(); // Alt+← is also "back" in the browser
+    if (dragState || savingMove) return;
+    if (filterActive()) { notify(tr("przenosz_filtr"), "ostrzezenie"); return; }
 
-    const typ = uchwyt.dataset.typ;
-    const el = uchwyt.closest(typ === "grupa" ? ".grupa" : ".karta");
-    const rodzenstwo = typ === "grupa" ? $$("#tresc > .grupa") : kartyGrupy(el.parentElement);
-    const i = rodzenstwo.indexOf(el);
-    const j = i + krok;
-    if (j < 0 || j >= rodzenstwo.length) return;
+    const type = handle.dataset.typ;
+    const el = handle.closest(type === "grupa" ? ".grupa" : ".karta");
+    const siblings = type === "grupa" ? $$("#tresc > .grupa") : groupCards(el.parentElement);
+    const i = siblings.indexOf(el);
+    const j = i + direction;
+    if (j < 0 || j >= siblings.length) return;
 
-    const miejsce = zapamietajMiejsce(el);
-    if (krok < 0) el.parentElement.insertBefore(el, rodzenstwo[j]);
-    else el.parentElement.insertBefore(el, rodzenstwo[j].nextElementSibling);
-    if (typ === "grupa") await zakonczRuchGrupy(el, miejsce);
-    else await zakonczRuchKarty(el, miejsce);
-    uchwyt.focus({ preventScroll: false }); // insertBefore zgubił fokus
+    const place = rememberPlace(el);
+    if (direction < 0) el.parentElement.insertBefore(el, siblings[j]);
+    else el.parentElement.insertBefore(el, siblings[j].nextElementSibling);
+    if (type === "grupa") await finishGroupMove(el, place);
+    else await finishCardMove(el, place);
+    handle.focus({ preventScroll: false }); // insertBefore lost the focus
   });
 
-  // Klawisz Enter/Spacja na uchwycie nie robi nic — to nie jest przycisk akcji.
+  // The Enter/Space key on the handle does nothing — it is not an action button.
   document.addEventListener("click", (e) => {
     if (e.target.closest && e.target.closest('[data-akcja="uchwyt"]')) e.preventDefault();
   }, true);
 
-  // ── układ i tytuł z innych kart ─────────────────────────────────────────
-  function ukladDom() {
+  // ── layout and title from other tabs ────────────────────────────────────
+  function domLayout() {
     return $$("#tresc > .grupa").map((g) => ({
       name: g.dataset.grupa,
-      services: kartyGrupy($(":scope > .siatka", g)).map((k) => k.dataset.nazwa),
+      services: groupCards($(":scope > .siatka", g)).map((k) => k.dataset.nazwa),
     }));
   }
 
-  function naUkladzie(u) {
-    if (!edytujeTytul && u.title) ustawTytul(u.title);
-    if (przeciaganie || zapisujeRuch || edytujeTytul || $("dialog[open]")) return;
-    // ta karta po własnej zmianie ma już ten sam układ i nie przeładowuje się
-    if (JSON.stringify(ukladDom()) !== JSON.stringify(u.groups)) location.reload();
+  function onLayout(u) {
+    if (!editingTitle && u.title) setTitle(u.title);
+    if (dragState || savingMove || editingTitle || $("dialog[open]")) return;
+    // this tab after its own change already has the same layout and does not reload
+    if (JSON.stringify(domLayout()) !== JSON.stringify(u.groups)) location.reload();
   }
 
   // ── start ───────────────────────────────────────────────────────────────
-  chipProblemy.addEventListener("click", () => przelaczProblemy());
+  chipProblems.addEventListener("click", () => toggleProblemsOnly());
 
-  zastosujWyglad(false);
-  rysuj(window.STAN_POCZATKOWY || {});
-  podlacz();
-  wczytajInfo();
-  wczytajTla();
-  wczytajWszystkieHistorie();
-  setInterval(wczytajWszystkieHistorie, 60000);
-  setInterval(() => rysuj(ostatniStan), 30000);
+  applyAppearance(false);
+  render(window.STAN_POCZATKOWY || {});
+  connect();
+  loadInfo();
+  loadBackgrounds();
+  loadAllHistory();
+  setInterval(loadAllHistory, 60000);
+  setInterval(() => render(lastState), 30000);
 })();

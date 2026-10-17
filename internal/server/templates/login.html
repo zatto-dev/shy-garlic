@@ -1,20 +1,20 @@
 {{define "login.html" -}}
 <!doctype html>
-<html lang="{{.Lang}}" data-preset="{{.Wyglad.Preset}}" data-ton="{{.Wyglad.Ton}}">
+<html lang="{{.Lang}}" data-preset="{{.Appearance.Preset}}" data-ton="{{.Appearance.Tone}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>{{.Tytuł}} — Shy Garlic</title>
+<title>{{.Title}} — Shy Garlic</title>
 <link rel="stylesheet" href="/assets/style.css">
 <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/assets/favicon-180.png">
 </head>
 <body class="brama">
 
-<!-- ── warstwa tła ────────────────────────────────────────────────────── -->
-<!-- Tu nie ma app.js, więc tło musi działać samym CSS-em z atrybutów <html>.
-     Nigdy nie ma tu tapety: serwer podstawia preset, a /bg/ stoi za logowaniem. -->
+<!-- ── background layer ───────────────────────────────────────────────── -->
+<!-- There is no app.js here, so the background must work with CSS alone, from the <html> attributes.
+     There is never a wallpaper here: the server substitutes a preset, and /bg/ sits behind the login. -->
 <div id="tlo" aria-hidden="true">
   <div class="tlo-warstwa">
     <div class="tlo-blob"></div>
@@ -34,7 +34,7 @@
     <p class="brama-opis">{{.T.opis_logowania}}</p>
   {{end}}
 
-  {{if .Błąd}}<p class="brama-blad" role="alert">{{.Błąd}}</p>{{end}}
+  {{if .Error}}<p class="brama-blad" role="alert">{{.Error}}</p>{{end}}
 
   <form method="post" action="{{if .Setup}}/setup{{else}}/login{{end}}" autocomplete="on">
     <input type="hidden" name="next" value="{{.Next}}">
@@ -54,12 +54,12 @@
   </form>
 
   <p class="brama-jezyk">
-    <a href="/lang?set={{.DrugiJezyk}}" rel="nofollow"
-       title="{{.T.jezyk}}: {{.DrugiJezykNazwa}}" aria-label="{{.T.jezyk}}: {{.DrugiJezykNazwa}}"
-       >{{.DrugiJezykKrotko}}</a>
+    <a href="/lang?set={{.SecondLang}}" rel="nofollow"
+       title="{{.T.jezyk}}: {{.SecondLangName}}" aria-label="{{.T.jezyk}}: {{.SecondLangName}}"
+       >{{.SecondLangShort}}</a>
   </p>
 
-  <p class="brama-stopka">Shy Garlic {{.Wersja}}</p>
+  <p class="brama-stopka">Shy Garlic {{.Version}}</p>
 </main>
 </body>
 </html>

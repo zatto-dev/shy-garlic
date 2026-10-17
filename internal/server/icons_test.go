@@ -214,16 +214,16 @@ func TestResolveIconUsesVariantsWhenPresent(t *testing.T) {
 	if ref.Src != "" {
 		t.Errorf("for an icon with variants Src should be empty (we render both variants), got %q", ref.Src)
 	}
-	if ref.WariantCiemny != "/icon/dagster-dark" || ref.WariantJasny != "/icon/dagster-light" {
-		t.Errorf("variants = (%q, %q), want (/icon/dagster-dark, /icon/dagster-light)", ref.WariantCiemny, ref.WariantJasny)
+	if ref.VariantDark != "/icon/dagster-dark" || ref.VariantLight != "/icon/dagster-light" {
+		t.Errorf("variants = (%q, %q), want (/icon/dagster-dark, /icon/dagster-light)", ref.VariantDark, ref.VariantLight)
 	}
 
 	refWithoutVariants := s.resolveIcon("jellyfin", "Jellyfin")
 	if refWithoutVariants.Src != "/icon/jellyfin" {
 		t.Errorf("without variants I expect a plain Src, got %q", refWithoutVariants.Src)
 	}
-	if refWithoutVariants.WariantCiemny != "" || refWithoutVariants.WariantJasny != "" {
+	if refWithoutVariants.VariantDark != "" || refWithoutVariants.VariantLight != "" {
 		t.Errorf("without variants the WariantCiemny/WariantJasny fields should be empty, got (%q, %q)",
-			refWithoutVariants.WariantCiemny, refWithoutVariants.WariantJasny)
+			refWithoutVariants.VariantDark, refWithoutVariants.VariantLight)
 	}
 }
