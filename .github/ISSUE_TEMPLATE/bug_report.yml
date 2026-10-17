@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in Shy Garlic does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. For security issues use a
+        private security advisory instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `shyg version`, or the image tag / chart version you run.
+      placeholder: "shyg 0.13.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Docker
+        - Docker Compose
+        - Helm
+        - Kustomize
+        - Binary
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem. Screenshots are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: |
+        The relevant part of your `shygarlic.yaml`. **Remove secrets, tokens,
+        passwords and private hostnames or IP addresses before pasting.**
+      render: yaml
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, browser, reverse proxy, Kubernetes version, etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output. Redact secrets and addresses.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed secrets and private addresses from everything above.
+          required: true

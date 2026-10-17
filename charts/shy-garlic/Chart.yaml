@@ -2,8 +2,11 @@ apiVersion: v2
 name: shy-garlic
 description: A self-hosted homelab dashboard with honest health checks and a config you can read.
 type: application
+# version and appVersion are overridden by the release workflow with the git tag
+# (helm package --version X --app-version X); the values here are placeholders.
 version: 0.1.0
 appVersion: "0.13.2"
+icon: https://raw.githubusercontent.com/zatto-dev/shy-garlic/main/docs/img/logo.png
 home: https://github.com/zatto-dev/shy-garlic
 sources:
   - https://github.com/zatto-dev/shy-garlic
