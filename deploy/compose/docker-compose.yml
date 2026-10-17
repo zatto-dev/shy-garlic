@@ -1,0 +1,47 @@
+# Shy Garlic with container discovery, through a read-only Docker socket proxy.
+#
+#   docker compose up -d
+#   docker compose logs shyg | grep setup_token     # the token /setup asks for
+#
+# Then open http://localhost:8080 (see "First run" in the README).
+#
+# The config lives on the shyg-data volume: it is copied from the bundled
+# example on the first start, edited in the panel afterwards, and never
+# overwritten. To keep it in a directory you manage (for example a git
+# repository), mount that file and point SHYG_CONFIG at it; give it to uid
+# 65532, by number, because the host does not know the name nonroot:
+#   volumes:  - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml
+#   environment:  SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
+#   chown 65532:65532 ./shygarlic.yaml
+
+services:
+  shyg:
+    image: ghcr.io/zatto-dev/shy-garlic:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SHYG_DOCKER: http://docker-proxy:2375   # remove this line (and docker-proxy) to turn discovery off
+      # SHYG_ALLOWED_HOSTS: dash.home.arpa     # only answer to this name (DNS rebinding guard)
+      # SHYG_TRUSTED_PROXY: 10.0.0.0/8         # when a reverse proxy sits in front
+      # SHYG_ADMIN_USER: admin                 # create the account at start and skip /setup
+      # SHYG_ADMIN_PASSWORD: change-me
+      TZ: Europe/Warsaw
+    volumes:
+      - shyg-data:/data   # config, accounts, history, icon cache, wallpapers
+    depends_on:
+      - docker-proxy
+
+  # Read-only view of the Docker socket: containers can be listed, nothing can
+  # be started, stopped or created.
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  shyg-data:
