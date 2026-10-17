@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -185,7 +186,12 @@ func serve(o cliOptions) error {
 
 	if o.seedConfig != "" {
 		seeded, err := seedConfig(o.cfgPath, o.seedConfig)
-		if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// the image sets a default seed; a deployment that mounts something
+			// else over it still starts, exactly as without --seed-config
+			slog.Warn("seed config not found, starting without seeding", "seed", o.seedConfig)
+		case err != nil:
 			return err
 		}
 		if seeded {

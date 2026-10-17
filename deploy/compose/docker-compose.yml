@@ -8,11 +8,11 @@
 # The config lives on the shyg-data volume: it is copied from the bundled
 # example on the first start, edited in the panel afterwards, and never
 # overwritten. To keep it in a directory you manage (for example a git
-# repository), replace the volume line below with a bind mount and give the
-# file to uid 65532, by number, because the host does not know the name nonroot:
-#   - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml
+# repository), mount that file and point SHYG_CONFIG at it; give it to uid
+# 65532, by number, because the host does not know the name nonroot:
+#   volumes:  - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml
+#   environment:  SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
 #   chown 65532:65532 ./shygarlic.yaml
-# and drop the "command:" block.
 
 services:
   shyg:
@@ -20,12 +20,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    command:
-      - serve
-      - -config
-      - /data/shygarlic.yaml
-      - -seed-config
-      - /etc/shygarlic/shygarlic.yaml
     environment:
       SHYG_DOCKER: http://docker-proxy:2375   # remove this line (and docker-proxy) to turn discovery off
       # SHYG_ALLOWED_HOSTS: dash.home.arpa     # only answer to this name (DNS rebinding guard)
@@ -41,7 +35,7 @@ services:
   # Read-only view of the Docker socket: containers can be listed, nothing can
   # be started, stopped or created.
   docker-proxy:
-    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
     restart: unless-stopped
     environment:
       CONTAINERS: 1

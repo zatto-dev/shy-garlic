@@ -32,9 +32,7 @@ pliku.
 ## Szybki start
 
 ```bash
-docker run -d --name shyg -p 8080:8080 -v shyg:/data \
-  ghcr.io/zatto-dev/shy-garlic serve \
-  -config /data/shygarlic.yaml -seed-config /etc/shygarlic/shygarlic.yaml
+docker run -d --name shyg -p 8080:8080 -v shyg:/data ghcr.io/zatto-dev/shy-garlic
 ```
 
 Potem:
@@ -46,11 +44,11 @@ Potem:
    pierwszej sekundy (zob. [Pierwsze uruchomienie](#pierwsze-uruchomienie)).
 
 > **Uwaga**
-> Dwie opcje po `serve` kładą config na wolumenie. Obraz ma przykładowy config,
-> ale panel działa jako użytkownik bez uprawnień i nie może zapisywać w tym
-> miejscu — bez tych opcji panel wstaje, a każdy zapis z UI kończy się błędem.
-> `-seed-config` kopiuje przykład do `/data/shygarlic.yaml` tylko przy pierwszym
-> starcie; istniejącego pliku nigdy nie rusza.
+> Config leży na wolumenie, w `/data/shygarlic.yaml`. Przy pierwszym starcie
+> obraz kopiuje tam przykładowy config; potem plik jest Twój i nic go nie
+> nadpisuje. Żeby zacząć od własnego pliku, zamontuj go pod
+> `/etc/shygarlic/shygarlic.yaml` (zostanie skopiowany przy pierwszym starcie)
+> albo ustaw `SHYG_CONFIG` na zamontowany plik, żeby edytować go na miejscu.
 
 Docker Compose, binarka, Kubernetes i Helm: zob. [Instalacja](#instalacja).
 

@@ -19,6 +19,9 @@ import (
 // appears under the real name and a file created in the meantime is not
 // overwritten.
 func seedConfig(cfgPath, seedPath string) (bool, error) {
+	if filepath.Clean(cfgPath) == filepath.Clean(seedPath) {
+		return false, nil // SHYG_CONFIG pointed at the seed itself: edit it in place
+	}
 	if _, err := os.Lstat(cfgPath); err == nil {
 		return false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {

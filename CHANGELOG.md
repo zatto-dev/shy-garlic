@@ -10,6 +10,17 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Container image: the config now lives on the `/data` volume.** The image
+  sets `SHYG_CONFIG=/data/shygarlic.yaml` and seeds it on the first start from
+  `/etc/shygarlic/shygarlic.yaml` (the bundled sample, or your file if you
+  mount one there), so a plain `docker run -v shyg:/data …` can save from the
+  UI. If you mount your config at `/etc/shygarlic/shygarlic.yaml` and want to
+  keep editing that file in place, set `SHYG_CONFIG=/etc/shygarlic/shygarlic.yaml`
+  (see the comment in `deploy/compose/docker-compose.yml`). Otherwise it is
+  copied to `/data` once and edited there.
+
 ### Added
 
 - `--seed-config` / `SHYG_SEED_CONFIG`: copy a starting config to `--config`

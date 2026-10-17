@@ -31,9 +31,7 @@ file you can keep in git — and the panel is a full editor of that same file.
 ## Quick start
 
 ```bash
-docker run -d --name shyg -p 8080:8080 -v shyg:/data \
-  ghcr.io/zatto-dev/shy-garlic serve \
-  -config /data/shygarlic.yaml -seed-config /etc/shygarlic/shygarlic.yaml
+docker run -d --name shyg -p 8080:8080 -v shyg:/data ghcr.io/zatto-dev/shy-garlic
 ```
 
 Then:
@@ -45,11 +43,11 @@ Then:
    exists from the first second (see [First run](#first-run)).
 
 > **Note**
-> The two options after `serve` put the config on the volume. The image ships a
-> sample config, but the panel runs as an unprivileged user and cannot write to
-> that location, so without them the dashboard starts and every save from the UI
-> fails. `-seed-config` copies the sample to `/data/shygarlic.yaml` on the first
-> start only; an existing file is never touched.
+> The config lives on the volume, at `/data/shygarlic.yaml`. On the first start
+> the image copies its sample config there; after that the file is yours and is
+> never overwritten. To start from your own file, mount it at
+> `/etc/shygarlic/shygarlic.yaml` (it is copied on the first start), or set
+> `SHYG_CONFIG` to a mounted file to edit it in place.
 
 For Docker Compose, a binary, Kubernetes and Helm, see [Install](#install).
 
