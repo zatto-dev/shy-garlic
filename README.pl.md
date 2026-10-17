@@ -741,8 +741,8 @@ Panel używa dokładnie tych samych endpointów co Ty.
 | `POST`   | `/api/notify/test`               | wyślij wiadomość testową                                |
 | `POST`   | `/api/background`                | wgraj tapetę (multipart `file`)                         |
 | `GET`    | `/api/background`                | lista wgranych tapet                                    |
-| `DELETE` | `/api/background/{nazwa}`        | usuń tapetę (`409`, gdy jest w użyciu)                  |
-| `GET`    | `/bg/{nazwa}`                    | serwowanie tapety — tylko dla zalogowanych              |
+| `DELETE` | `/api/background/{name}`        | usuń tapetę (`409`, gdy jest w użyciu)                  |
+| `GET`    | `/bg/{name}`                    | serwowanie tapety — tylko dla zalogowanych              |
 | `GET`    | `/metrics`                       | metryki Prometheusa — sesja albo token API              |
 | `GET`    | `/api/tokens`                    | lista tokenów API (nigdy sam sekret)                    |
 | `POST`   | `/api/tokens`                    | utwórz token; sekret tylko w tej jednej odpowiedzi      |

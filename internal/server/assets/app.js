@@ -11,10 +11,10 @@
   const substitute = (text, value) => String(text).replace(/%[ds]/, String(value));
 
   const STATE_DESCRIPTIONS = {
-    up: tr("opis_up"),
-    degraded: tr("opis_degraded"),
-    down: tr("opis_down"),
-    unknown: tr("opis_unknown"),
+    up: tr("state_desc_up"),
+    degraded: tr("state_desc_degraded"),
+    down: tr("state_desc_down"),
+    unknown: tr("state_desc_unknown"),
   };
   const STATES = ["up", "degraded", "down", "unknown"];
 
@@ -34,8 +34,8 @@
   //
   // localStorage throws in private mode and when site data is blocked —
   // the panel is supposed to keep working then, just without remembering anything.
-  const APPEARANCE_KEY = "shyg.wyglad";
-  const EDIT_KEY = "shyg-edycja";
+  const APPEARANCE_KEY = "shyg.appearance";
+  const EDIT_KEY = "shyg.edit";
 
   const storage = {
     read(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
@@ -43,9 +43,23 @@
     remove(k) { try { localStorage.removeItem(k); } catch (_) {} },
   };
 
+  // Before 0.14 these preferences lived under Polish key names. Carry the value over once
+  // (only when the new key is still empty) and drop the old key, so nobody loses their
+  // wallpaper choice or edit mode on upgrade. The block between the markers is also run
+  // on its own by TestLocalStorageMigration.
+  // migrate-storage:begin
+  const LEGACY_KEYS = { "shyg.wyglad": APPEARANCE_KEY, "shyg-edycja": EDIT_KEY };
+  for (const [oldKey, newKey] of Object.entries(LEGACY_KEYS)) {
+    const value = storage.read(oldKey);
+    if (value === null) continue;
+    if (storage.read(newKey) === null) storage.write(newKey, value);
+    storage.remove(oldKey);
+  }
+  // migrate-storage:end
+
   // ── appearance ──────────────────────────────────────────────────────────
   //
-  // The source of truth for the instance is the YAML (window.WYGLAD). localStorage
+  // The source of truth for the instance is the YAML (window.APPEARANCE). localStorage
   // overrides it locally — per browser. After merging, every field goes
   // through the same validation as on the server; not a single character that is
   // not in the allowlist reaches the CSS.
@@ -67,7 +81,7 @@
   }
 
   function effectiveAppearance() {
-    const w = Object.assign({}, window.WYGLAD || {}, localAppearance());
+    const w = Object.assign({}, window.APPEARANCE || {}, localAppearance());
     const blur = Math.max(0, Math.min(30, Math.round(Number(w.blur))));
     const dim = Math.max(0, Math.min(80, Math.round(Number(w.dim))));
     const preset = PRESETS.includes(w.preset) ? w.preset : "aurora";
@@ -162,7 +176,7 @@
     if (wallpaperTile) {
       wallpaperTile.classList.toggle("empty", uploadedBackgrounds.length === 0);
       const sub = $(".tile-sub", wallpaperTile);
-      if (sub) sub.textContent = uploadedBackgrounds.length ? "" : tr("tapeta_upusc");
+      if (sub) sub.textContent = uploadedBackgrounds.length ? "" : tr("wallpaper_drop");
     }
     if (blurSlider) blurSlider.value = String(w.blur);
     const value = $("#blur-value");
@@ -187,10 +201,10 @@
       li.classList.toggle("in-use", inUse);
       // the border colour alone says nothing to a screen reader — hence the title
       const selectButton = $("button[data-action='wallpaper']", li);
-      if (selectButton) selectButton.title = inUse ? li.dataset.name + " · " + tr("tapeta_uzywana") : li.dataset.name;
+      if (selectButton) selectButton.title = inUse ? li.dataset.name + " · " + tr("wallpaper_in_use") : li.dataset.name;
     }
     // The shortcut to the instance layer is seen only by someone who may write to the file.
-    $("#picker-to-settings").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
+    $("#picker-to-settings").hidden = !(window.APPEARANCE && window.APPEARANCE.writable);
   }
 
   function refreshView(view) {
@@ -227,6 +241,9 @@
   menuButton.addEventListener("click", () => togglePopover(menuPanel, menuButton, "aria-expanded"));
   scrim.addEventListener("click", closePopovers);
 
+  // ! The button labels describe the TEXT colour, while `tone` names the background:
+  // "Light text" (#tone-light) is for a dark wallpaper, so it saves tone "dark", and
+  // "Dark text" (#tone-dark) saves tone "light". This is intended, not a swapped pair.
   $("#tone-light").addEventListener("click", () => saveAppearance({ tone: "dark" }));
   $("#tone-dark").addEventListener("click", () => saveAppearance({ tone: "light" }));
 
@@ -253,7 +270,7 @@
   $("#picker-reset").addEventListener("click", () => {
     storage.remove(APPEARANCE_KEY);
     applyAppearance(true);
-    notify(tr("zapisano"));
+    notify(tr("saved"));
   });
 
   // And this one leads to the instance layer — the picker itself does not write to the file.
@@ -296,8 +313,8 @@
         removeButton.className = "btn btn--icon btn--sm btn--danger background-remove";
         removeButton.dataset.action = "remove-wallpaper";
         removeButton.dataset.name = t.name;
-        removeButton.title = tr("tapeta_usun");
-        removeButton.setAttribute("aria-label", tr("tapeta_usun") + " " + t.name);
+        removeButton.title = tr("wallpaper_remove");
+        removeButton.setAttribute("aria-label", tr("wallpaper_remove") + " " + t.name);
         // SVG, not the "×" character — the rest of the panel draws icons, and a glyph here
         // jumped vertically depending on the typeface.
         removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" '
@@ -359,15 +376,15 @@
   }
 
   async function uploadWallpaper(file) {
-    if (!backgroundsEnabled) return notify(tr("tapeta_wylaczona"), "warning");
+    if (!backgroundsEnabled) return notify(tr("wallpaper_uploads_off"), "warning");
     // the type from the name is only a hint — the server has the last word anyway,
     // reading it from the file content
     if (file.type && !BACKGROUND_TYPES.includes(file.type)) {
-      return notify(tr("tapeta_zly_typ"), "warning");
+      return notify(tr("wallpaper_bad_type"), "warning");
     }
-    const limitMB = (window.WYGLAD && window.WYGLAD.limitMB) || 8;
+    const limitMB = (window.APPEARANCE && window.APPEARANCE.limitMB) || 8;
     if (file.size > limitMB * 1024 * 1024) {
-      return notify(substitute(tr("tapeta_za_duza"), limitMB), "warning");
+      return notify(substitute(tr("wallpaper_too_large"), limitMB), "warning");
     }
 
     const tone = await toneFromImage(file);
@@ -377,14 +394,14 @@
       const r = await fetch("/api/background", { method: "POST", body: data });
       let body = null;
       try { body = await r.json(); } catch (_) {}
-      if (!r.ok) throw new Error((body && body.error) || tr("blad_zapisu_tla"));
+      if (!r.ok) throw new Error((body && body.error) || tr("error_wallpaper_upload"));
       await loadBackgrounds();
       const fields = { preset: "photo", image: body.name };
       if (tone) fields.tone = tone;
       saveAppearance(fields);
-      notify(tr("tapeta_wgrana"));
+      notify(tr("wallpaper_uploaded"));
     } catch (err) {
-      notify(err.message || tr("blad_zapisu_tla"), "warning");
+      notify(err.message || tr("error_wallpaper_upload"), "warning");
     }
   }
 
@@ -408,8 +425,8 @@
   function stateLabel(s, r) {
     if (s === "up" && typeof r.ms === "number") return r.ms + " ms";
     if (s === "degraded") {
-      if (isContentError(r.err)) return tr("chip_tresc");
-      return r.code ? substitute(tr("powod_http"), r.code) : tr("chip_degraded");
+      if (isContentError(r.err)) return tr("chip_content");
+      return r.code ? substitute(tr("reason_http"), r.code) : tr("chip_degraded");
     }
     if (s === "down") return tr("chip_down");
     return "—";
@@ -444,7 +461,7 @@
 
       const when = r.at ? new Date(r.at).toLocaleTimeString(LANG) : "—";
       const reason = r.err ? ` (${r.err})` : "";
-      box.title = `${STATE_DESCRIPTIONS[s]}${reason} · ${tr("sprawdzone")} ${when}`;
+      box.title = `${STATE_DESCRIPTIONS[s]}${reason} · ${tr("checked")} ${when}`;
       box.setAttribute("aria-label", `${STATE_DESCRIPTIONS[s]}${reason}`);
 
       const meta = $(".card-meta span", el);
@@ -453,9 +470,9 @@
 
     const bad = counts.down + counts.degraded;
     summary.textContent = "";
-    addCounter(counts.up, tr("licznik_dziala"));
-    if (bad) addCounter(bad, bad === 1 ? tr("licznik_uwagi_1") : tr("licznik_uwagi"), "zly");
-    if (counts.unknown) addCounter(counts.unknown, tr("licznik_sprawdzam"));
+    addCounter(counts.up, tr("count_up"));
+    if (bad) addCounter(bad, bad === 1 ? tr("count_attention_one") : tr("count_attention"), "zly");
+    if (counts.unknown) addCounter(counts.unknown, tr("count_checking"));
 
     $("span:last-child", chipUp).textContent = counts.up + " " + tr("chip_up");
     $("span:last-child", chipProblems).textContent =
@@ -529,7 +546,7 @@
       if (d.samples > 0) {
         const box = $(".state", el);
         box.dataset.uptime = d.uptime.toFixed(1);
-        const ariaLabel = `${tr("dostepnosc_24h")}: ${d.uptime.toFixed(1)}% (${d.samples} ${tr("sprawdzen")})`;
+        const ariaLabel = `${tr("uptime_24h")}: ${d.uptime.toFixed(1)}% (${d.samples} ${tr("checks")})`;
         $(".chart", el).setAttribute("aria-label", ariaLabel);
         $(".chart", el).setAttribute("title", ariaLabel);
         const meta = $(".card-meta b", el);
@@ -555,17 +572,17 @@
     };
     // the instance appearance changed in the file or from another tab; the local
     // override from localStorage still wins
-    eventSource.addEventListener("wyglad", (e) => {
+    eventSource.addEventListener("appearance", (e) => {
       try {
-        window.WYGLAD = Object.assign({}, window.WYGLAD, JSON.parse(e.data));
+        window.APPEARANCE = Object.assign({}, window.APPEARANCE, JSON.parse(e.data));
         applyAppearance(true);
       } catch (_) {}
     });
-    eventSource.addEventListener("uklad", (e) => {
+    eventSource.addEventListener("layout", (e) => {
       try { onLayout(JSON.parse(e.data)); } catch (_) {}
     });
     // file error/warnings: they appear and disappear without a refresh
-    eventSource.addEventListener("konfig", (e) => {
+    eventSource.addEventListener("config", (e) => {
       try { showBanner(JSON.parse(e.data)); } catch (_) {}
     });
     eventSource.onerror = () => setDisconnected(true);
@@ -594,7 +611,7 @@
 
   function setDisconnected(lost) {
     connection.classList.toggle("broken", lost);
-    connection.textContent = lost ? tr("brak_polaczenia") : tr("na_zywo");
+    connection.textContent = lost ? tr("disconnected") : tr("live");
     chipUp.classList.toggle("broken", lost);
     chipProblems.classList.toggle("broken", lost);
   }
@@ -707,18 +724,18 @@
       // Disabled on purpose in the file = the item disappears. Reminding about a feature
       // the user turned off themselves is noise. A missing socket = dimmed, because it is a state of the
       // environment and it is worth showing that such a feature exists.
-      docker.hidden = !!d.dockerWylaczony;
+      docker.hidden = !!d.dockerDisabled;
       docker.setAttribute("aria-disabled", String(!dockerAvailable));
-      docker.title = dockerAvailable ? "" : tr("docker_niedostepny");
+      docker.title = dockerAvailable ? "" : tr("docker_unavailable");
       const badge = $("#menu-docker-badge");
       badge.hidden = !d.dockerNew;
-      if (d.dockerNew) badge.textContent = substitute(tr("menu_docker_nowe"), d.dockerNew);
+      if (d.dockerNew) badge.textContent = substitute(tr("menu_docker_new"), d.dockerNew);
 
       wallpaperTile.hidden = !backgroundsEnabled;
       $("#picker-replace").hidden = !backgroundsEnabled;
-      $("#picker-to-settings").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
+      $("#picker-to-settings").hidden = !(window.APPEARANCE && window.APPEARANCE.writable);
 
-      $("#notify-state").textContent = d.notify ? tr("powiad_wlaczone") : tr("powiad_wylaczone");
+      $("#notify-state").textContent = d.notify ? tr("notify_enabled") : tr("notify_disabled");
       $("#notify-test").hidden = !d.notify;
     } catch (_) {}
   }
@@ -738,7 +755,7 @@
 
   function notifyError(err) {
     const msg = (err && err.message) || String(err);
-    notify(msg, msg === tr("konflikt_pliku") ? "warning" : "");
+    notify(msg, msg === tr("file_conflict") ? "warning" : "");
   }
 
   // ── mini-dialogs instead of prompt() and confirm() ──────────────────────
@@ -852,7 +869,7 @@
       t.textContent = `${new Date(p.at).toLocaleString(LANG)} · ${STATE_DESCRIPTIONS[p.state] || p.state}` +
         (p.state === "up" ? ` · ${p.ms} ms`
           : p.err ? ` · ${p.err}`
-            : p.code ? ` · ${substitute(tr("powod_http"), p.code)}` : "");
+            : p.code ? ` · ${substitute(tr("reason_http"), p.code)}` : "");
       r.append(t);
       svg.append(r);
     });
@@ -861,16 +878,16 @@
   // err before code: with a content mismatch the code is 200, and the reason sits in err
   function changeReason(z) {
     if (z.err) return z.err;
-    if (z.code) return substitute(tr("powod_http"), z.code);
-    return tr("brak_powodu");
+    if (z.code) return substitute(tr("reason_http"), z.code);
+    return tr("reason_none");
   }
 
   // we assemble the check rule from pieces, without innerHTML
   function checkDescription(d) {
     const parts = [];
-    if (d.path) parts.push(substitute(tr("kontrola_get"), d.path));
-    if (d.contains) parts.push(substitute(tr("kontrola_zawiera"), d.contains));
-    if (d.notContains) parts.push(substitute(tr("kontrola_nie_zawiera"), d.notContains));
+    if (d.path) parts.push(substitute(tr("check_get"), d.path));
+    if (d.contains) parts.push(substitute(tr("check_contains"), d.contains));
+    if (d.notContains) parts.push(substitute(tr("check_not_contains"), d.notContains));
     return parts.join(" · ");
   }
 
@@ -919,7 +936,7 @@
 
       const icon = $("#detail-icon");
       icon.textContent = "";
-      renderIcon(icon, { src: d.iconSrc, dark: d.iconWariantCiemny, light: d.iconWariantJasny }, d.name || "", 28);
+      renderIcon(icon, { src: d.iconSrc, dark: d.iconVariantDark, light: d.iconVariantLight }, d.name || "", 28);
 
       const state = d.now && d.now.state ? d.now.state : "unknown";
       const box = $("#detail-state");
@@ -929,7 +946,7 @@
       // reason for the current state (e.g. "content: missing …") — only when something is wrong
       const reason = $("#detail-reason");
       const hasProblem = (state === "degraded" || state === "down") && d.now && d.now.err;
-      reason.textContent = hasProblem ? `${tr("powod_stanu")}: ${d.now.err}` : "";
+      reason.textContent = hasProblem ? `${tr("state_reason")}: ${d.now.err}` : "";
       reason.dataset.state = state;
       reason.hidden = !hasProblem;
       const checkEl = $("#detail-check");
@@ -940,11 +957,11 @@
       stats.textContent = "";
       const percent = (x) => (x.samples ? x.uptime.toFixed(1) : "—");
       stats.append(
-        tile(tr("doba"), percent(d.day), d.day.samples ? "%" : tr("brak_danych")),
-        tile(tr("tydzien"), percent(d.week), d.week.samples ? "%" : tr("brak_danych")),
-        tile(tr("mediana"), d.day.p50 || "—", "ms"),
+        tile(tr("period_day"), percent(d.day), d.day.samples ? "%" : tr("no_data")),
+        tile(tr("period_week"), percent(d.week), d.week.samples ? "%" : tr("no_data")),
+        tile(tr("median"), d.day.p50 || "—", "ms"),
         tile("p95", d.day.p95 || "—", "ms"),
-        tile(tr("najwolniej"), d.day.max || "—", "ms"),
+        tile(tr("slowest"), d.day.max || "—", "ms"),
       );
 
       const points = d.points || [];
@@ -953,13 +970,13 @@
       overlayBarTitles(chart, points, result.step);
       $("#detail-scale").textContent = points.length
         ? `${points.length} × ${d.interval} · 0–${result.scaleMax} ms`
-        : tr("brak_danych");
+        : tr("no_data");
 
       const list = $("#detail-changes");
       list.textContent = "";
       if (!d.changes || !d.changes.length) {
         const li = document.createElement("li");
-        li.textContent = tr("brak_zmian_stanu");
+        li.textContent = tr("state_changes_none");
         list.append(li);
       } else {
         for (const z of d.changes) {
@@ -991,7 +1008,7 @@
     const b = $("#detail-check-now");
     const originalText = b.textContent;
     b.disabled = true;
-    b.textContent = tr("sprawdzam");
+    b.textContent = tr("checking");
     try {
       await api("POST", `/api/check?key=${encodeURIComponent(currentKey)}`);
       await openDetails(currentKey);
@@ -1027,15 +1044,15 @@
     const counter = $("#diff-counter");
     counter.textContent = "";
     if (!preview.diff) {
-      counter.textContent = tr("bez_zmian");
+      counter.textContent = tr("diff_no_change");
     } else {
       const plus = document.createElement("b"); plus.className = "plus"; plus.textContent = "+" + preview.added;
       const minus = document.createElement("b"); minus.className = "minus"; minus.textContent = "−" + preview.removed;
-      counter.append(plus, " " + tr("linii_dodanych") + " · ", minus, " " + tr("linii_usunietych"));
+      counter.append(plus, " " + tr("diff_added") + " · ", minus, " " + tr("diff_removed"));
     }
-    $("#diff-title").textContent = preview.summary || tr("podglad_zmian");
+    $("#diff-title").textContent = preview.summary || tr("diff_title");
     $("#diff-save").hidden = !!previewOnly || !preview.diff;
-    $("#diff-cancel").textContent = previewOnly ? tr("zamknij") : tr("anuluj");
+    $("#diff-cancel").textContent = previewOnly ? tr("close") : tr("cancel");
 
     diffDialog.showModal();
     return new Promise((resolve) => {
@@ -1146,7 +1163,7 @@
       groupSelect.append(o);
     }
 
-    $("#service-title").textContent = card ? tr("edytuj_usluge") : tr("nowa_usluga");
+    $("#service-title").textContent = card ? tr("edit_service") : tr("new_service");
     if (card) {
       serviceForm.name.value = card.dataset.name;
       serviceForm.url.value = card.dataset.address;
@@ -1217,7 +1234,7 @@
   // variants cost two 404s (SHYG-53).
   function variantPaths(d) {
     const out = {};
-    for (const [n, w] of Object.entries((d && d.warianty) || {})) {
+    for (const [n, w] of Object.entries((d && d.variants) || {})) {
       out[n] = w.map((x) => `/icon/${encodeURIComponent(x)}`);
     }
     return out;
@@ -1272,7 +1289,7 @@
     const tokens = (f.expect.value || "").split(",").map((x) => x.trim()).filter(Boolean);
     // a typo must not silently wipe the codes (empty = default)
     if (!f.expect.disabled && tokens.some((x) => !/^[1-5]\d\d$/.test(x))) {
-      serviceError.textContent = tr("blad_kody_http");
+      serviceError.textContent = tr("error_http_codes");
       serviceError.hidden = false;
       return;
     }
@@ -1336,7 +1353,7 @@
 
     if (action === "change-group") {
       const oldName = button.dataset.group;
-      const newName = await askForName(tr("zmien_nazwe_grupy"), oldName);
+      const newName = await askForName(tr("rename_group"), oldName);
       if (!newName || newName === oldName) return;
       try {
         const ok = await applyChange("PATCH", "/api/groups", { name: oldName, newName: newName });
@@ -1371,9 +1388,9 @@
       try {
         await api("DELETE", `/api/background/${encodeURIComponent(name)}`);
         await loadBackgrounds();
-        notify(tr("zapisano"));
+        notify(tr("saved"));
       } catch (err) {
-        notify(err.message || tr("tapeta_uzywana_blad"), "warning");
+        notify(err.message || tr("error_wallpaper_in_use"), "warning");
       }
     }
   });
@@ -1384,7 +1401,7 @@
 
   async function newGroup() {
     closePopovers();
-    const name = await askForName(tr("nazwa_grupy_tytul"));
+    const name = await askForName(tr("group_name_title"));
     if (!name) return;
     try {
       const ok = await applyChange("POST", "/api/groups", { name: name });
@@ -1408,7 +1425,7 @@
 
   $("#menu-docker").addEventListener("click", async () => {
     closePopovers();
-    if (!dockerAvailable) return notify(tr("docker_niedostepny"), "warning");
+    if (!dockerAvailable) return notify(tr("docker_unavailable"), "warning");
 
     const list = $("#candidate-list");
     const errorEl = $("#docker-error");
@@ -1427,7 +1444,7 @@
 
       if (!d.candidates || !d.candidates.length) {
         const li = document.createElement("li");
-        li.textContent = tr("docker_brak");
+        li.textContent = tr("docker_none");
         list.append(li);
       }
 
@@ -1463,7 +1480,7 @@
 
         const reason = document.createElement("span");
         reason.className = "reason";
-        reason.textContent = k.known ? tr("docker_juz_jest") : (REASONS[k.why] || k.why);
+        reason.textContent = k.known ? tr("docker_already_added") : (REASONS[k.why] || k.why);
 
         li.append(checkbox, icon, infoBox, reason);
         list.append(li);
@@ -1547,7 +1564,7 @@
   // ── Appearance tab: the instance layer, i.e. writing to the YAML ──────────
 
   function fillInstanceAppearance() {
-    const w = window.WYGLAD || {};
+    const w = window.APPEARANCE || {};
     for (const tile of $$("#instance-presets .tile-preset")) {
       tile.setAttribute("aria-pressed", String(tile.dataset.preset === w.preset));
     }
@@ -1576,12 +1593,12 @@
     const selectedTile = $('#instance-presets .tile-preset[aria-pressed="true"]');
     try {
       const ok = await applyChange("PUT", "/api/appearance", {
-        preset: selectedTile ? selectedTile.dataset.preset : (window.WYGLAD || {}).preset,
+        preset: selectedTile ? selectedTile.dataset.preset : (window.APPEARANCE || {}).preset,
         blur: parseInt($("#instance-blur").value, 10),
         dim: parseInt($("#instance-dim").value, 10),
       });
       if (!ok) return;
-      showOk(tr("wyglad_zapisany"));
+      showOk(tr("appearance_saved"));
     } catch (err) { showError(err.message || String(err)); }
   });
 
@@ -1594,8 +1611,8 @@
   function showFormatHint(fromEnv) {
     const hint = $("#webhook-format-hint");
     hint.textContent = fromEnv
-      ? tr("webhook_format_ze_srodowiska")
-      : tr("format_podpowiedz_" + formatField.value);
+      ? tr("webhook_format_from_env")
+      : tr("format_hint_" + formatField.value);
   }
   formatField.addEventListener("change", () => showFormatHint(formatField.disabled));
 
@@ -1604,27 +1621,27 @@
     // The format from the environment is the property of the deploy, just like the address.
     loadedFormat = d.format;
     formatField.value = d.format;
-    formatField.disabled = d.formatZrodlo === "srodowisko";
+    formatField.disabled = d.formatSource === "env";
     showFormatHint(formatField.disabled);
     const field = $("#webhook-address");
     field.value = "";
     field.placeholder = d.webhook || "https://…";
     // The address from the environment is the property of the deploy — the field is to be dead, and the
     // user should know why, instead of clicking on something that will not work anyway.
-    const fromEnv = d.zrodlo === "srodowisko";
+    const fromEnv = d.source === "env";
     field.disabled = fromEnv;
     $("#webhook-save").disabled = fromEnv && formatField.disabled;
     // The address already stands in the field as a placeholder — the status should say something else,
     // otherwise the same string hangs twice one under another.
     $("#notify-state").textContent = fromEnv
-      ? tr("webhook_ze_srodowiska")
-      : (d.wlaczony ? tr("powiad_wlaczone") : tr("webhook_zrodlo_brak"));
-    $("#webhook-threshold").value = String(d.prog);
-    $("#notify-test").hidden = !d.wlaczony;
+      ? tr("webhook_from_env")
+      : (d.enabled ? tr("notify_enabled") : tr("webhook_not_set"));
+    $("#webhook-threshold").value = String(d.threshold);
+    $("#notify-test").hidden = !d.enabled;
   }
 
   $("#webhook-save").addEventListener("click", async () => {
-    const body = { prog: parseInt($("#webhook-threshold").value, 10) };
+    const body = { threshold: parseInt($("#webhook-threshold").value, 10) };
     const address = $("#webhook-address").value.trim();
     // An empty field means "do not change" — clearing is a separate gesture,
     // otherwise merely opening the tab would wipe the webhook when saving the threshold.
@@ -1635,7 +1652,7 @@
     try {
       await api("PUT", "/api/notify", body);
       await loadNotifications();
-      showOk(tr("webhook_zapisany"));
+      showOk(tr("webhook_saved"));
     } catch (err) { showError(err.message || String(err)); }
   });
 
@@ -1645,14 +1662,14 @@
     const d = await api("GET", "/api/instance");
     const tbody = $("#instance-table tbody");
     tbody.replaceChildren();
-    for (const o of (d.opcje || [])) {
+    for (const o of (d.options || [])) {
       const row = document.createElement("tr");
       // textContent, not innerHTML: the values are file paths and CIDRs
       // supplied by the operator.
       for (const [text, className] of [
-        [o.klucz, "instance-key"],
-        [o.wartosc || "—", "instance-value"],
-        [tr("zrodlo_" + o.zrodlo), "instance-source"],
+        [o.key, "instance-key"],
+        [o.value || "—", "instance-value"],
+        [tr("source_" + o.source), "instance-source"],
       ]) {
         const td = document.createElement("td");
         td.className = className;
@@ -1681,7 +1698,7 @@
       const d = await api("GET", "/api/tokens");
       if (!d.tokens.length) {
         const li = document.createElement("li");
-        li.textContent = tr("tokeny_brak");
+        li.textContent = tr("tokens_none");
         list.append(li);
         return;
       }
@@ -1693,15 +1710,15 @@
         const meta = document.createElement("span");
         meta.className = "token-meta";
         const used = t.lastUsed
-          ? substitute(tr("tokeny_uzyty"), new Date(t.lastUsed).toLocaleString(LANG))
-          : tr("tokeny_nieuzyty");
+          ? substitute(tr("tokens_last_used"), new Date(t.lastUsed).toLocaleString(LANG))
+          : tr("tokens_never_used");
         meta.textContent = `${t.hint}… · ${used}`;
         info.append(name, meta);
         const b = document.createElement("button");
-        b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("tokeny_odwolaj");
+        b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("tokens_revoke");
         b.addEventListener("click", async () => {
-          if (!(await confirmAction(substitute(tr("tokeny_potwierdz"), t.name)))) return;
-          try { await api("DELETE", `/api/tokens/${t.id}`); await loadTokens(); showOk(tr("tokeny_odwolany")); }
+          if (!(await confirmAction(substitute(tr("tokens_confirm_revoke"), t.name)))) return;
+          try { await api("DELETE", `/api/tokens/${t.id}`); await loadTokens(); showOk(tr("tokens_revoked")); }
           catch (err) { showError(err.message); }
         });
         li.append(info, b);
@@ -1724,7 +1741,7 @@
       newTokenField.focus();
       newTokenField.select();
       settingsError.hidden = true;
-      showOk(tr("tokeny_utworzony"));
+      showOk(tr("tokens_created"));
     } catch (err) { showError(err.message); }
   });
 
@@ -1745,7 +1762,7 @@
       newTokenField.select();
       try { ok = document.execCommand("copy"); } catch (_) {}
     }
-    if (ok) showOk(tr("skopiowano"));
+    if (ok) showOk(tr("copied"));
   });
 
   async function loadAccounts() {
@@ -1756,13 +1773,13 @@
       for (const u of d.users) {
         const li = document.createElement("li");
         const name = document.createElement("span");
-        name.textContent = u.login + (u.login === d.me ? ` (${tr("ty")})` : "");
+        name.textContent = u.login + (u.login === d.me ? ` (${tr("you")})` : "");
         li.append(name);
         if (u.login !== d.me) {
           const b = document.createElement("button");
-          b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("usun_male");
+          b.type = "button"; b.className = "btn btn--danger btn--sm"; b.textContent = tr("delete_lower");
           b.addEventListener("click", async () => {
-            if (!(await confirmAction(substitute(tr("potwierdz_usun_konto"), u.login)))) return;
+            if (!(await confirmAction(substitute(tr("confirm_delete_account"), u.login)))) return;
             try { await api("DELETE", `/api/users/${u.id}`); loadAccounts(); }
             catch (err) { showError(err.message); }
           });
@@ -1787,7 +1804,7 @@
     const f = e.target;
     try {
       await api("POST", "/api/password", { old: f.old.value, new: f.new.value });
-      f.reset(); showOk(tr("haslo_zmienione"));
+      f.reset(); showOk(tr("password_changed"));
     } catch (err) { showError(err.message); }
   });
 
@@ -1942,7 +1959,7 @@
   $("#notify-test").addEventListener("click", async () => {
     try {
       await api("POST", "/api/notify/test");
-      showOk(tr("test_wyslany"));
+      showOk(tr("test_sent"));
     } catch (err) { showError(err.message); }
   });
 
@@ -1952,10 +1969,10 @@
     list.textContent = "";
     try {
       const d = await api("GET", "/api/versions");
-      $("#git-info").textContent = d.git ? "· " + tr("git_aktywny") : "";
+      $("#git-info").textContent = d.git ? "· " + tr("git_active") : "";
       if (!d.versions || !d.versions.length) {
         const li = document.createElement("li");
-        li.textContent = tr("brak_historii");
+        li.textContent = tr("history_none");
         list.append(li);
         return;
       }
@@ -1978,7 +1995,7 @@
 
         const showButton = document.createElement("button");
         showButton.type = "button";
-        showButton.textContent = tr("pokaz");
+        showButton.textContent = tr("show");
         showButton.addEventListener("click", async () => {
           try {
             const v = await api("GET", `/api/versions/${w.id}`);
@@ -1988,7 +2005,7 @@
 
         const restoreButton = document.createElement("button");
         restoreButton.type = "button";
-        restoreButton.textContent = tr("przywroc");
+        restoreButton.textContent = tr("restore");
         restoreButton.addEventListener("click", async () => {
           try {
             const ok = await applyChange("POST", `/api/versions/${w.id}/restore`, {});
@@ -2024,7 +2041,7 @@
     field.value = oldTitle;
     field.autocomplete = "off";
     field.spellcheck = false;
-    field.setAttribute("aria-label", tr("tytul_pole_aria"));
+    field.setAttribute("aria-label", tr("title_field_aria"));
     titleEl.textContent = "";
     titleEl.append(field);
     titleButton.hidden = true;
@@ -2055,7 +2072,7 @@
         const d = await api("PUT", "/api/title", { title: field.value });
         document.title = d.title;
         finish(d.title);
-        notify(tr("zapisano"));
+        notify(tr("saved"));
       } catch (err) {
         // the error stays by the field; the field stays open so that it can be corrected
         field.setAttribute("aria-invalid", "true");
@@ -2134,7 +2151,7 @@
     try {
       await api("POST", "/api/services/move",
         { group: z.group, name: card.dataset.name, toGroup: toGroup, index: index });
-      notify(tr("kolejnosc_ok"));
+      notify(tr("order_saved"));
       return true;
     } catch (err) {
       restorePlace(card, z);
@@ -2149,7 +2166,7 @@
     savingMove = true;
     try {
       await api("POST", "/api/groups/move", { name: section.dataset.group, index: index });
-      notify(tr("kolejnosc_ok"));
+      notify(tr("order_saved"));
       return true;
     } catch (err) {
       restorePlace(section, z);
@@ -2171,7 +2188,7 @@
     const ok = await saveCardMove(card, z, toGroup, index);
     if (ok) {
       const n = groupCards(card.parentElement).length;
-      announce(fmt(tr("pozycja_usluga"), card.dataset.name, index + 1, n, toGroup));
+      announce(fmt(tr("position_service"), card.dataset.name, index + 1, n, toGroup));
     }
     return ok;
   }
@@ -2180,7 +2197,7 @@
     if (section.nextElementSibling === z.next) return false;
     const index = groupIndex(section);
     const ok = await saveGroupMove(section, z, index);
-    if (ok) announce(fmt(tr("pozycja_grupa"), section.dataset.group, index + 1, $$("#content > .group").length));
+    if (ok) announce(fmt(tr("position_group"), section.dataset.group, index + 1, $$("#content > .group").length));
     return ok;
   }
 
@@ -2428,7 +2445,7 @@
     if (!document.body.classList.contains("edit")) return;
     const z = dragSource(e);
     if (!z) return;
-    if (filterActive()) { notify(tr("przenosz_filtr"), "warning"); return; }
+    if (filterActive()) { notify(tr("move_filter_active"), "warning"); return; }
     const touchOnCard = z.surface && e.pointerType === "touch";
     dragState = {
       type: z.type, el: z.el, handle: z.handle, id: e.pointerId, active: false,
@@ -2466,7 +2483,7 @@
     if (!direction) return;
     e.preventDefault(); // Alt+← is also "back" in the browser
     if (dragState || savingMove) return;
-    if (filterActive()) { notify(tr("przenosz_filtr"), "warning"); return; }
+    if (filterActive()) { notify(tr("move_filter_active"), "warning"); return; }
 
     const type = handle.dataset.type;
     const el = handle.closest(type === "group" ? ".group" : ".card");
@@ -2507,7 +2524,7 @@
   chipProblems.addEventListener("click", () => toggleProblemsOnly());
 
   applyAppearance(false);
-  render(window.STAN_POCZATKOWY || {});
+  render(window.INITIAL_STATE || {});
   connect();
   loadInfo();
   loadBackgrounds();

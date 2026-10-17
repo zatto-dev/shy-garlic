@@ -47,16 +47,6 @@ func (w metricsOutput) value(t *testing.T, name string, labels map[string]string
 	return 0, false
 }
 
-func (w metricsOutput) count(name string) int {
-	n := 0
-	for _, p := range w.samples {
-		if p.name == name {
-			n++
-		}
-	}
-	return n
-}
-
 // parseMetrics takes the text apart and ALONG THE WAY guards the syntax: every sample must
 // have TYPE and HELP of its family before it, and each TYPE/HELP must occur once.
 func parseMetrics(t *testing.T, text string) metricsOutput {
@@ -182,9 +172,7 @@ func parseSample(l string) (sample, error) {
 				return p, fmt.Errorf("unterminated label value")
 			}
 			p.labels[name] = wantOut.String()
-			if strings.HasPrefix(rest, ",") {
-				rest = rest[1:]
-			}
+			rest = strings.TrimPrefix(rest, ",")
 		}
 	}
 	if !strings.HasPrefix(rest, " ") {

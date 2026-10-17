@@ -111,10 +111,10 @@ func TestPatchServiceRejectsBadDescriptionAndTagsHumanly(t *testing.T) {
 	before := string(s.configFile(t))
 	long := strings.Repeat("a", config.MaxDescription+1)
 	cases := []struct{ name, body, want string }{
-		{"description too long", `{"description":"` + long + `"}`, "blad_opis_dlugi"},
-		{"description with a control character", `{"description":"a\nb"}`, "blad_opis_znaki"},
-		{"tag too long", `{"tags":["` + strings.Repeat("t", config.MaxTag+1) + `"]}`, "blad_tagi"},
-		{"too many tags", `{"tags":["a","b","c","d","e","f","g","h","i","j","k","l","m"]}`, "blad_tagi"},
+		{"description too long", `{"description":"` + long + `"}`, "error_description_long"},
+		{"description with a control character", `{"description":"a\nb"}`, "error_description_chars"},
+		{"tag too long", `{"tags":["` + strings.Repeat("t", config.MaxTag+1) + `"]}`, "error_tags"},
+		{"too many tags", `{"tags":["a","b","c","d","e","f","g","h","i","j","k","l","m"]}`, "error_tags"},
 	}
 	for _, tc := range cases {
 		body := strings.Replace(tc.body, "{", `{"group":"Media","name":"Jellyfin","url":"http://jellyfin.home.arpa",`, 1)
@@ -149,7 +149,7 @@ func TestPatchServiceDescriptionWithMergeGives400WithExplanation(t *testing.T) {
 		Error string `json:"error"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &reply)
-	if reply.Error != i18n.T(i18n.EN, "blad_pole_dziedziczone") {
+	if reply.Error != i18n.T(i18n.EN, "error_field_inherited") {
 		t.Errorf("message: %s", w.Body)
 	}
 	if string(s.configFile(t)) != before {
@@ -219,8 +219,8 @@ func TestAPIServiceReturnsDescriptionAndTags(t *testing.T) {
 }
 
 func TestDescriptionAndTagsHaveTranslations(t *testing.T) {
-	keys := []string{"opis_uslugi", "opis_uslugi_placeholder", "tagi_uslugi", "tagi_placeholder",
-		"blad_opis_dlugi", "blad_opis_znaki", "blad_tagi", "blad_pole_dziedziczone"}
+	keys := []string{"service_description", "service_description_placeholder", "service_tags", "service_tags_placeholder",
+		"error_description_long", "error_description_chars", "error_tags", "error_field_inherited"}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)
 		for _, k := range keys {

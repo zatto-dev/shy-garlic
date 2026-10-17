@@ -157,8 +157,8 @@ func TestSanitizeBackgroundName(t *testing.T) {
 	if n, _ := sanitizeName("obrazek.jpeg", "png"); n != "obrazek.png" {
 		t.Errorf("name = %q, want obrazek.png", n)
 	}
-	if n, _ := sanitizeName("....", "png"); n != "tlo.png" {
-		t.Errorf("empty body = %q, want tlo.png", n)
+	if n, _ := sanitizeName("....", "png"); n != "background.png" {
+		t.Errorf("empty body = %q, want background.png", n)
 	}
 	if _, ok := sanitizeName("x", "svg"); ok {
 		t.Error("a format outside the allowlist must not pass")
@@ -275,9 +275,9 @@ func multipartTempCount(t *testing.T) int {
 
 func TestBackgroundUploadCollisionGivesSuffix(t *testing.T) {
 	s := testServer(t)
-	want := []string{"tlo.png", "tlo-2.png", "tlo-3.png"}
+	want := []string{"background.png", "background-2.png", "background-3.png"}
 	for i, name := range want {
-		w := upload(t, s, "tlo.png", pngBytes(), "image/png")
+		w := upload(t, s, "background.png", pngBytes(), "image/png")
 		if w.Code != http.StatusCreated {
 			t.Fatalf("upload %d → %d (%s)", i+1, w.Code, w.Body.String())
 		}
@@ -360,7 +360,7 @@ func TestRemoveBackgroundStaysInsideDir(t *testing.T) {
 	}
 	for _, payload := range append(pathPayloads, "../waznyplik.txt", "x.png") {
 		r := httptest.NewRequest(http.MethodDelete, "/api/background/x", nil)
-		r.SetPathValue("nazwa", payload)
+		r.SetPathValue("name", payload)
 		w := httptest.NewRecorder()
 		s.handleBackgroundRemove(w, r)
 		if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
@@ -382,7 +382,7 @@ func TestRemoveUsedBackgroundRefuses409(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodDelete, "/api/background/uzywane.png", nil)
-	r.SetPathValue("nazwa", "uzywane.png")
+	r.SetPathValue("name", "uzywane.png")
 	w := httptest.NewRecorder()
 	s.handleBackgroundRemove(w, r)
 	if w.Code != http.StatusConflict {

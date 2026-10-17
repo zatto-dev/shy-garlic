@@ -341,7 +341,7 @@ const previewStub = `<script>
   window.EventSource = StrumienPodgladu;
 
   const historia = (klucz) => {
-    const teraz = (window.STAN_POCZATKOWY || {})[klucz] || { state: "up", ms: 60 };
+    const teraz = (window.INITIAL_STATE || {})[klucz] || { state: "up", ms: 60 };
     let h = 2166136261;
     for (const z of klucz) h = (Math.imul(h ^ z.charCodeAt(0), 16777619)) >>> 0;
     const punkty = [];
@@ -367,7 +367,7 @@ const previewStub = `<script>
       const klucz = new URLSearchParams(u.split("?")[1] || "").get("key") || "";
       const el = document.querySelector('.card[data-key="' + klucz + '"]');
       const h = historia(klucz);
-      const teraz = (window.STAN_POCZATKOWY || {})[klucz] || { state: "up", ms: 60 };
+      const teraz = (window.INITIAL_STATE || {})[klucz] || { state: "up", ms: 60 };
       const punkty = h.points.map((p, i) => ({
         state: p.state, ms: p.ms, code: p.state === "degraded" ? 502 : 200,
         at: new Date(Date.now() - (h.points.length - i) * 30000).toISOString(),
@@ -395,16 +395,16 @@ const previewStub = `<script>
     }
     if (u.startsWith("/api/background")) return json({ items: [] });
     if (u.startsWith("/api/notify")) {
-      return json({ wlaczony: true, webhook: "https://discord.com/•••", zrodlo: "baza", prog: 2 });
+      return json({ enabled: true, webhook: "https://discord.com/•••", source: "database", threshold: 2 });
     }
     if (u.startsWith("/api/instance")) {
-      return json({ opcje: [
-        { klucz: "addr", wartosc: ":8080", zrodlo: "domyslna" },
-        { klucz: "config", wartosc: "/etc/shygarlic/shygarlic.yaml", zrodlo: "srodowisko" },
-        { klucz: "data", wartosc: "/data/shygarlic.db", zrodlo: "srodowisko" },
-        { klucz: "backgrounds", wartosc: "/data/bg", zrodlo: "domyslna" },
-        { klucz: "docker", wartosc: "/var/run/docker.sock", zrodlo: "flaga" },
-        { klucz: "trusted-proxy", wartosc: "192.168.0.0/16", zrodlo: "flaga" },
+      return json({ options: [
+        { key: "addr", value: ":8080", source: "default" },
+        { key: "config", value: "/etc/shygarlic/shygarlic.yaml", source: "env" },
+        { key: "data", value: "/data/shygarlic.db", source: "env" },
+        { key: "backgrounds", value: "/data/bg", source: "default" },
+        { key: "docker", value: "/var/run/docker.sock", source: "flag" },
+        { key: "trusted-proxy", value: "192.168.0.0/16", source: "flag" },
       ] });
     }
     if (u.startsWith("/api/users")) return json({ users: [{ id: 1, login: "mariusz" }] });
@@ -466,11 +466,11 @@ func toPreview(t *testing.T, html string, icons map[string]string, state string,
 		return m
 	})
 	if state != "" {
-		const empty = "window.STAN_POCZATKOWY = {};"
+		const empty = "window.INITIAL_STATE = {};"
 		if !strings.Contains(html, empty) {
-			t.Fatal("could not find window.STAN_POCZATKOWY = {}; — swapping in the demo state will not work")
+			t.Fatal("could not find window.INITIAL_STATE = {}; — swapping in the demo state will not work")
 		}
-		html = strings.Replace(html, empty, "window.STAN_POCZATKOWY = "+state+";", 1)
+		html = strings.Replace(html, empty, "window.INITIAL_STATE = "+state+";", 1)
 	}
 	if state != "" {
 		const hook = `<script src="assets/app.js" defer></script>`
@@ -525,7 +525,7 @@ func TestPreviewPages(t *testing.T) {
 	state := string(b)
 
 	// ! tone and preset go through the config, not through swapping an attribute in the file:
-	// app.js sets data-tone from window.WYGLAD at start anyway, so a
+	// app.js sets data-tone from window.APPEARANCE at start anyway, so a
 	// hand-changed attribute would be overwritten at the first paint.
 	// ! bento only makes sense when the cards have different sizes. examples/homelab.yaml
 	// does not set `size`, so the bento variant gets them for the time of rendering —
@@ -770,10 +770,10 @@ func TestPageHasHandlesAndTitleForEditing(t *testing.T) {
 // a label in the interface.
 func TestOrderAndTitleTextsHaveBothLanguages(t *testing.T) {
 	keys := []string{
-		"zmien_tytul", "tytul_pole_aria", "uchwyt_usluga", "uchwyt_grupa", "pozycja_usluga",
-		"pozycja_grupa", "przenosz_filtr", "kolejnosc_ok", "blad_tytul_pusty",
-		"blad_tytul_dlugi", "blad_tytul_znaki", "blad_przenoszenie", "opis_tytul",
-		"opis_kolejnosc_uslugi", "opis_kolejnosc_grupy",
+		"edit_title", "title_field_aria", "handle_service", "handle_group", "position_service",
+		"position_group", "move_filter_active", "order_saved", "error_title_empty",
+		"error_title_long", "error_title_chars", "error_move", "desc_title_changed",
+		"desc_service_reordered", "desc_group_reordered",
 	}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)

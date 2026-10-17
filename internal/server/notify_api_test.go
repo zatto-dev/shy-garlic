@@ -33,14 +33,14 @@ func TestNotifyGetSourceDB(t *testing.T) {
 		t.Fatalf("want 200, have %d", rr.Code)
 	}
 	var reply struct {
-		Enabled bool   `json:"wlaczony"`
+		Enabled bool   `json:"enabled"`
 		Webhook string `json:"webhook"`
-		Source  string `json:"zrodlo"`
+		Source  string `json:"source"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&reply); err != nil {
 		t.Fatalf("decoding the response: %v", err)
 	}
-	if !reply.Enabled || reply.Source != "baza" {
+	if !reply.Enabled || reply.Source != "database" {
 		t.Fatalf("want enabled/db, have %v/%q", reply.Enabled, reply.Source)
 	}
 	if strings.Contains(reply.Webhook, "abc123") {
@@ -56,11 +56,11 @@ func TestNotifyGetWithoutWebhook(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.handleNotifyGet(rr, httptest.NewRequest("GET", "/api/notify", nil))
 	var reply struct {
-		Enabled bool   `json:"wlaczony"`
-		Source  string `json:"zrodlo"`
+		Enabled bool   `json:"enabled"`
+		Source  string `json:"source"`
 	}
 	json.NewDecoder(rr.Body).Decode(&reply)
-	if reply.Enabled || reply.Source != "brak" {
+	if reply.Enabled || reply.Source != "none" {
 		t.Fatalf("want disabled/none, have %v/%q", reply.Enabled, reply.Source)
 	}
 }
@@ -139,7 +139,7 @@ func TestNotifyPutSavesThreshold(t *testing.T) {
 	s := testServer(t)
 	rr := httptest.NewRecorder()
 	s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify",
-		strings.NewReader(`{"prog":4}`)))
+		strings.NewReader(`{"threshold":4}`)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("want 200, have %d — body: %s", rr.Code, rr.Body.String())
 	}
@@ -153,7 +153,7 @@ func TestNotifyPutSavesThreshold(t *testing.T) {
 
 func TestNotifyPutRejectsBadThreshold(t *testing.T) {
 	s := testServer(t)
-	for _, body := range []string{`{"prog":0}`, `{"prog":11}`} {
+	for _, body := range []string{`{"threshold":0}`, `{"threshold":11}`} {
 		rr := httptest.NewRecorder()
 		s.handleNotifyPut(rr, httptest.NewRequest("PUT", "/api/notify", strings.NewReader(body)))
 		if rr.Code != http.StatusBadRequest {
@@ -165,8 +165,8 @@ func TestNotifyPutRejectsBadThreshold(t *testing.T) {
 func TestInstanceReturnsSourcesWithoutSecrets(t *testing.T) {
 	s := testServer(t)
 	s.instance = []OptionInfo{
-		{Key: "addr", Value: ":8080", Source: "domyslna"},
-		{Key: "trusted-proxy", Value: "10.0.0.0/8", Source: "flaga"},
+		{Key: "addr", Value: ":8080", Source: "default"},
+		{Key: "trusted-proxy", Value: "10.0.0.0/8", Source: "flag"},
 	}
 	rr := httptest.NewRecorder()
 	s.handleInstance(rr, httptest.NewRequest("GET", "/api/instance", nil))
@@ -174,7 +174,7 @@ func TestInstanceReturnsSourcesWithoutSecrets(t *testing.T) {
 		t.Fatalf("want 200, have %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"addr", ":8080", "domyslna", "trusted-proxy", "flaga"} {
+	for _, want := range []string{"addr", ":8080", "default", "trusted-proxy", "flag"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("brakuje %q w %s", want, body)
 		}
@@ -248,7 +248,7 @@ func TestInfoDistinguishesMissingDockerReasons(t *testing.T) {
 	s.handleInfo(rr, httptest.NewRequest("GET", "/api/info", nil))
 	var reply struct {
 		Docker   bool `json:"docker"`
-		Disabled bool `json:"dockerWylaczony"`
+		Disabled bool `json:"dockerDisabled"`
 	}
 	json.NewDecoder(rr.Body).Decode(&reply)
 	if !reply.Disabled {
@@ -260,7 +260,7 @@ func TestInfoDistinguishesMissingDockerReasons(t *testing.T) {
 	rr2 := httptest.NewRecorder()
 	s2.handleInfo(rr2, httptest.NewRequest("GET", "/api/info", nil))
 	var reply2 struct {
-		Disabled bool `json:"dockerWylaczony"`
+		Disabled bool `json:"dockerDisabled"`
 	}
 	json.NewDecoder(rr2.Body).Decode(&reply2)
 	if reply2.Disabled {

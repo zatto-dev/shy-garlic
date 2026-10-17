@@ -353,7 +353,7 @@ func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	s.renderLogin(w, s.withLang(lang, loginView{
-		Next: r.URL.Query().Get("next"), Version: Version, Title: i18n.T(lang, "logowanie")}))
+		Next: r.URL.Query().Get("next"), Version: Version, Title: i18n.T(lang, "sign_in")}))
 }
 
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
@@ -372,8 +372,8 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
-			Error: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
-			Version: Version, Title: i18n.T(lang, "logowanie")}))
+			Error: i18n.T(lang, "too_many_attempts"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "sign_in")}))
 		return
 	}
 
@@ -384,8 +384,8 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
-			Error: i18n.T(lang, "zle_dane"), Login: login, Next: next,
-			Version: Version, Title: i18n.T(lang, "logowanie")}))
+			Error: i18n.T(lang, "bad_credentials"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "sign_in")}))
 		return
 	}
 	if err := s.setSession(w, r, u.ID); err != nil {
@@ -423,7 +423,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.FromRequest(r)
 	view := func(message, login string) loginView {
 		return s.withLang(lang, loginView{Setup: true, Error: message, Login: login,
-			Version: Version, Title: i18n.T(lang, "pierwsze_urucho")})
+			Version: Version, Title: i18n.T(lang, "first_run")})
 	}
 	if r.Method == http.MethodGet {
 		s.renderLogin(w, view("", ""))
@@ -442,7 +442,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.lim.allow(ip) {
 		slog.Warn("too many setup attempts", "ip", ip)
 		w.WriteHeader(http.StatusTooManyRequests)
-		s.renderLogin(w, view(i18n.T(lang, "za_duzo_prob"), login))
+		s.renderLogin(w, view(i18n.T(lang, "too_many_attempts"), login))
 		return
 	}
 	if !s.checkSetupToken(r.FormValue("setup_token")) {
@@ -460,11 +460,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		message := i18n.T(lang, "blad_konta")
+		message := i18n.T(lang, "error_account")
 		if strings.Contains(err.Error(), "8 characters") {
-			message = i18n.T(lang, "haslo_za_krotkie")
+			message = i18n.T(lang, "error_password_short")
 		} else if strings.Contains(err.Error(), "too short") {
-			message = i18n.T(lang, "login_za_krotki")
+			message = i18n.T(lang, "error_login_short")
 		}
 		s.renderLogin(w, view(message, login))
 		return
