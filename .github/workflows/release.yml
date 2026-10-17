@@ -35,10 +35,9 @@ jobs:
             exit 1
           fi
           .github/scripts/changelog-notes.sh "$version" CHANGELOG.md > /dev/null
-          # The kustomize base installs the published `-git` image variant
-          # (its init container needs `sh`), so the tag must follow the release.
-          if ! grep -Fq "newTag: \"${version}-git\"" deploy/kubernetes/kustomization.yaml; then
-            echo "::error file=deploy/kubernetes/kustomization.yaml::images.newTag must be \"${version}-git\" for ${TAG}"
+          # The kustomize base must install the image of this release.
+          if ! grep -Fq "newTag: \"${version}\"" deploy/kubernetes/kustomization.yaml; then
+            echo "::error file=deploy/kubernetes/kustomization.yaml::images.newTag must be \"${version}\" for ${TAG}"
             exit 1
           fi
           if ! grep -Fq "?ref=${TAG}\"" deploy/kubernetes/kustomization.yaml; then

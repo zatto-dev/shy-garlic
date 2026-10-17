@@ -22,10 +22,8 @@ configMapGenerator:
     options:
       disableNameSuffixHash: true
 
-# Keep in step with the release you install (?ref=vX): the tag is X.Y.Z-git.
-# The `-git` variant (Alpine + git) is used on purpose: the seed-config init
-# container runs `sh`, which the default distroless image does not have. The
-# release workflow fails when this tag does not match the git tag.
+# Keep in step with the release you install (?ref=vX).
+# The release workflow fails when this tag does not match the git tag.
 images:
   - name: ghcr.io/zatto-dev/shy-garlic
-    newTag: "0.13.2-git"
+    newTag: "0.13.2"
