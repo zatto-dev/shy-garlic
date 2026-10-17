@@ -101,6 +101,10 @@ var texts = map[string]map[Lang]string{
 		EN: "Fetched by this server and served from its cache unmodified. Logos belong to their owners.",
 		PL: "Pobierane przez ten serwer i serwowane z jego cache bez modyfikacji. Logotypy należą do ich właścicieli.",
 	},
+	"icon_credit_changes_zip": {
+		EN: "Served unmodified. Logos belong to their owners.",
+		PL: "Serwowane bez modyfikacji. Logotypy należą do ich właścicieli.",
+	},
 	"health_check": {EN: "Health check", PL: "Sprawdzanie"},
 	"interval":     {EN: "Interval", PL: "Co ile"},
 	"timeout":      {EN: "Timeout", PL: "Timeout"},

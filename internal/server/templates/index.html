@@ -664,5 +664,5 @@ window.APPEARANCE = {{.AppearanceJSON}};
   <span class="dot-sep">·</span>
   <a href="https://github.com/selfhst/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a>
   {{.T.icon_credit_by}} selfh.st (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" title="{{.T.icon_credit_license}}">CC BY 4.0</a>).
-  {{.T.icon_credit_changes}}</p>
+  {{if .IconsZip}}{{.T.icon_credit_changes_zip}}{{else}}{{.T.icon_credit_changes}}{{end}}</p>
 {{- end}}

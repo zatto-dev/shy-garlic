@@ -43,9 +43,13 @@ func TestIconCreditRendersInBothLanguages(t *testing.T) {
 			}
 		}
 		m := i18n.Map(l)
-		for _, k := range []string{"icon_credit_label", "icon_credit_changes"} {
-			if !strings.Contains(out, html.EscapeString(m[k])) {
-				t.Errorf("%s: the credit does not show text %q (%q)", l, k, m[k])
+		// look inside the credit paragraphs only — the page also embeds every
+		// text as JSON for app.js, which would satisfy a page-wide search
+		for _, c := range creditParagraphs(out) {
+			for _, k := range []string{"icon_credit_label", "icon_credit_by", "icon_credit_changes"} {
+				if !strings.Contains(c, html.EscapeString(m[k])) {
+					t.Errorf("%s: the credit does not show text %q (%q)", l, k, m[k])
+				}
 			}
 		}
 		texts[l] = m["icon_credit_changes"]

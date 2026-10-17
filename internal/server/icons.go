@@ -37,8 +37,9 @@ import (
 // and saves it. After first use it works offline, and the CDN never sees the
 // user's browser — it sees one server with no context.
 //
-// `zip` mode (an optional icons.zip file) gives the full set right away, without a
-// single outbound request — for networks cut off from the internet.
+// `zip` mode (an optional icons.zip file) gives a set right away, without
+// downloading any index — for networks cut off from the internet. A name the zip
+// does not have is still looked up on the CDN when asked for, never ahead of time.
 //
 // Two catalogs feed it: Dashboard Icons (homarr-labs, below) first, and
 // selfh.st/icons for the names Dashboard Icons lacks — see icons_selfhst.go.
@@ -87,6 +88,25 @@ type Catalog struct {
 	// cached yet, and must not be sent to selfh.st because of that.
 	homarrAuthoritative bool
 	net                 netGuard
+	life                context.Context // set by Refresh; background downloads end with it
+}
+
+// lifetime is the context background downloads run under.
+func (k *Catalog) lifetime() context.Context {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.life == nil {
+		return context.Background()
+	}
+	return k.life
+}
+
+// Authoritative tells whether name routing rests on full indexes. Without them
+// a name may later move to the other catalog, so browsers keep icons briefly.
+func (k *Catalog) Authoritative() bool {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.homarrAuthoritative
 }
 
 // rebuildNamesLocked merges both catalogs into the sorted name list. The caller
@@ -218,6 +238,9 @@ type tree struct {
 // No internet is not a critical error — the panel keeps working, and the picker
 // shows what already lies in the cache.
 func (k *Catalog) Refresh(ctx context.Context) {
+	k.mu.Lock()
+	k.life = ctx
+	k.mu.Unlock()
 	if k.Mode() == "zip" {
 		return
 	}
@@ -492,13 +515,22 @@ func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error)
 			rc, err := f.Open()
 			if err == nil {
 				defer rc.Close()
-				data, err := io.ReadAll(io.LimitReader(rc, 1<<20))
-				return data, "image/svg+xml", err
+				data, err := io.ReadAll(io.LimitReader(rc, maxIconBytes+1))
+				if err == nil && len(data) > maxIconBytes {
+					err = fmt.Errorf("icons.zip: %s.svg is larger than %d bytes", name, maxIconBytes)
+				}
+				if err != nil {
+					return nil, "", err
+				}
+				return data, "image/svg+xml", nil
 			}
 		}
 	}
 
 	sources := k.sourcesFor(name)
+	if len(sources) == 0 {
+		return nil, "", errNotFound
+	}
 	// only the first source's cache here: the later ones count only after the
 	// earlier answered 404 (walkSources), so one catalog never shadows the other
 	if data, kind, ok := readCached(sources[0].dir, sources[0].name, sources[0].ext); ok {
@@ -714,8 +746,13 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	// 'unsafe-inline'. The sandbox closes this without taking away the icons' ability to work.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	// an icon under a given name is immutable, so a week in the cache is
-	// fine — unlike /bg/, where the file is sometimes replaced
-	w.Header().Set("Cache-Control", "public, max-age=604800")
+	// fine — unlike /bg/, where the file is sometimes replaced. Without full
+	// indexes the name may still move to the other catalog: five minutes.
+	if s.icons.Authoritative() {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
 	_, _ = w.Write(data)
 }
 

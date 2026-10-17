@@ -34,6 +34,8 @@ const (
 	hostCooldown    = 2 * time.Minute
 	maxNotFound     = 4096 // bound on remembered misses; names come from requests
 	prefetchWorkers = 4
+	maxIconFlights  = 32 // downloads running at once; above that a request gets "pending"
+	maxConnsPerHost = 8
 )
 
 // errNotFound means the source answered and does not have the file — the only
@@ -51,6 +53,7 @@ func newIconClient() *http.Client {
 	t.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	t.TLSHandshakeTimeout = 3 * time.Second
 	t.ResponseHeaderTimeout = 5 * time.Second
+	t.MaxConnsPerHost = maxConnsPerHost
 	return &http.Client{Transport: t}
 }
 
@@ -127,7 +130,9 @@ func (g *netGuard) markDown(host string) {
 }
 
 // sourcesFor decides where a name comes from, in order. Dashboard Icons first;
-// selfh.st when its name, or as a fallback when the indexes cannot tell.
+// selfh.st when its name, or as a fallback when the indexes cannot tell. No
+// sources = both indexes are complete and neither has the name: answered from
+// memory, so random names in /icon/ never reach the network.
 func (k *Catalog) sourcesFor(name string) []iconSource {
 	homarr := func(n, ext string) iconSource {
 		return iconSource{base: cdnIcons, dir: k.cacheDir, name: n, ext: ext}
@@ -138,7 +143,10 @@ func (k *Catalog) sourcesFor(name string) []iconSource {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
-		ext, _ := k.selfhst.fileExt(ref)
+		ext, ok := k.selfhst.fileExt(ref)
+		if !ok && k.selfhst.loaded {
+			return nil
+		}
 		return []iconSource{selfhst(ref, ext)}
 	}
 	if ext, ok := k.homarrFileLocked(name); ok {
@@ -148,6 +156,9 @@ func (k *Catalog) sourcesFor(name string) []iconSource {
 	if inSelfhst && k.homarrAuthoritative {
 		return []iconSource{selfhst(name, sExt)}
 	}
+	if k.homarrAuthoritative && k.selfhst.loaded {
+		return nil
+	}
 	out := []iconSource{homarr(name, "")}
 	if inSelfhst || !k.selfhst.loaded {
 		out = append(out, selfhst(name, sExt))
@@ -156,7 +167,7 @@ func (k *Catalog) sourcesFor(name string) []iconSource {
 }
 
 // fetchIcon is one background download along the sources, shared by everyone
-// asking for the same name.
+// asking for the same name. nil = maxIconFlights downloads are already running.
 func (k *Catalog) fetchIcon(name string, sources []iconSource) *iconFlight {
 	g := &k.net
 	g.mu.Lock()
@@ -165,12 +176,17 @@ func (k *Catalog) fetchIcon(name string, sources []iconSource) *iconFlight {
 		g.mu.Unlock()
 		return f
 	}
+	if len(g.flights) >= maxIconFlights {
+		g.mu.Unlock()
+		return nil
+	}
 	f := &iconFlight{done: make(chan struct{})}
 	g.flights[name] = f
 	g.mu.Unlock()
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), iconFetchBudget)
+		// tied to the catalog's lifetime, not to the request that started it
+		ctx, cancel := context.WithTimeout(k.lifetime(), iconFetchBudget)
 		defer cancel()
 		f.data, f.kind, f.err = k.walkSources(ctx, name, sources)
 		g.mu.Lock()
@@ -200,8 +216,15 @@ func (k *Catalog) walkSources(ctx context.Context, key string, sources []iconSou
 				return data, kind, nil
 			}
 			if !errors.Is(err, errNotFound) {
-				// network trouble or a broken answer: not a reason to try another
-				// catalog, and not a miss to remember
+				// network trouble or a broken answer: not a reason to ask another
+				// catalog over the network, and not a miss to remember — but a file
+				// a later catalog left in the cache can still be served (offline
+				// without an index, that is the only way to show it)
+				for _, later := range sources[i+1:] {
+					if data, kind, ok := readCached(later.dir, later.name, later.ext); ok {
+						return data, kind, nil
+					}
+				}
 				return nil, "", err
 			}
 		}
@@ -217,6 +240,9 @@ func (k *Catalog) readFromNetwork(ctx context.Context, name string, sources []ic
 		return nil, "", errNotFound
 	}
 	f := k.fetchIcon(name, sources)
+	if f == nil {
+		return nil, "", errIconPending
+	}
 	wait := time.NewTimer(iconWaitBudget)
 	defer wait.Stop()
 	select {
@@ -257,18 +283,30 @@ func (k *Catalog) Prefetch(ctx context.Context, names []string) {
 	go func() {
 		sem := make(chan struct{}, prefetchWorkers)
 		var wg sync.WaitGroup
+		zipMode := k.Mode() == "zip"
+	loop:
 		for _, n := range todo {
-			if ctx.Err() != nil {
-				break
-			}
-			if k.onDiskOrZip(n) || k.net.missing(n) {
+			// zip mode is for networks without internet: what the zip lacks is not
+			// fetched ahead of time
+			if zipMode || k.onDiskOrZip(n) || k.net.missing(n) {
 				continue
 			}
-			sem <- struct{}{}
+			sources := k.sourcesFor(n)
+			if len(sources) == 0 {
+				continue
+			}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				break loop
+			}
 			wg.Add(1)
 			go func() {
 				defer func() { <-sem; wg.Done() }()
-				f := k.fetchIcon(n, k.sourcesFor(n))
+				f := k.fetchIcon(n, sources)
+				if f == nil {
+					return
+				}
 				<-f.done
 				if f.err != nil && !errors.Is(f.err, errNotFound) {
 					slog.Debug("icon prefetch failed", "icon", n, "err", f.err)
@@ -289,7 +327,10 @@ func (k *Catalog) onDiskOrZip(name string) bool {
 			return true
 		}
 	}
-	src := k.sourcesFor(name)[0]
-	_, _, ok := readCached(src.dir, src.name, src.ext)
+	sources := k.sourcesFor(name)
+	if len(sources) == 0 {
+		return false
+	}
+	_, _, ok := readCached(sources[0].dir, sources[0].name, sources[0].ext)
 	return ok
 }
