@@ -25,28 +25,6 @@ spec:
         fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
-      initContainers:
-        - name: seed-config
-          image: ghcr.io/zatto-dev/shy-garlic
-          command:
-            - sh
-            - -c
-            - |
-              mkdir -p /data/config
-              if [ ! -e /data/config/shygarlic.yaml ]; then
-                cp /seed/shygarlic.yaml /data/config/shygarlic.yaml
-              fi
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
-          resources:
-            requests: {cpu: 10m, memory: 16Mi}
-            limits: {memory: 64Mi}
-          volumeMounts:
-            - {name: data, mountPath: /data}
-            - {name: seed, mountPath: /seed, readOnly: true}
       containers:
         - name: shy-garlic
           image: ghcr.io/zatto-dev/shy-garlic
@@ -54,6 +32,8 @@ spec:
           env:
             - {name: SHYG_CONFIG, value: /data/config/shygarlic.yaml}
             - {name: SHYG_DATA, value: /data/shygarlic.db}
+            # seeds /data/config on first start; an existing config is never touched
+            - {name: SHYG_SEED_CONFIG, value: /seed/shygarlic.yaml}
             # Behind an ingress add SHYG_TRUSTED_PROXY=<proxy CIDR> here.
           ports:
             - {name: http, containerPort: 8080}
@@ -79,6 +59,7 @@ spec:
             limits: {memory: 256Mi}
           volumeMounts:
             - {name: data, mountPath: /data}
+            - {name: seed, mountPath: /seed, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: data

@@ -44,6 +44,8 @@ func run() error {
 
 	fs := flag.NewFlagSet("shyg", flag.ExitOnError)
 	cfgPath := fs.String("config", envOr("SHYG_CONFIG", "shygarlic.yaml"), "path to the config file")
+	seedCfg := fs.String("seed-config", envOr("SHYG_SEED_CONFIG", ""),
+		"copy this file to -config on start when -config does not exist yet (an existing config is never touched)")
 	addr := fs.String("addr", envOr("SHYG_ADDR", ":8080"), "listen address")
 	dataPath := fs.String("data", envOr("SHYG_DATA", "shygarlic.db"), "SQLite file with accounts and history")
 	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "optional icons.zip — a full offline icon set, no downloading from the network")
@@ -80,7 +82,7 @@ func run() error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
 	o := cliOptions{
-		cfgPath: *cfgPath, addr: *addr, dataPath: *dataPath,
+		cfgPath: *cfgPath, seedConfig: *seedCfg, addr: *addr, dataPath: *dataPath,
 		iconsZip: *iconsZip, cacheDir: *cacheDir, backgroundDir: *backgroundDir,
 		webhook: *webhook, webhookFormat: *webhookFormat, failThreshold: *failThreshold, dockerSock: *dockerSock,
 		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow, allowedHost: *allowedHost,
@@ -106,6 +108,7 @@ func run() error {
 // being swapped, and that is exactly the kind of bug you then hunt for an hour.
 type cliOptions struct {
 	cfgPath       string
+	seedConfig    string
 	addr          string
 	dataPath      string
 	iconsZip      string
@@ -149,6 +152,7 @@ func instanceDescription(fs *flag.FlagSet, o cliOptions) []server.OptionInfo {
 	return []server.OptionInfo{
 		{Key: "addr", Value: o.addr, Source: source(fs, "addr", "SHYG_ADDR")},
 		{Key: "config", Value: o.cfgPath, Source: source(fs, "config", "SHYG_CONFIG")},
+		{Key: "seed-config", Value: o.seedConfig, Source: source(fs, "seed-config", "SHYG_SEED_CONFIG")},
 		{Key: "data", Value: o.dataPath, Source: source(fs, "data", "SHYG_DATA")},
 		{Key: "cache", Value: o.cacheDir, Source: source(fs, "cache", "SHYG_CACHE")},
 		{Key: "backgrounds", Value: o.backgroundDir, Source: source(fs, "backgrounds", "SHYG_BACKGROUNDS")},
@@ -178,6 +182,16 @@ func envOr(key, defaults string) string {
 
 func serve(o cliOptions) error {
 	server.Version = version
+
+	if o.seedConfig != "" {
+		seeded, err := seedConfig(o.cfgPath, o.seedConfig)
+		if err != nil {
+			return err
+		}
+		if seeded {
+			slog.Info("config seeded", "from", o.seedConfig, "to", o.cfgPath)
+		}
+	}
 
 	if o.cacheDir == "" {
 		o.cacheDir = filepath.Join(filepath.Dir(o.dataPath), "icons")
