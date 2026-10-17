@@ -10,6 +10,12 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Fixed
+
+- The 0.14.0 release published `latest` pointing at the `-git` image instead
+  of the distroless one. `latest` has been repointed to the distroless 0.14.0,
+  and the release workflow no longer adds `latest` to the `-git` tags.
+
 ## [0.14.0] — 2026-10-17
 
 ### Upgrade notes

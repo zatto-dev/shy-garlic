@@ -1,0 +1,46 @@
+name: Retag latest
+
+# Points `latest` (and `git`) at an already published release, without
+# rebuilding. Copies the whole manifest index, attestations included, so SBOM
+# and provenance stay attached. Use it to roll `latest` back, or to repair it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published release to point latest at, e.g. 0.14.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point latest and git at the release
+        env:
+          VERSION: ${{ inputs.version }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z, got '$VERSION'"
+            exit 1
+          fi
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$VERSION"
+          docker buildx imagetools create -t "$IMAGE:git" "$IMAGE:$VERSION-git"
+          digest() { docker buildx imagetools inspect "$1" --format '{{json .Manifest.Digest}}'; }
+          [ "$(digest "$IMAGE:latest")" = "$(digest "$IMAGE:$VERSION")" ] || { echo "::error::latest does not match $VERSION"; exit 1; }
+          [ "$(digest "$IMAGE:git")" = "$(digest "$IMAGE:$VERSION-git")" ] || { echo "::error::git does not match $VERSION-git"; exit 1; }
+          echo "latest -> $VERSION, git -> $VERSION-git"
