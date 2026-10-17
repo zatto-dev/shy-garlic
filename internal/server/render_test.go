@@ -230,9 +230,7 @@ func demoState(cfg *config.Config) map[string]health.Result {
 		err   string
 	}
 	exceptions := map[string]entry{
-		"Media/Immich":                  {health.StateDegraded, 812, 502, ""},
 		"Tools/Paperless-ngx":           {health.StateDown, 0, 0, "connection refused"},
-		"Monitoring/Grafana":            {health.StateUnknown, 0, 0, ""},
 		"Infrastructure/Home Assistant": {health.StateUp, 118, 200, ""},
 	}
 	defaults := []int64{34, 47, 61, 72, 96, 128, 153}
@@ -394,6 +392,10 @@ const previewStub = `<script>
       return json({ docker: true, dockerNew: 0, backgrounds: true, notify: true });
     }
     if (u.startsWith("/api/background")) return json({ items: [] });
+    if (u.startsWith("/api/tokens")) return json({ tokens: [] });
+    if (u.startsWith("/api/appearance")) {
+      return json({ preset: "aurora", image: "", blur: 10, dim: 50, tone: "dark", view: "grid" });
+    }
     if (u.startsWith("/api/notify")) {
       return json({ enabled: true, webhook: "https://discord.com/•••", source: "database", threshold: 2 });
     }
@@ -404,7 +406,7 @@ const previewStub = `<script>
         { key: "data", value: "/data/shygarlic.db", source: "env" },
         { key: "backgrounds", value: "/data/bg", source: "default" },
         { key: "docker", value: "/var/run/docker.sock", source: "flag" },
-        { key: "trusted-proxy", value: "192.168.0.0/16", source: "flag" },
+        { key: "trusted-proxy", value: "10.0.0.0/8", source: "flag" },
       ] });
     }
     if (u.startsWith("/api/users")) return json({ users: [{ id: 1, login: "admin" }] });
@@ -495,9 +497,9 @@ func TestPreviewPages(t *testing.T) {
 		t.Skip("without -podglad I write nothing")
 	}
 	// the footer shows Version; in the test it is "dev", and the screenshots should show
-	// what stands on demo.example.com
+	// what the release shows
 	old := Version
-	Version = "0.11.0"
+	Version = "0.14.0"
 	t.Cleanup(func() { Version = old })
 
 	root := repoRoot(t)
@@ -644,7 +646,7 @@ func TestPreviewPages(t *testing.T) {
 		var buf bytes.Buffer
 		// EN as in a default request without Accept-Language — the other screenshots
 		// are also in English, and both READMEs share the same pictures
-		data := s.withLang(i18n.EN, loginView{Setup: w.setup, Version: "0.9.0",
+		data := s.withLang(i18n.EN, loginView{Setup: w.setup, Version: "0.14.0",
 			Title: "Sign in"})
 		if err := s.tmpl.ExecuteTemplate(&buf, "login.html", data); err != nil {
 			t.Fatal(err)

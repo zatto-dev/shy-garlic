@@ -18,9 +18,10 @@ credited in the release notes, unless you would rather not be.
 
 ## Supported versions
 
-Only the latest release is supported. The project is below `1.0.0` and has not
-yet been through an external security review; fixes land in a new version
-rather than in patches to old ones.
+Only the latest `0.x` release is supported. The project is below `1.0.0` and
+has not yet been through an external security review; fixes land in a new
+version rather than in patches to old ones, so please reproduce a problem on the
+latest release before reporting it.
 
 ## What the panel assumes about its environment
 
@@ -65,13 +66,17 @@ Knowing where the boundary is drawn saves everyone time.
   check errors, and the config banner warns about each one. The health check
   itself still uses them. Prefer a health endpoint that needs no
   credentials, and keep the file out of public repositories.
+- **Writing requests must come from the panel's own origin.** `Sec-Fetch-Site`
+  (or, for clients without it, `Origin` / `Referer`) has to say same-origin, and
+  the session cookie is `HttpOnly` and `SameSite=Strict`. There is no CSRF token;
+  a reverse proxy therefore has to pass the original `Host` header.
 - **`--trusted-proxy` decides who may set `X-Forwarded-For`.** Leave it empty
   unless a proxy really sits in front of the panel. Setting it too widely lets
   a client forge its own address, which affects both the log and the sign-in
   rate limit. It is deliberately a start-up flag and not something the panel
   can change about itself.
 - **API tokens are read-only and live in the database.** A token (`shyg_…`) is
-  honoured only for `GET` on `/metrics`, `/api/status` and `/api/history`; every
+  honored only for `GET` on `/metrics`, `/api/status` and `/api/history`; every
   other route ignores it and requires a session. The database stores a SHA-256
   hash, never the token. `--metrics-allow` lets listed networks read `/metrics`
   without a token — use it only for networks you trust, and set
@@ -80,10 +85,14 @@ Knowing where the boundary is drawn saves everyone time.
   with proxy headers from an unlisted peer is refused, and so is a trusted
   proxy that sends no `X-Forwarded-For`). Do not use `--metrics-allow` behind
   L4 forwarders or proxies that do not append `X-Forwarded-For`; use a token.
-- **The Docker socket is read-only by design.** The bundled compose file puts
-  a socket proxy in front of it with `POST` disabled, so discovery can list
-  containers and nothing else. Handing the panel the bare socket gives it the
+- **The Docker socket is read-only by design.** The compose example in
+  `deploy/compose/docker-compose.yml` puts a socket proxy in front of it with
+  `POST` disabled, so discovery can list containers and nothing else. Handing the panel the bare socket gives it the
   ability to control the host; do that only if you understand the trade.
+- **The container runs unprivileged.** Both image variants run as uid 65532; the
+  default one is distroless (no shell, no `git`). The database and its `-wal` /
+  `-shm` files are created `0600` in a `0700` directory. Commits of the config to
+  git work only in the `-git` image or on a host that has git.
 - **Icons never reach your browser from a CDN.** The server fetches and caches
   them, so no third party learns which services you run. `--icons icons.zip`
   removes even the server's outbound requests.

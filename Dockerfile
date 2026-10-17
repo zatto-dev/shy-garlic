@@ -34,10 +34,15 @@ COPY --from=build /out/shyg /shyg
 COPY --from=build /src/examples/homelab.yaml /etc/shygarlic/shygarlic.yaml
 USER nonroot
 EXPOSE 8080
-ENV SHYG_CONFIG=/etc/shygarlic/shygarlic.yaml
+# The config lives on the /data volume so the editor can write it. On first
+# start it is seeded from /etc/shygarlic/shygarlic.yaml — the bundled example,
+# or your own file if you mount one there. Set SHYG_CONFIG to keep editing a
+# mounted file in place.
+ENV SHYG_CONFIG=/data/shygarlic.yaml
+ENV SHYG_SEED_CONFIG=/etc/shygarlic/shygarlic.yaml
 ENV SHYG_DATA=/data/shygarlic.db
 ENTRYPOINT ["/shyg"]
-CMD ["serve", "-config", "/etc/shygarlic/shygarlic.yaml", "-addr", ":8080"]
+CMD ["serve"]
 
 # ── default image ─────────────────────────────────────────────────────────────
 # Last stage = what a plain `docker build .` produces. Releases name both targets
@@ -52,10 +57,15 @@ COPY --from=build --chown=65532:65532 /empty /data
 
 USER nonroot:nonroot
 EXPOSE 8080
-ENV SHYG_CONFIG=/etc/shygarlic/shygarlic.yaml
+# The config lives on the /data volume so the editor can write it. On first
+# start it is seeded from /etc/shygarlic/shygarlic.yaml — the bundled example,
+# or your own file if you mount one there. Set SHYG_CONFIG to keep editing a
+# mounted file in place.
+ENV SHYG_CONFIG=/data/shygarlic.yaml
+ENV SHYG_SEED_CONFIG=/etc/shygarlic/shygarlic.yaml
 # the DB in /data, with the icons/ and bg/ subdirectories next to it — never in one directory,
 # because a wallpaper named `shygarlic.db` would overwrite the DB
 ENV SHYG_DATA=/data/shygarlic.db
 
 ENTRYPOINT ["/shyg"]
-CMD ["serve", "-config", "/etc/shygarlic/shygarlic.yaml", "-addr", ":8080"]
+CMD ["serve"]

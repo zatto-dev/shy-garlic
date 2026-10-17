@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/zatto-dev/shy-garlic/actions/workflows/ci.yml"><img src="https://github.com/zatto-dev/shy-garlic/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/zatto-dev/shy-garlic/releases/latest"><img src="https://img.shields.io/github/v/release/zatto-dev/shy-garlic" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue" alt="Licence: AGPL-3.0-or-later"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License: AGPL-3.0-or-later"></a>
 </p>
 
 <p align="center">
@@ -28,8 +28,33 @@ Shy Garlic is a start page for a homelab: your services in groups, each with a
 heartbeat that says whether it is actually up. The whole instance is one YAML
 file you can keep in git — and the panel is a full editor of that same file.
 
-- **One static Go binary**, 14 MB, no cgo. SQLite through `modernc.org/sqlite`.
-  The container image is about 16 MB.
+## Quick start
+
+```bash
+docker run -d --name shyg -p 8080:8080 -v shyg:/data ghcr.io/zatto-dev/shy-garlic
+```
+
+Then:
+
+1. Read the one-time **setup token** from the log: `docker logs shyg 2>&1 | grep setup_token`.
+2. Open <http://localhost:8080>, paste the token and create the administrator
+   account. Or skip this step: start the container with
+   `-e SHYG_ADMIN_USER=admin -e SHYG_ADMIN_PASSWORD=<password>` and the account
+   exists from the first second (see [First run](#first-run)).
+
+> **Note**
+> The config lives on the volume, at `/data/shygarlic.yaml`. On the first start
+> the image copies its sample config there; after that the file is yours and is
+> never overwritten. To start from your own file, mount it at
+> `/etc/shygarlic/shygarlic.yaml` (it is copied on the first start), or set
+> `SHYG_CONFIG` to a mounted file to edit it in place.
+
+For Docker Compose, a binary, Kubernetes and Helm, see [Install](#install).
+
+## At a glance
+
+- **One static Go binary**, no cgo. SQLite through `modernc.org/sqlite`. The
+  container image is distroless: the binary, a sample config and nothing else.
 - **No node in the product.** `html/template`, vanilla JavaScript and SSE — no
   build step for the frontend, and not one CDN request from your browser.
 - **Writes from the UI are round-trip-safe.** Comments, anchors, alignment and
@@ -50,7 +75,7 @@ you cannot diff, review, or copy to another machine.
 
 **Shy Garlic does both, over the same file.** A change made by clicking is
 written back as a splice at byte offsets in the original text — not as a
-re-serialisation of a parsed document. That is the whole difference: comments,
+re-serialization of a parsed document. That is the whole difference: comments,
 blank lines, anchors (`&defaults`), merge keys (`<<: *defaults`), quoting style
 and the alignment of end-of-line comments stay exactly where they were.
 
@@ -98,17 +123,17 @@ Behind that there are two more safety nets:
   the UI becomes a commit: `shyg: added service "Radarr" to group "Infrastructure"`.
   You click in a browser, and the history shows up in `git log`. No git, no
   repository — nothing happens, no error. The default image is distroless and
-  therefore has no `git` binary; build `--target git` for an Alpine-based image
-  that does, or run the binary on a host that has git.
+  therefore has no `git` binary; use the `-git` image variant (see
+  [Images](#images)) or run the binary on a host that has git.
 
 ## An editor that doesn't need node
 
 <p align="center">
-  <img src="docs/img/edytor-pliku.png" alt="Config editor with YAML syntax highlighting" width="100%">
+  <img src="docs/img/file-editor.png" alt="Config editor with YAML syntax highlighting" width="100%">
 </p>
 
 The file tab in settings is a real editor: YAML syntax highlighting — comments,
-keys, numbers, keywords and anchors each in their own colour, in both themes —
+keys, numbers, keywords and anchors each in their own color, in both themes —
 and a full-screen mode for longer files. The highlighter is written from
 scratch, because the alternative was a build step or a CDN, and this project has
 neither. The field stays a plain `<textarea>`, so undo, paste and selection
@@ -127,8 +152,8 @@ tab open.
   and wants you to log in", not "the service is down".
 - **"Cannot connect" is a different state than "the server answered something
   unexpected."** The first is red, the second amber.
-- **States are told apart by shape, not only colour** — circle, diamond, square.
-  Colour alone is not enough for colour-blind users.
+- **States are told apart by shape, not only color** — circle, diamond, square.
+  Color alone is not enough for color-blind users.
 - `insecure: true` for self-signed certificates, because in a homelab they are
   everywhere and a Proxmox box is not down just because you never bought a cert.
 - **A page that answers 200 can still be wrong.** `check.contains` and
@@ -141,7 +166,7 @@ tab open.
 ## Every service has a story
 
 <p align="center">
-  <img src="docs/img/detale.png" alt="Service details with uptime and response times" width="100%">
+  <img src="docs/img/details.png" alt="Service details with uptime and response times" width="100%">
 </p>
 
 Clicking the chart on a card opens the details: uptime over 24 hours and 7 days,
@@ -165,7 +190,7 @@ and gets nothing at all after the first fetch. What it does see, once, is a
 server asking for a file. If even that is too much, `--icons icons.zip` ships
 the complete set in one file and makes the number of outbound requests zero.
 
-The catalogue holds about 4200 icons, searchable by name and by alias.
+The catalog holds more than 4,000 icons, searchable by name and by alias.
 
 ## It can read your containers
 
@@ -224,7 +249,7 @@ address). The format is stored next to the address in the database.
 
 | Format     | Address you enter                                                | What is sent                                                                 |
 | ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | an embed with a coloured bar (the default)                                   |
+| `discord`  | `https://discord.com/api/webhooks/<id>/<token>`                  | an embed with a colored bar (the default)                                   |
 | `slack`    | `https://hooks.slack.com/services/…` (Mattermost, Rocket.Chat too) | `{"text": "…"}`                                                              |
 | `ntfy`     | `https://ntfy.sh/<topic>` or your own server                     | plain text body, headers `Title`, `Priority` (`high` for down), `Tags`, `Click` |
 | `gotify`   | `https://<host>/message?token=<APP_TOKEN>`                       | `{"title", "message", "priority"}` (down = 8)                                |
@@ -253,7 +278,20 @@ the deployment instead: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerts`
 
 ## Install
 
+### Images
+
+| Tags                                  | What is inside                                         |
+| ------------------------------------- | ------------------------------------------------------ |
+| `latest`, `X.Y.Z`, `X.Y`              | distroless: the binary and a sample config, no shell, no `git` |
+| `git`, `X.Y.Z-git`, `X.Y-git`         | Alpine with `git`, which config commits from the UI need |
+
+The default image cannot commit the config to git, because it has no `git`.
+Pick a `-git` tag if you keep the config in a repository. Pin a version in
+production (`ghcr.io/zatto-dev/shy-garlic:0.14.0`) instead of following `latest`.
+
 ### Docker Compose
+
+The shortest version is the [quick start](#quick-start) as a file:
 
 ```yaml
 services:
@@ -262,41 +300,38 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    environment:
-      SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
-      SHYG_DATA: /data/shygarlic.db
-      SHYG_DOCKER: http://docker-proxy:2375   # drop this line if you don't want discovery
-      TZ: Europe/Warsaw
     volumes:
-      - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml   # your config, writable
-      - shyg-data:/data                                  # accounts, history, icon cache, wallpapers
-    healthcheck:
-      test: ["CMD", "/shyg", "version"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    depends_on:
-      - docker-proxy
-
-  # Read-only view of the Docker socket: containers can be listed, nothing can
-  # be started, stopped or created.
-  docker-proxy:
-    image: ghcr.io/tecnativa/docker-socket-proxy:latest
-    restart: unless-stopped
-    environment:
-      CONTAINERS: 1
-      POST: 0
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-
+      - shyg-data:/data      # config, accounts, history, icon cache, wallpapers
 volumes:
   shyg-data:
 ```
 
+The full example, with container discovery through a read-only Docker socket
+proxy (containers can be listed, nothing can be started, stopped or created), is
+in [`deploy/compose/docker-compose.yml`](deploy/compose/docker-compose.yml):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/zatto-dev/shy-garlic/main/deploy/compose/docker-compose.yml
+docker compose up -d
+docker compose logs shyg | grep setup_token
+```
+
 Open `http://localhost:8080`.
 
+To keep the config in a directory you manage yourself, for example a git
+repository, bind-mount the file and point `SHYG_CONFIG` at it, so the panel edits it in
+place:
+
+```yaml
+    environment:
+      SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
+    volumes:
+      - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml   # your config, writable
+      - shyg-data:/data
+```
+
 The image runs as uid **65532**. A named volume inherits the right owner from
-the image; a bind mount does not, so give the config file that owner yourself —
+the image; a bind mount does not, so give the config file that owner yourself,
 with the number, because the host does not know the name `nonroot`:
 
 ```bash
@@ -314,9 +349,15 @@ against the checksum file published with that same release; a mismatch aborts
 the install. `SHYG_VERSION` pins a version, `SHYG_BIN_DIR` picks the target
 directory.
 
+Then give it a config and start it. The sample below is the same one the image
+ships; without a config file the panel starts empty and says so in a banner.
+
 ```bash
+curl -fsSLo shygarlic.yaml https://raw.githubusercontent.com/zatto-dev/shy-garlic/main/examples/homelab.yaml
 shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
 ```
+
+The setup token is printed in the terminal (see [First run](#first-run)).
 
 ### From source
 
@@ -339,10 +380,11 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
   --namespace shy-garlic --create-namespace
 ```
 
-**Plain kubectl** (kustomize, pinned to a release tag):
+**Plain kubectl** (kustomize, pinned to a release tag; replace `v0.14.0` with the
+[latest release](https://github.com/zatto-dev/shy-garlic/releases/latest) tag):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.1"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.14.0"
 ```
 
 Then reach the panel and create the administrator on the first visit (see
@@ -379,11 +421,10 @@ If volumes still do not get created on your nodes, see Talos's own
 `helm uninstall` keeps the volume on purpose, so your data survives an accident;
 to reinstall onto it, add `--set persistence.existingClaim=shy-garlic`.
 
-Two things differ from Docker. The config lives on the volume
-(`/data/config/shygarlic.yaml`): it is seeded from the bundled example on first
-start and edited in the panel afterwards, so upgrading never overwrites it. And
-there is no Docker socket, so container discovery is simply off; services come
-from the config file.
+The config lives on the volume (`/data/config/shygarlic.yaml`), copied from the
+bundled example with `--seed-config` on first start and edited in the panel
+afterwards, so upgrading never overwrites it. There is no Docker socket, so
+container discovery is simply off; services come from the config file.
 
 ### First run
 
@@ -396,7 +437,7 @@ instance rather than whoever reached the port first. The panel prints it in its
 log when it starts:
 
 ```bash
-docker logs shyg 2>&1 | grep setup_token                      # Docker
+docker logs shyg 2>&1 | grep setup_token                      # Docker (Compose: docker compose logs shyg)
 kubectl -n shy-garlic logs deploy/shy-garlic | grep setup_token # Kubernetes
 ```
 
@@ -406,8 +447,9 @@ level=WARN msg="first run: no account exists yet. Open /setup and enter this set
 
 Paste it into the *Setup token* field. It lives in memory only: a restart before
 the account exists prints a new one, and it is discarded when the account is
-created. Setting `SHYG_ADMIN_USER` and `SHYG_ADMIN_PASSWORD` creates the account
-at start and skips `/setup` (and the token) altogether.
+created. Setting `SHYG_ADMIN_USER` and `SHYG_ADMIN_PASSWORD` (environment only,
+there are no flags for them) creates the account at start and skips `/setup`
+(and the token) altogether. Keep the password in a secret, not in a file you commit.
 
 To make sure the panel only answers to the name you open it by, set
 `--allowed-host` / `SHYG_ALLOWED_HOSTS` to a comma-separated list of host names
@@ -432,7 +474,7 @@ browser's `Origin` does not match it.
 <table>
   <tr>
     <td width="50%"><img src="docs/img/panel-light.png" alt="Light theme"></td>
-    <td width="50%"><img src="docs/img/tryb-edycji.png" alt="Edit mode"></td>
+    <td width="50%"><img src="docs/img/edit-mode.png" alt="Edit mode"></td>
   </tr>
   <tr>
     <td align="center"><sub>Light and dark theme</sub></td>
@@ -450,10 +492,17 @@ browser's `Origin` does not match it.
 
 The background is either a preset (aurora, nebula, graphite, dawn, fog) or your
 own wallpaper, with blur and dimming you set yourself — dimming, because on a
-photo with strong internal contrast no choice of text colour rescues legibility.
+photo with strong internal contrast no choice of text color rescues legibility.
 
 <p align="center">
   <img src="docs/img/background-picker-dark.png" alt="Background picker" width="100%">
+</p>
+
+The gear in the top bar opens the settings: appearance, notifications,
+accounts, history, the config file and an overview of the instance.
+
+<p align="center">
+  <img src="docs/img/settings-dark.png" alt="Settings window" width="70%">
 </p>
 
 The picker in the top bar changes **your** browser only. Settings → Appearance
@@ -538,7 +587,7 @@ so point `path` at the final address. Only the first 1 MiB is searched.
 | `groups[].name`                | section name                                            | —                           |
 | `services[].name`              | service name                                            | required                    |
 | `services[].url`               | address; `http://`, `https://` or `tcp://host:port`     | required                    |
-| `services[].icon`              | catalogue icon name, or a full URL                      | first letter of the name    |
+| `services[].icon`              | catalog icon name, or a full URL                      | first letter of the name    |
 | `services[].size`              | tile size in the bento view: `sm`, `md`, `lg`           | `md`                        |
 | `services[].description`       | one line under the name; also searched (max 200 chars)  | —                           |
 | `services[].tags`              | list of labels, searched; chips in list view (max 12×32) | —                          |
@@ -558,6 +607,35 @@ so point `path` at the final address. Only the first 1 MiB is searched.
 | `notify.threshold`             | failed checks in a row before we notify                 | `2`                         |
 | `discovery.docker`             | suggest services from containers                        | on when a socket is there   |
 
+### Command-line options
+
+`shyg serve` is the default command; `shyg check` runs the checks once (for
+scripts) and `shyg version` prints the version. Flags take one or two dashes
+(`-addr` or `--addr`). A flag on the command line beats its environment variable.
+
+| Flag               | Environment             | Default                           | Meaning |
+| ------------------ | ----------------------- | --------------------------------- | ------- |
+| `--config`         | `SHYG_CONFIG`           | `shygarlic.yaml`                  | the YAML config file (in the image: `/etc/shygarlic/shygarlic.yaml`) |
+| `--seed-config`    | `SHYG_SEED_CONFIG`      | none                              | copied to `--config` on start when that file does not exist yet |
+| `--addr`           | `SHYG_ADDR`             | `:8080`                           | listen address |
+| `--data`           | `SHYG_DATA`             | `shygarlic.db`                    | SQLite file with accounts and history (in the image: `/data/shygarlic.db`) |
+| `--cache`          | `SHYG_CACHE`            | `icons/` next to the database     | icon cache directory |
+| `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` next to the database        | uploaded wallpapers |
+| `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, a complete offline icon set: no downloads |
+| `--docker`         | `SHYG_DOCKER`           | `/var/run/docker.sock` if present | Docker socket or socket proxy URL (`http://host:2375`) for suggesting services |
+| `--webhook`        | `SHYG_WEBHOOK`          | none (set it in the panel)        | notification webhook address; the old name `SHYG_DISCORD_WEBHOOK` is still read |
+| `--webhook-format` | `SHYG_WEBHOOK_FORMAT`   | `discord`, unless set in the panel | `discord`, `slack`, `ntfy`, `gotify`, `telegram` or `generic` |
+| `--fail-threshold` | none                    | `2`                               | failed checks in a row before a notification; the proper place is `notify.threshold` in the file, the flag overrides it |
+| `--trusted-proxy`  | `SHYG_TRUSTED_PROXY`    | none                              | proxy networks (CIDR, comma-separated) allowed to set `X-Forwarded-For` / `-Proto` |
+| `--metrics-allow`  | `SHYG_METRICS_ALLOW`    | none (a token is required)        | networks (CIDR) that may read `/metrics` without a token |
+| `--allowed-host`   | `SHYG_ALLOWED_HOSTS`    | any                               | host names the panel answers to, comma-separated, no ports; others get `421` |
+| `--debug`          | none                    | off                               | debug logs |
+
+Two more variables have no flag: `SHYG_ADMIN_USER` and `SHYG_ADMIN_PASSWORD`
+create the first account at start (see [First run](#first-run)). `TZ` sets the
+time zone of the logs and timestamps. The install script reads `SHYG_VERSION`
+and `SHYG_BIN_DIR`.
+
 ### Where each setting lives
 
 Configuration sits in four layers. The line is not drawn by importance but by
@@ -565,22 +643,22 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--seed-config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | the [command-line options](#command-line-options) above | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
 | The SQLite database   | webhook address and format, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
 
-Every flag has an `SHYG_`-prefixed environment variable (`SHYG_ADDR`,
-`SHYG_CONFIG`, …). Settings → Instance lists all of them together with where
-each value came from: a flag, an environment variable, or the built-in default.
+Settings → Instance lists the options together with where each value came
+from: a flag, an environment variable, or the built-in default.
 
 `--seed-config` (`SHYG_SEED_CONFIG`) copies a starting config to `--config`
 on first start, only when there is no config yet — the Helm chart and the
 Kubernetes manifests use it to seed a volume from a ConfigMap. An existing config
 is never overwritten.
 
-! **The webhook address is not in the file and never will be.** The dashboard
-shows that file and commits it; the URL is a credential.
+> **Note**
+> The webhook address is not in the file and never will be. The dashboard shows
+> that file and commits it; the URL is a credential.
 
 ## Sign-in
 
@@ -589,9 +667,10 @@ shows that file and commits it; the URL is a credential.
 </p>
 
 Accounts live in SQLite with bcrypt-hashed passwords. The session is an
-`HttpOnly`, `SameSite=Strict` cookie valid for 30 days, mutating routes carry a
-CSRF token, and five failed attempts from one address lock sign-in for five
-minutes. Changing a password is rate-limited the same way. The API answers `401`
+`HttpOnly`, `SameSite=Strict` cookie valid for 30 days. Writing requests are
+accepted only from the panel's own origin: `Sec-Fetch-Site` (or, for clients
+without it, `Origin` / `Referer`) has to say so. Five failed attempts from one
+address lock sign-in for five minutes. Changing a password is rate-limited the same way. The API answers `401`
 without a session. Behind HTTPS (directly or through a trusted proxy) the panel
 also sends `Strict-Transport-Security`.
 
@@ -608,7 +687,7 @@ choice. It is shown once, with a copy button, and stored only as a SHA-256 hash
 in the database — if you lose it, revoke it and create another.
 
 A token is **read-only by construction**: the `Authorization: Bearer shyg_…`
-header is honoured only for `GET` on three routes — `/metrics`, `/api/status`
+header is honored only for `GET` on three routes — `/metrics`, `/api/status`
 and `/api/history`. Everywhere else it is ignored and the route wants a session,
 so a token that leaks from your Prometheus cannot change the config, create an
 account or mint another token. Requests without a valid token get `401`, never a
@@ -725,6 +804,7 @@ The dashboard uses exactly the same endpoints you would.
 | `GET`    | `/api/instance`                  | start-up options and where each value came from            |
 | `GET`    | `/api/discover`                  | services proposed from running containers                  |
 | `GET`    | `/api/icons?q=jelly`             | icon search                                                |
+| `GET`    | `/icon/{name}`                   | an icon, served from the server's cache                    |
 | `GET`    | `/api/config`                    | raw YAML                                                   |
 | `PUT`    | `/api/config`                    | write raw YAML (validated first)                           |
 | `POST`   | `/api/services`                  | add a service                                              |
@@ -738,6 +818,7 @@ The dashboard uses exactly the same endpoints you would.
 | `PATCH`  | `/api/groups`                    | rename a group                                             |
 | `DELETE` | `/api/groups?name=…`             | delete a group                                             |
 | `GET`    | `/api/versions`                  | change history                                             |
+| `GET`    | `/api/versions/{id}`             | one version: diff and the full file at that point          |
 | `POST`   | `/api/versions/{id}/restore`     | restore the file to that version                           |
 | `GET`    | `/api/appearance`                | the instance default look                                  |
 | `PUT`    | `/api/appearance`                | change it (goes through the diff, like any edit)           |
@@ -752,9 +833,15 @@ The dashboard uses exactly the same endpoints you would.
 | `GET`    | `/api/tokens`                    | list API tokens (never the secret itself)                  |
 | `POST`   | `/api/tokens`                    | create a token; the secret is in this one response only    |
 | `DELETE` | `/api/tokens/{id}`               | revoke a token                                             |
-| `GET`    | `/healthz`                       | liveness, the one route that needs no session              |
+| `GET`    | `/api/users`                     | list accounts                                              |
+| `POST`   | `/api/users`                     | create an account                                          |
+| `DELETE` | `/api/users/{id}`                | delete an account (and revoke the tokens it issued)        |
+| `POST`   | `/api/password`                  | change your own password                                   |
+| `GET`    | `/healthz`                       | liveness, the one API route that needs no session          |
 
-Account management (`/api/users`, `/api/password`) follows the same rules.
+Besides the API there are the pages `/` (the dashboard), `/login`, `/logout`,
+`/setup` and `/lang` (language switch), and the static files under `/assets/`;
+only `/` needs a session.
 
 Add `?dry=1` to any writing call and nothing is saved — you get the diff of what
 would have changed, which is exactly what the UI uses for its preview.
@@ -807,7 +894,7 @@ commits with the [DCO](CONTRIBUTING.md) (`git commit -s`, which adds a
 [CONTRIBUTING.md](CONTRIBUTING.md); security issues go the way
 [SECURITY.md](SECURITY.md) describes, not into a public issue.
 
-## Licence
+## License
 
 **GNU Affero General Public License v3.0 or later** — see [LICENSE](LICENSE).
 

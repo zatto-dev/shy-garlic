@@ -56,3 +56,12 @@ func TestSeedConfigMissingSeedIsAnError(t *testing.T) {
 		t.Fatal("want an error for a missing seed file")
 	}
 }
+
+func TestSeedConfigSameFileIsANoOp(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "shygarlic.yaml")
+	seeded, err := seedConfig(cfg, filepath.Join(dir, ".", "shygarlic.yaml"))
+	if err != nil || seeded {
+		t.Fatalf("seeded=%v err=%v", seeded, err)
+	}
+}

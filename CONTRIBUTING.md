@@ -3,7 +3,7 @@
 Thanks for helping out. This page covers how to build, what a good change looks
 like, and how to sign your work.
 
-## Licence
+## License
 
 Shy Garlic is licensed under the **GNU Affero General Public License v3.0 or later**.
 Contributions are accepted under the same terms. AGPL was chosen deliberately: if
@@ -19,7 +19,7 @@ Signed-off-by: Your Name <you@example.com>
 ```
 
 That line certifies that you wrote the patch or otherwise have the right to submit
-it under the project's licence. Nothing more is asked of you, and copyright stays
+it under the project's license. Nothing more is asked of you, and copyright stays
 yours. A CI check fails pull requests that contain unsigned commits. To fix
 them, run `git rebase --signoff origin/main` and force-push your branch.
 
@@ -58,6 +58,14 @@ SHYG_RDIR=/home/you/shyg-build    # directory to sync into (one per clone: rsync
 and `login.html` from `examples/homelab.yaml` into `bin/podglad/*.html` together
 with the assets and the icons, with every `/assets/...` and `/icon/...` path rewritten
 to a relative one. Open the files straight from disk, with no server and no sign-in.
+The screenshots in `docs/img/` come from these pages (demo data only: `192.168.1.x`,
+`*.home.arpa`, and the footer shows the release version):
+
+```bash
+google-chrome --headless=new --no-sandbox --hide-scrollbars --force-prefers-reduced-motion \
+  --window-size=1440,900 --force-device-scale-factor=2 --virtual-time-budget=8000 \
+  --screenshot=panel-dark.png file://$PWD/bin/podglad/index-grid-ciemny.html
+```
 
 ## What a good change looks like
 
@@ -95,7 +103,7 @@ to report it privately.
    are taken from the tag.
 
 **The GHCR packages must be public.** A package first published by a workflow in
-an organisation is created *private*, and GitHub has no API to change that. Once
+an organization is created *private*, and GitHub has no API to change that. Once
 per package (the image and the chart): Package settings -> Danger Zone -> Change
 visibility -> Public. The release jobs pull anonymously and fail with a clear
 message if a package is still private.

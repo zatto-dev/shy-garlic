@@ -77,7 +77,7 @@ keeps the chart-created PersistentVolumeClaim, so data survives an accident.
 
 Seed the dashboard from a local file. It is used only on first start, when the
 config file does not exist on the volume yet; later edits happen in the panel
-(Settings -> Config).
+(Settings → File).
 
 ```bash
 helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
