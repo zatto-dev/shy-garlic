@@ -49,7 +49,12 @@
              autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}"
              {{if .Setup}}minlength="8"{{end}}>
     </label>
-    {{if .Setup}}<p class="gate-hint">{{.T.min_8}}</p>{{end}}
+    {{if .Setup}}<p class="gate-hint">{{.T.min_8}}</p>
+    <label>
+      <span>{{.T.setup_token}}</span>
+      <input name="setup_token" required autocomplete="off" autocapitalize="none" spellcheck="false">
+    </label>
+    <p class="gate-hint">{{.T.setup_token_hint}}</p>{{end}}
     <button type="submit" class="btn btn--primary btn--lg">{{if .Setup}}{{.T.zaloz_konto}}{{else}}{{.T.zaloguj}}{{end}}</button>
   </form>
 

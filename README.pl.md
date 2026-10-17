@@ -320,7 +320,7 @@ shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
 ### Ze źródeł
 
 ```bash
-go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.25
+go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.27
 ```
 
 ### Kubernetes / Talos Linux
@@ -389,6 +389,36 @@ usługi bierze się z pliku configu.
 Pierwsze wejście prowadzi na `/setup`, gdzie zakładasz konto administratora.
 Dopóki baza jest pusta, panel nie wpuszcza nikogo dalej; gdy konto już istnieje,
 `/setup` jest zamknięty.
+
+Założenie konta wymaga **tokenu instalacji**, który dowodzi, że to Ty prowadzisz
+instancję, a nie ten, kto pierwszy trafił na port. Panel wypisuje go w logu przy
+starcie:
+
+```bash
+docker logs shyg 2>&1 | grep setup_token                      # Docker
+kubectl -n shy-garlic logs deploy/shy-garlic | grep setup_token # Kubernetes
+```
+
+```text
+level=WARN msg="first run: no account exists yet. Open /setup and enter this setup token …" setup_token=3f9c01ab-5d27e4c1-9a0b7d33-c1e8f642
+```
+
+Wklej go w pole *Token instalacji*. Token żyje tylko w pamięci: restart przed
+założeniem konta wypisze nowy, a po założeniu konta jest wyrzucany. Ustawienie
+`SHYG_ADMIN_USER` i `SHYG_ADMIN_PASSWORD` zakłada konto przy starcie i pomija
+`/setup` (razem z tokenem).
+
+Żeby panel odpowiadał tylko na nazwę, pod którą go otwierasz, ustaw
+`--allowed-host` / `SHYG_ALLOWED_HOSTS` na listę nazw hostów rozdzielonych
+przecinkami (bez portów), np. `SHYG_ALLOWED_HOSTS=dash.example.org,dash.lan`.
+Żądanie z innym `Host` dostaje `421 Misdirected Request`; to zatrzymuje
+złośliwą stronę internetową, która próbuje dobić się do panelu w Twojej sieci
+przez DNS rebinding. `localhost`, `127.0.0.1` i `::1` działają zawsze. Pusta
+lista (domyślnie) oznacza brak kontroli. Za reverse proxy lista musi zawierać
+nazwę, którą proxy przekazuje w `Host`; scrapery otwierające `/metrics` po
+adresie IP potrzebują tego adresu na liście (albo muszą wysyłać dozwolony
+nagłówek `Host`). `/healthz` jest wyłączony z kontroli, więc sondy kontenera i
+Kubernetesa działają.
 
 Za reverse proxy (Traefik, Caddy, Pangolin) ustaw `--trusted-proxy` /
 `SHYG_TRUSTED_PROXY` na jego sieć, np. `10.0.0.0/8`. Bez tego `X-Forwarded-For` i
@@ -519,8 +549,8 @@ czego prowadzi karta.
 | `appearance.background.dim`    | przyciemnienie pod treścią w %, `0`–`80`                | `50`                         |
 | `appearance.background.tone`   | jasność tekstu: `dark` albo `light`                     | `dark`                       |
 | `appearance.view`              | `grid`, `bento` albo `list`                             | `grid`                       |
-| `check.interval`               | co ile sprawdzać                                        | `30s`                        |
-| `check.timeout`                | ile czekać na odpowiedź                                 | `5s`                         |
+| `check.interval`               | co ile sprawdzać; od 1 s do 24 h, inna wartość wraca do domyślnej i jest zgłoszona w banerze | `30s`                        |
+| `check.timeout`                | ile czekać na odpowiedź; od 1 s do 24 h, ta sama zasada | `5s`                         |
 | `check.expect`                 | kody uznawane za „żyje"                                 | `[200, 301, 302, 401, 403]`  |
 | `check.insecure`               | ignoruj błędy certyfikatu                               | `false`                      |
 | `check.path`                   | ścieżka (i query) pytana zamiast tej z `url`; zaczyna się od `/`, ten sam host | —                    |
@@ -536,7 +566,7 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 
 | Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
 | Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
 | Baza SQLite                  | adres i format webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
 | Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
@@ -556,8 +586,10 @@ commituje, a URL jest poświadczeniem.
 
 Konta mieszkają w SQLite, hasła haszowane bcryptem. Sesja to ciasteczko
 `HttpOnly`, `SameSite=Strict` ważne 30 dni, trasy zapisujące niosą token CSRF, a
-pięć nieudanych prób z jednego adresu blokuje logowanie na pięć minut. API bez
-sesji odpowiada `401`.
+pięć nieudanych prób z jednego adresu blokuje logowanie na pięć minut. Zmiana
+hasła ma taki sam limit prób. API bez sesji odpowiada `401`. Za HTTPS
+(bezpośrednio albo przez zaufane proxy) panel wysyła też
+`Strict-Transport-Security`.
 
 Nie ma uprawnień per użytkownik: każde konto może wszystko. Przed czym panel się
 broni, a przed czym nie, i jak zakłada, że go wdrożysz, spisane jest w

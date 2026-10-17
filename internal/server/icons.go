@@ -659,17 +659,31 @@ func blockLocalAddresses(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
+// notPublic lists ranges that look routable but are not the open internet — or
+// that tunnel to an address the filter below would block if it saw it directly.
+// The stdlib helpers (IsPrivate, IsLoopback, …) do not know them.
+var notPublic = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),      // "this network"; 0.x.x.x connects to the local host on Linux
+	netip.MustParsePrefix("100.64.0.0/10"),  // CGNAT
+	netip.MustParsePrefix("192.0.0.0/24"),   // IETF protocol assignments
+	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking, used for fake-IP DNS by some VPNs
+	netip.MustParsePrefix("240.0.0.0/4"),    // reserved, incl. 255.255.255.255
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64: embeds an IPv4 address (10.0.0.1 → 64:ff9b::a00:1)
+	netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64
+	netip.MustParsePrefix("2002::/16"),      // 6to4: embeds an IPv4 address
+	netip.MustParsePrefix("2001::/32"),      // Teredo: embeds an IPv4 address
+}
+
 func publicAddress(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	ip = ip.Unmap().WithZone("")
 	switch {
 	case ip.IsLoopback(), ip.IsPrivate(), ip.IsUnspecified(),
 		ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast(),
 		ip.IsInterfaceLocalMulticast(), ip.IsMulticast():
 		return false
 	}
-	if ip.Is4() {
-		b := ip.As4()
-		if b[0] == 100 && b[1] >= 64 && b[1] <= 127 { // CGNAT 100.64/10
+	for _, p := range notPublic {
+		if p.Contains(ip) {
 			return false
 		}
 	}

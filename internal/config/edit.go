@@ -351,6 +351,14 @@ func (d *Document) setEmptyList(group string) error {
 
 // AddGroup appends a new, empty group to the end of the group list.
 func (d *Document) AddGroup(name string) error {
+	prev := d.src
+	if err := d.addGroup(name); err != nil {
+		return err
+	}
+	return d.verifyLoads(prev, func(cfg *Config) bool { return hasGroup(cfg, name) })
+}
+
+func (d *Document) addGroup(name string) error {
 	if name == "" {
 		return errors.New("group name is required")
 	}

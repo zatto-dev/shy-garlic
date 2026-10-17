@@ -473,7 +473,11 @@ func (s *Server) handleBackgroundUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	// the server has no ReadTimeout (deliberately, because of SSE), so one infinitely
 	// slow body would hold a goroutine forever
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(uploadTimeout))
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(uploadTimeout))
+	// the server's WriteTimeout starts when the headers arrive; a slow upload must
+	// still get to write its answer
+	_ = rc.SetWriteDeadline(time.Now().Add(uploadTimeout + 30*time.Second))
 
 	// r.MultipartReader, NEVER ParseMultipartForm: the latter spills the excess
 	// to os.TempDir() and clogs the container's writable layer

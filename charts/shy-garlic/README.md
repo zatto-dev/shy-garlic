@@ -46,6 +46,7 @@ keeps the chart-created PersistentVolumeClaim, so data survives an accident.
 | `admin.existingSecretUserKey` | `SHYG_ADMIN_USER` | Key holding the user name. |
 | `admin.existingSecretPasswordKey` | `SHYG_ADMIN_PASSWORD` | Key holding the password. |
 | `admin.username` / `admin.password` | `""` | Let the chart create the Secret (both required). Prefer `existingSecret`: values end up in Helm release history. |
+| `allowedHosts` | `[]` | Host names the panel answers to (`SHYG_ALLOWED_HOSTS`); other `Host` headers get `421` (DNS rebinding protection). `/healthz` is exempt for probes; `/metrics` is not, so a scraper must send an allowed `Host` or be added here. |
 | `trustedProxy` | `""` | Comma-separated CIDRs of the ingress/proxy allowed to set `X-Forwarded-For`/`-Proto`. Set it when using `ingress` or `httpRoute`. |
 | `extraEnv` | `[]` | Extra environment variables (`SHYG_WEBHOOK`, `SHYG_ICONS`, ...). No credentials here. |
 | `extraEnvFrom` | `[]` | Extra `envFrom` sources, e.g. a Secret. |

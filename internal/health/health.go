@@ -19,14 +19,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zatto-dev/shy-garlic/internal/netguard"
 )
 
 type State string
@@ -100,7 +104,7 @@ func New() *Monitor {
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: skipVerify},
 			DisableKeepAlives:   false,
 			MaxIdleConnsPerHost: 2,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			DialContext:         netguard.Dialer(5 * time.Second).DialContext,
 		}
 	}
 	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -194,16 +198,35 @@ func (m *Monitor) loop(ctx context.Context, t Target) {
 	case <-time.After(jitter):
 	}
 
-	tick := time.NewTicker(t.Interval)
+	// ! A ticker panics on a non-positive period, and a panic in this goroutine
+	// takes the whole process down. Config validation already keeps such values
+	// out; this is the last line, for Targets built any other way.
+	tick := time.NewTicker(max(t.Interval, minInterval))
 	defer tick.Stop()
 	for {
-		m.record(t.Key, Check(ctx, m.clientFor(t), t))
+		m.record(t.Key, m.safeCheck(ctx, t))
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
 		}
 	}
+}
+
+// minInterval — the floor for the check period, whatever the Target says.
+// A variable only so tests can run fast loops.
+var minInterval = time.Second
+
+// safeCheck runs one check and turns a panic into a failed result with a log
+// entry, so one broken target cannot stop its own loop or the process.
+func (m *Monitor) safeCheck(ctx context.Context, t Target) (r Result) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("health check panicked", "key", t.Key, "panic", p)
+			r = Result{State: StateDown, Err: "internal error", At: time.Now()}
+		}
+	}()
+	return Check(ctx, m.clientFor(t), t)
 }
 
 func (m *Monitor) clientFor(t Target) *http.Client {
@@ -314,8 +337,15 @@ func Check(ctx context.Context, client *http.Client, t Target) Result {
 	}
 	res.Latency = time.Since(start)
 	res.MS = res.Latency.Milliseconds()
+	res.Err = userinfoInText.ReplaceAllString(res.Err, "$1")
 	return res
 }
+
+// userinfoInText finds user[:password]@ after a scheme in free text. Errors from
+// net/http quote the requested URL, and Result.Err ends up in /api/status, in
+// the history and in notifications — the check itself keeps the credentials, its
+// output must not.
+var userinfoInText = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s"'?#]*@`)
 
 // checkURL builds the address we actually query: the service URL, and when
 // Path is set — with its path and query replaced. Scheme, host, port and login
@@ -428,8 +458,7 @@ func shorten(s string) string {
 }
 
 func checkTCP(ctx context.Context, host string, res Result) Result {
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", host)
+	conn, err := netguard.Dialer(0).DialContext(ctx, "tcp", host)
 	if err != nil {
 		res.State, res.Err = StateDown, shortError(err)
 		return res

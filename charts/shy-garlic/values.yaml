@@ -40,7 +40,8 @@ config:
   initial: ""
 
 # ── Administrator account ───────────────────────────────────────────────────
-# By default nothing is set: the first visit to /setup creates the admin.
+# By default nothing is set: the first visit to /setup creates the admin (it needs
+# the setup token from the pod's log).
 # Optionally create the account at start-up from a Secret.
 admin:
   # Name of an existing Secret with the keys below. Takes precedence over
@@ -60,6 +61,13 @@ admin:
 # `ingress` or `httpRoute`, otherwise the sign-in rate limiter sees the
 # proxy's address for every visitor.
 trustedProxy: ""
+
+# Host names the panel answers to (SHYG_ALLOWED_HOSTS), e.g. ["dash.example.org"].
+# Any other Host gets 421, which stops DNS rebinding. Empty = no check.
+# ! /healthz is exempt (kubelet probes send the pod IP), but /metrics is NOT: a
+# Prometheus scraper must send an allowed Host header, or its name/IP has to be
+# added to this list. Loopback names always work.
+allowedHosts: []
 
 # Extra environment variables (SHYG_WEBHOOK, SHYG_ICONS, ...).
 # ! Do not put credentials here - use extraEnvFrom with a Secret.
