@@ -926,7 +926,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg
 	s.mu.RUnlock()
 	if cfg == nil {
-		http.Error(w, "config not loaded", http.StatusServiceUnavailable)
+		plainError(w, r, http.StatusServiceUnavailable, "error_not_loaded")
 		return
 	}
 
@@ -1066,12 +1066,12 @@ func (d *deadlineWriter) flush() error {
 // handleEvents is the SSE stream — the panel gets changes immediately, without polling.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if _, ok := w.(http.Flusher); !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		plainError(w, r, http.StatusInternalServerError, "error_internal")
 		return
 	}
 	// each stream holds a goroutine, a monitor subscription and a connection
 	if !s.acquireStream(r) {
-		http.Error(w, "too many open streams", http.StatusTooManyRequests)
+		plainError(w, r, http.StatusTooManyRequests, "error_too_many_streams")
 		return
 	}
 	defer s.releaseStream(r)

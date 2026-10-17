@@ -52,7 +52,7 @@ func denyWithoutSession(w http.ResponseWriter, r *http.Request) {
 	if tokenRoute(r) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="Shy Garlic"`)
 	}
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	plainError(w, r, http.StatusUnauthorized, "error_unauthorized")
 }
 
 // ── limits and logs of failed attempts ───────────────────────────────────────
@@ -90,7 +90,7 @@ func (s *Server) authenticateToken(w http.ResponseWriter, r *http.Request) bool 
 	ip := ipAddress(r)
 	if !s.tokenLimiter.allow(ip) {
 		w.Header().Set("Retry-After", "300")
-		http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+		plainError(w, r, http.StatusTooManyRequests, "error_too_many_failed")
 		return false
 	}
 	token, _ := bearerFromHeader(r)
@@ -190,7 +190,7 @@ func toAPIToken(t store.APIToken) tokenAPI {
 func (s *Server) handleTokensList(w http.ResponseWriter, r *http.Request) {
 	list, err := s.st.APITokens(r.Context())
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	out := make([]tokenAPI, 0, len(list))
@@ -206,7 +206,7 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	author := ""
@@ -222,7 +222,7 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, i18n.T(lang, "error_token_limit"))
 		return
 	case err != nil:
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	slog.Info("API token created", "name", entry.Name, "author", author)
@@ -237,15 +237,15 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTokenDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "bad id")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_id")
 		return
 	}
 	if err := s.st.RemoveAPIToken(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrTokenNotFound) {
-			jsonError(w, http.StatusNotFound, err.Error())
+			apiError(w, r, err)
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	s.usageMu.Lock()

@@ -127,7 +127,7 @@ func requireAllowedHost(allowed map[string]bool, next http.Handler) http.Handler
 		}
 		h := hostOnly(r.Host)
 		if !allowed[h] && !loopbackHost(h) {
-			http.Error(w, "misdirected request: this host name is not allowed (see --allowed-host)", http.StatusMisdirectedRequest)
+			plainError(w, r, http.StatusMisdirectedRequest, "error_host_not_allowed")
 			return
 		}
 		next.ServeHTTP(w, r)
