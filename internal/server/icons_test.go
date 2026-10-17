@@ -149,7 +149,7 @@ func sampleMetadata(t *testing.T) []byte {
 }
 
 // TestRefreshFetchesVariantsAlsoWithCachedIndex recreates the most common
-// production case: the process restarts with a warm cache (spis.json
+// production case: the process restarts with a warm cache (index.json
 // fresher than a week), so Refresh takes the name list from disk without
 // going out to the network — but the light/dark variants have no cache file of
 // their own and MUST still be fetched from metadata.json, otherwise after a restart
@@ -161,11 +161,11 @@ func TestRefreshFetchesVariantsAlsoWithCachedIndex(t *testing.T) {
 		w.Write(sampleMetadata(t))
 	})
 
-	// spis.json already lies on disk and is fresh — Refresh should use it without the
+	// index.json already lies on disk and is fresh — Refresh should use it without the
 	// network for the LIST OF NAMES, but that does not excuse it from fetching the variants.
 	index, _ := json.Marshal(map[string]string{"dagster": "svg", "jellyfin": "svg"})
-	if err := os.WriteFile(filepath.Join(dir, "spis.json"), index, 0o644); err != nil {
-		t.Fatalf("preparing spis.json: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "index.json"), index, 0o644); err != nil {
+		t.Fatalf("preparing index.json: %v", err)
 	}
 
 	k.Refresh(context.Background())
@@ -174,7 +174,7 @@ func TestRefreshFetchesVariantsAlsoWithCachedIndex(t *testing.T) {
 		t.Fatalf("Count() = %d, want 2 (from the on-disk cache, no network)", k.Count())
 	}
 	if metadataCalls == 0 {
-		t.Fatal("Refresh did NOT try to fetch metadata.json despite a fresh spis.json on disk — variants would stay empty after every restart")
+		t.Fatal("Refresh did NOT try to fetch metadata.json despite a fresh index.json on disk — variants would stay empty after every restart")
 	}
 	if dark, light := k.Variants("dagster"); dark != "dagster-dark" || light != "dagster-light" {
 		t.Errorf("Variants(dagster) after Refresh() = (%q, %q), want (dagster-dark, dagster-light)", dark, light)

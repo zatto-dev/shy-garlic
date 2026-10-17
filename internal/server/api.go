@@ -109,11 +109,11 @@ func (s *Server) withEditOpen(w http.ResponseWriter, r *http.Request, descriptio
 			code = http.StatusNotFound
 		case errors.Is(err, config.ErrDuplicate):
 			code = http.StatusConflict
-			message = i18n.T(i18n.FromRequest(r), "blad_duplikat_nazwy")
+			message = i18n.T(i18n.FromRequest(r), "error_name_duplicate")
 		case errors.Is(err, config.ErrInheritedField):
-			message = i18n.T(i18n.FromRequest(r), "blad_pole_dziedziczone")
+			message = i18n.T(i18n.FromRequest(r), "error_field_inherited")
 		case errors.Is(err, config.ErrUnsupportedLayout):
-			message = i18n.T(i18n.FromRequest(r), "blad_uklad_pliku")
+			message = i18n.T(i18n.FromRequest(r), "error_file_layout")
 		}
 		jsonError(w, code, message)
 		return false
@@ -141,7 +141,7 @@ func (s *Server) withEditOpen(w http.ResponseWriter, r *http.Request, descriptio
 
 	if err := d.Save(); err != nil {
 		if errors.Is(err, config.ErrChangedOnDisk) {
-			jsonError(w, http.StatusConflict, i18n.T(i18n.FromRequest(r), "konflikt_pliku"))
+			jsonError(w, http.StatusConflict, i18n.T(i18n.FromRequest(r), "file_conflict"))
 			return false
 		}
 		jsonError(w, http.StatusInternalServerError, "save failed: "+err.Error())
@@ -216,16 +216,16 @@ func (req serviceRequest) descriptionAndTags() (description *string, tags *[]str
 		v, err := config.NormalizeDescription(*req.Description)
 		switch {
 		case errors.Is(err, config.ErrDescriptionTooLong):
-			return nil, nil, "blad_opis_dlugi"
+			return nil, nil, "error_description_long"
 		case err != nil:
-			return nil, nil, "blad_opis_znaki"
+			return nil, nil, "error_description_chars"
 		}
 		description = &v
 	}
 	if req.Tags != nil {
 		v, err := config.NormalizeTags(*req.Tags)
 		if err != nil {
-			return nil, nil, "blad_tagi"
+			return nil, nil, "error_tags"
 		}
 		tags = &v
 	}
@@ -299,7 +299,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !config.ValidServiceAddress(req.URL) {
-		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "error_service_address"))
 		return
 	}
 	check, checkKey := req.parseCheck()
@@ -321,7 +321,7 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	svc.Check = check
 
-	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_usluge"), req.Name, req.Group)
+	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_service_added"), req.Name, req.Group)
 	if s.withEdit(w, r, description, func(d *config.Document) error { return d.AddService(req.Group, svc) }) {
 		jsonReply(w, http.StatusCreated, map[string]any{"ok": true})
 	}
@@ -347,14 +347,14 @@ func (req serviceRequest) parseCheck() (config.Check, string) {
 		v, err := time.ParseDuration(t)
 		// below one second the ticker would flood the checked service
 		if err != nil || v < config.MinCheckDuration || v > config.MaxCheckDuration {
-			return c, "blad_czas_sprawdzania"
+			return c, "error_check_duration"
 		}
 		*f.out = config.Duration(v)
 	}
 	if req.Expect != nil {
 		for _, k := range *req.Expect {
 			if k < 100 || k > 599 {
-				return c, "blad_kody_http"
+				return c, "error_http_codes"
 			}
 		}
 		c.Expect = *req.Expect
@@ -422,7 +422,7 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	if !config.ValidServiceAddress(req.URL) {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_service_address"))
 		return
 	}
 	newDescription, newTags, errorKey := req.descriptionAndTags()
@@ -460,9 +460,9 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, i18n.T(lang, errorKey))
 		return
 	}
-	description := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_usluge"), req.Name)
+	description := fmt.Sprintf(i18n.T(lang, "desc_service_changed"), req.Name)
 	if req.NewGroup != "" && req.NewGroup != req.Group {
-		description = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), req.Name, req.Group, req.NewGroup)
+		description = fmt.Sprintf(i18n.T(lang, "desc_service_moved"), req.Name, req.Group, req.NewGroup)
 	}
 	// ! pairs computed NOW — fn below overwrites req.Group with the new group
 	newGroup, newName := req.Group, req.Name
@@ -534,7 +534,7 @@ func (s *Server) handleServiceDelete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "provide group and name")
 		return
 	}
-	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_usunieto_usluge"), name, group)
+	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_service_deleted"), name, group)
 	if s.withEdit(w, r, description, func(d *config.Document) error { return d.RemoveService(group, name) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -559,12 +559,12 @@ func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validEntryName(req.Group) || !validEntryName(req.Name) ||
 		!validEntryName(req.ToGroup) || req.Index == nil {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_move"))
 		return
 	}
-	description := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_uslugi"), req.Name, req.ToGroup, *req.Index+1)
+	description := fmt.Sprintf(i18n.T(lang, "desc_service_reordered"), req.Name, req.ToGroup, *req.Index+1)
 	if req.ToGroup != req.Group {
-		description = fmt.Sprintf(i18n.T(lang, "opis_przeniesiono"), req.Name, req.Group, req.ToGroup)
+		description = fmt.Sprintf(i18n.T(lang, "desc_service_moved"), req.Name, req.Group, req.ToGroup)
 	}
 	pairs := map[string]string{key(req.Group, req.Name): key(req.ToGroup, req.Name)}
 	if s.withEditKeys(w, r, description, func(*config.Config) map[string]string { return pairs },
@@ -587,10 +587,10 @@ func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validEntryName(req.Name) || req.Index == nil {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_przenoszenie"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_move"))
 		return
 	}
-	description := fmt.Sprintf(i18n.T(lang, "opis_kolejnosc_grupy"), req.Name, *req.Index+1)
+	description := fmt.Sprintf(i18n.T(lang, "desc_group_reordered"), req.Name, *req.Index+1)
 	if s.withEdit(w, r, description, func(d *config.Document) error { return d.MoveGroup(req.Name, *req.Index) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -611,17 +611,17 @@ func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
 	}
 	title, err := config.NormalizeTitle(req.Title)
 	if err != nil {
-		key := "blad_tytul_znaki"
+		key := "error_title_chars"
 		switch {
 		case errors.Is(err, config.ErrTitleEmpty):
-			key = "blad_tytul_pusty"
+			key = "error_title_empty"
 		case errors.Is(err, config.ErrTitleTooLong):
-			key = "blad_tytul_dlugi"
+			key = "error_title_long"
 		}
 		jsonError(w, http.StatusBadRequest, i18n.T(lang, key))
 		return
 	}
-	description := fmt.Sprintf(i18n.T(lang, "opis_tytul"), title)
+	description := fmt.Sprintf(i18n.T(lang, "desc_title_changed"), title)
 	if s.withEdit(w, r, description, func(d *config.Document) error { return d.SetTitle(title) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true, "title": title})
 	}
@@ -641,7 +641,7 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
 		return
 	}
-	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_grupe"), req.Name),
+	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_group_added"), req.Name),
 		func(d *config.Document) error { return d.AddGroup(req.Name) }) {
 		jsonReply(w, http.StatusCreated, map[string]any{"ok": true})
 	}
@@ -677,7 +677,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		return pairs
 	}
-	if s.withEditKeys(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_zmieniono_grupe"), req.Name, req.NewName),
+	if s.withEditKeys(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_group_renamed"), req.Name, req.NewName),
 		migrate, func(d *config.Document) error { return d.RenameGroup(req.Name, req.NewName) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -689,7 +689,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "provide name")
 		return
 	}
-	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_usunieto_grupe"), name),
+	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_group_deleted"), name),
 		func(d *config.Document) error { return d.RemoveGroup(name) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -720,7 +720,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid YAML: "+err.Error())
 		return
 	}
-	if s.withEditOpen(w, r, i18n.T(i18n.FromRequest(r), "opis_reczna_edycja"), nil, config.OpenRaw,
+	if s.withEditOpen(w, r, i18n.T(i18n.FromRequest(r), "desc_manual_edit"), nil, config.OpenRaw,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(req.YAML)) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -746,7 +746,7 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonReply(w, http.StatusOK, map[string]any{
 		"icons":    names,
-		"warianty": variants,
+		"variants": variants,
 		"total":    s.icons.Count(),
 		"mode":     s.icons.Mode(),
 	})
@@ -867,7 +867,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	limit := fmt.Sprintf("password:%d:%s", me.ID, ip)
 	if !s.lim.allow(limit) {
 		slog.Warn("too many password change attempts", "login", me.Login, "ip", ip)
-		jsonError(w, http.StatusTooManyRequests, i18n.T(i18n.FromRequest(r), "za_duzo_prob"))
+		jsonError(w, http.StatusTooManyRequests, i18n.T(i18n.FromRequest(r), "too_many_attempts"))
 		return
 	}
 	if _, err := s.st.Authenticate(r.Context(), me.Login, req.Old); err != nil {
@@ -949,7 +949,7 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "this version does not parse: "+err.Error())
 		return
 	}
-	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_przywrocono"), v.ID, v.Description)
+	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_version_restored"), v.ID, v.Description)
 	if s.withEditOpen(w, r, description, nil, config.OpenRaw,
 		func(d *config.Document) error { return d.ReplaceAll([]byte(v.Content)) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
@@ -1036,7 +1036,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	icon := s.resolveIcon(svc.Icon, svc.Name)
 	jsonReply(w, http.StatusOK, map[string]any{
 		"key": serviceKey, "name": svc.Name, "group": group, "url": config.RedactURL(svc.URL), "icon": svc.Icon,
-		"iconSrc": icon.Src, "iconWariantCiemny": icon.VariantDark, "iconWariantJasny": icon.VariantLight,
+		"iconSrc": icon.Src, "iconVariantDark": icon.VariantDark, "iconVariantLight": icon.VariantLight,
 		"size": svc.Size, "description": svc.Description, "tags": tagsToJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
 		"expect": svc.Check.Expect, "insecure": svc.Check.Insecure,
@@ -1088,11 +1088,11 @@ func webhookMask(address string) string {
 func (s *Server) webhookSource() string {
 	switch {
 	case s.webhookFromEnv:
-		return "srodowisko"
+		return "env"
 	case s.notifier.Webhook() != "":
-		return "baza"
+		return "database"
 	default:
-		return "brak"
+		return "none"
 	}
 }
 
@@ -1102,35 +1102,35 @@ func (s *Server) handleNotifyGet(w http.ResponseWriter, r *http.Request) {
 		formats[i] = string(f)
 	}
 	jsonReply(w, http.StatusOK, map[string]any{
-		"wlaczony":     s.notifier.Enabled(),
+		"enabled":      s.notifier.Enabled(),
 		"webhook":      webhookMask(s.notifier.Webhook()),
-		"zrodlo":       s.webhookSource(),
+		"source":       s.webhookSource(),
 		"format":       string(s.notifier.Format()),
-		"formatZrodlo": s.formatSource(r.Context()),
-		"formaty":      formats,
-		"prog":         s.notifier.Threshold(),
+		"formatSource": s.formatSource(r.Context()),
+		"formats":      formats,
+		"threshold":    s.notifier.Threshold(),
 	})
 }
 
 func (s *Server) formatSource(ctx context.Context) string {
 	if s.formatFromEnv {
-		return "srodowisko"
+		return "env"
 	}
 	if v, err := s.st.Setting(ctx, "notify.format"); err == nil && v != "" {
-		return "baza"
+		return "database"
 	}
-	return "domyslny"
+	return "default"
 }
 
 // error text key for an address that does not match the format
 func formatAddressError(err error) string {
 	switch {
 	case errors.Is(err, notify.ErrTelegramAddress):
-		return "webhook_adres_telegram"
+		return "webhook_address_telegram"
 	case errors.Is(err, notify.ErrGotifyAddress):
-		return "webhook_adres_gotify"
+		return "webhook_address_gotify"
 	}
-	return "webhook_zly_adres"
+	return "webhook_bad_address"
 }
 
 // handleNotifyPut writes to TWO layers at once: address and format to SQLite (the
@@ -1145,7 +1145,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Webhook   *string `json:"webhook"`
 		Format    *string `json:"format"`
-		Threshold *int    `json:"prog"`
+		Threshold *int    `json:"threshold"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad JSON")
@@ -1153,16 +1153,16 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Webhook != nil && s.webhookFromEnv {
-		jsonError(w, http.StatusConflict, i18n.T(lang, "webhook_ze_srodowiska"))
+		jsonError(w, http.StatusConflict, i18n.T(lang, "webhook_from_env"))
 		return
 	}
 	if req.Format != nil {
 		if s.formatFromEnv {
-			jsonError(w, http.StatusConflict, i18n.T(lang, "webhook_format_ze_srodowiska"))
+			jsonError(w, http.StatusConflict, i18n.T(lang, "webhook_format_from_env"))
 			return
 		}
 		if !notify.ValidFormat(*req.Format) {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_format"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_bad_format"))
 			return
 		}
 	}
@@ -1176,13 +1176,13 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 			// choice belongs to the deploy, not to a click.
 			u, err := url.Parse(address)
 			if err != nil || u.Scheme != "https" || u.Host == "" {
-				jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_adres"))
+				jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_bad_address"))
 				return
 			}
 		}
 	}
 	if req.Threshold != nil && (*req.Threshold < 1 || *req.Threshold > 10) {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_zly_prog"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "webhook_bad_threshold"))
 		return
 	}
 	// the address must match the format — we check the pair in the state it will be in
@@ -1222,7 +1222,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Threshold != nil {
-		if !s.withEdit(w, r, "próg powiadomień", func(d *config.Document) error {
+		if !s.withEdit(w, r, i18n.T(lang, "desc_notify_threshold"), func(d *config.Document) error {
 			return d.SetNotifyThreshold(*req.Threshold)
 		}) {
 			return
@@ -1235,12 +1235,12 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 
 // handleInstance lists the start-up options — read-only.
 func (s *Server) handleInstance(w http.ResponseWriter, r *http.Request) {
-	jsonReply(w, http.StatusOK, map[string]any{"opcje": s.instance})
+	jsonReply(w, http.StatusOK, map[string]any{"options": s.instance})
 }
 
 func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 	if !s.notifier.Enabled() {
-		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "webhook_zrodlo_brak"))
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "webhook_not_set"))
 		return
 	}
 	if err := s.notifier.Test(r.Context()); err != nil {
@@ -1273,10 +1273,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		// Disabled in the file is not the same as a missing socket: the user chose the
 		// first one themselves and the entry should disappear, the second is the state of
 		// the environment and the entry should fade, so it is visible that it exists at all.
-		"dockerWylaczony": !s.dockerEnabled(),
-		"dockerNew":       s.newInDockerCount(r.Context(), host),
-		"backgrounds":     s.backgrounds.Available(),
-		"appearance":      s.instanceAppearance().toAPI(),
+		"dockerDisabled": !s.dockerEnabled(),
+		"dockerNew":      s.newInDockerCount(r.Context(), host),
+		"backgrounds":    s.backgrounds.Available(),
+		"appearance":     s.instanceAppearance().toAPI(),
 	})
 }
 
@@ -1366,7 +1366,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	targetPreset, targetImage := current.Preset, current.Image
 	if req.Preset != nil {
 		if !config.Allowed(*req.Preset, config.BackgroundPresets) {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		}
 		targetPreset = *req.Preset
@@ -1375,7 +1375,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Tone != nil {
 		if !config.Allowed(*req.Tone, config.BackgroundTones) {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		}
 		fields["tone"] = *req.Tone
@@ -1383,7 +1383,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.View != nil {
 		if !config.Allowed(*req.View, config.Views) {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		}
 		fields["view"] = *req.View
@@ -1391,7 +1391,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Blur != nil {
 		if *req.Blur < 0 || *req.Blur > config.MaxBlur {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		}
 		fields["blur"] = strconv.Itoa(*req.Blur)
@@ -1399,7 +1399,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Dim != nil {
 		if *req.Dim < 0 || *req.Dim > config.MaxDim {
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		}
 		fields["dim"] = strconv.Itoa(*req.Dim)
@@ -1411,10 +1411,10 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 		case image == "":
 			// clearing the reference — valid for every preset
 		case !config.BackgroundName.MatchString(image), targetPreset != config.PresetPhoto:
-			jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 			return
 		case !s.backgrounds.Exists(image):
-			jsonError(w, http.StatusNotFound, i18n.T(lang, "blad_wygladu"))
+			jsonError(w, http.StatusNotFound, i18n.T(lang, "error_appearance"))
 			return
 		}
 		targetImage = image
@@ -1422,7 +1422,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 		changes = append(changes, "image="+image)
 	}
 	if targetPreset == config.PresetPhoto && targetImage == "" {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 		return
 	}
 	if len(fields) == 0 {
@@ -1430,7 +1430,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	description := fmt.Sprintf(i18n.T(lang, "opis_zmieniono_wyglad"), strings.Join(changes, ", "))
+	description := fmt.Sprintf(i18n.T(lang, "desc_appearance_changed"), strings.Join(changes, ", "))
 	if s.withEdit(w, r, description, func(d *config.Document) error { return d.SetAppearance(fields) }) {
 		jsonReply(w, http.StatusOK, map[string]any{"ok": true})
 	}
@@ -1462,7 +1462,7 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	// disabled it yourself", 404 "there is no socket" — mixing them forces the user to
 	// guess whether to look for the error in the file or in the volume.
 	if !s.dockerEnabled() {
-		jsonError(w, http.StatusForbidden, i18n.T(i18n.FromRequest(r), "docker_wylaczony"))
+		jsonError(w, http.StatusForbidden, i18n.T(i18n.FromRequest(r), "docker_disabled"))
 		return
 	}
 	if s.docker == nil || !s.docker.Available() {
@@ -1547,7 +1547,7 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !config.ValidServiceAddress(u.URL) {
-			jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
+			jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "error_service_address"))
 			return
 		}
 		if _, _, err := u.descriptionAndTags(); err != "" {
@@ -1560,7 +1560,7 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_wiele"), len(req.Services), req.Group)
+	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_services_added"), len(req.Services), req.Group)
 	ok := s.withEdit(w, r, description, func(d *config.Document) error {
 		for _, u := range req.Services {
 			group := u.Group

@@ -86,7 +86,7 @@ func TestContentCheckFromConfigToResult(t *testing.T) {
 func TestContentCheckTextsHaveBothLanguages(t *testing.T) {
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)
-		for _, k := range []string{"chip_tresc", "powod_stanu", "kontrola_get", "kontrola_zawiera", "kontrola_nie_zawiera"} {
+		for _, k := range []string{"chip_content", "state_reason", "check_get", "check_contains", "check_not_contains"} {
 			if v := m[k]; v == "" || v == k {
 				t.Errorf("%s: missing text %q", l, k)
 			}

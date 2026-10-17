@@ -121,7 +121,7 @@ func TestAPITokensNameValidation(t *testing.T) {
 		}
 	}
 	w := send(h, c, "POST", "/api/tokens", `{"name":""}`, "Accept-Language", "pl")
-	if !strings.Contains(w.Body.String(), i18n.T(i18n.PL, "blad_token_nazwa")[:20]) {
+	if !strings.Contains(w.Body.String(), i18n.T(i18n.PL, "error_token_name")[:20]) {
 		t.Errorf("message in Polish: %s", w.Body)
 	}
 }
@@ -442,9 +442,9 @@ func TestIPAddressTakesRightmostUntrustedEntry(t *testing.T) {
 }
 
 func TestTokenTextsHaveBothLanguages(t *testing.T) {
-	keys := []string{"tokeny_tytul", "tokeny_opis", "tokeny_nazwa", "tokeny_utworz", "tokeny_pokazany_raz",
-		"tokeny_brak", "tokeny_odwolaj", "tokeny_potwierdz", "tokeny_uzyty", "tokeny_nieuzyty",
-		"tokeny_utworzony", "tokeny_odwolany", "kopiuj", "skopiowano", "blad_token_nazwa", "blad_token_limit"}
+	keys := []string{"tokens_title", "tokens_desc", "tokens_name", "tokens_create", "tokens_shown_once",
+		"tokens_none", "tokens_revoke", "tokens_confirm_revoke", "tokens_last_used", "tokens_never_used",
+		"tokens_created", "tokens_revoked", "copy", "copied", "error_token_name", "error_token_limit"}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)
 		for _, k := range keys {
@@ -497,7 +497,7 @@ func TestAccountRemovalRevokesTokensButPasswordChangeDoesNot(t *testing.T) {
 		t.Error("the token of the removed account still works")
 	}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.PL} {
-		if txt := i18n.T(lang, "haslo_zmienione"); !strings.Contains(txt, "API") {
+		if txt := i18n.T(lang, "password_changed"); !strings.Contains(txt, "API") {
 			t.Errorf("%s: the message does not mention API tokens: %q", lang, txt)
 		}
 	}

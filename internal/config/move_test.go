@@ -312,8 +312,11 @@ func TestMoveGroupWithoutBlankLines(t *testing.T) {
 }
 
 func TestMoveServiceToWithoutTrailingNewline(t *testing.T) {
-	src := strings.TrimRight(moveSrc, "\n# stopka") // ends with `services: []`
-	src = strings.TrimSuffix(strings.TrimSuffix(moveSrc, "\n# stopka\n"), "\n")
+	src := strings.TrimSuffix(strings.TrimSuffix(moveSrc, "\n# stopka\n"), "\n")
+	// the point of the test: a file that ends with `services: []` and NO newline
+	if strings.HasSuffix(src, "\n") || !strings.HasSuffix(src, "services: []") {
+		t.Fatalf("fixture must end with `services: []` without a newline, ends with %q", src[len(src)-20:])
+	}
 	d, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)

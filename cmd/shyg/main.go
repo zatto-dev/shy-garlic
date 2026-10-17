@@ -85,7 +85,7 @@ func run() error {
 		webhook: *webhook, webhookFormat: *webhookFormat, failThreshold: *failThreshold, dockerSock: *dockerSock,
 		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow, allowedHost: *allowedHost,
 	}
-	o.thresholdFromFlag = source(fs, "fail-threshold", "") == "flaga"
+	o.thresholdFromFlag = source(fs, "fail-threshold", "") == "flag"
 	o.instance = instanceDescription(fs, o)
 
 	switch command {
@@ -133,12 +133,12 @@ func source(fs *flag.FlagSet, name, envKey string) string {
 		}
 	})
 	if set {
-		return "flaga"
+		return "flag"
 	}
 	if envKey != "" && os.Getenv(envKey) != "" {
-		return "srodowisko"
+		return "env"
 	}
-	return "domyslna"
+	return "default"
 }
 
 // instanceDescription gathers the start-up options to show in the panel.
