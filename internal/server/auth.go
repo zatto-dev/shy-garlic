@@ -359,7 +359,7 @@ func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		plainError(w, r, http.StatusBadRequest, "error_bad_form")
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
@@ -389,7 +389,7 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.setSession(w, r, u.ID); err != nil {
-		http.Error(w, "session error", http.StatusInternalServerError)
+		plainInternal(w, r, err)
 		return
 	}
 	slog.Info("logged in", "login", u.Login, "ip", ip)
@@ -412,7 +412,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	n, err := s.st.UserCount(r.Context())
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		plainInternal(w, r, err)
 		return
 	}
 	if n > 0 {
@@ -431,7 +431,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		plainError(w, r, http.StatusBadRequest, "error_bad_form")
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
@@ -461,9 +461,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		message := i18n.T(lang, "error_account")
-		if strings.Contains(err.Error(), "8 characters") {
+		if errors.Is(err, store.ErrPasswordShort) {
 			message = i18n.T(lang, "error_password_short")
-		} else if strings.Contains(err.Error(), "too short") {
+		} else if errors.Is(err, store.ErrLoginShort) {
 			message = i18n.T(lang, "error_login_short")
 		}
 		s.renderLogin(w, view(message, login))
@@ -471,7 +471,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearSetupToken()
 	if err := s.setSession(w, r, u.ID); err != nil {
-		http.Error(w, "session error", http.StatusInternalServerError)
+		plainInternal(w, r, err)
 		return
 	}
 	slog.Info("admin account created", "login", u.Login)

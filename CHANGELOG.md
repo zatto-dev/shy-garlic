@@ -118,6 +118,14 @@ the entries below say when it does.
 
 ### Fixed
 
+- **API errors are translated and no longer leak internals.** Adding a
+  duplicate service or group now answers 409 with the translated "name taken"
+  message (it used to be a bare 400), and a duplicate login answers 409 instead
+  of echoing `UNIQUE constraint failed: users.login`. Every other message the
+  API returns (bad JSON, missing fields, unknown group, wrong password, missing
+  version, plain-text 401/429 and so on) now comes in English and Polish; the
+  YAML parser detail stays in `invalid YAML: ...` because it carries the line.
+  Internal failures answer with a generic 500 and the detail goes to the log.
 - **Wallpaper brightness measurement works under the CSP.** `img-src` now also
   allows `blob:` (and only there), which the page uses to measure an uploaded
   image; before, the browser blocked that URL.

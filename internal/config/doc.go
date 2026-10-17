@@ -17,6 +17,10 @@ var (
 	// ErrDuplicate — the name is already taken in the same list (service in a group, group).
 	// Two services with the same name would merge check history under one key.
 	ErrDuplicate = errors.New("name already exists")
+	// ErrNameRequired — a service or group was given an empty name.
+	ErrNameRequired = errors.New("name is required")
+	// ErrPosition — a move target outside the list.
+	ErrPosition = errors.New("position out of range")
 )
 
 // Document is the configuration seen as TEXT, not as a data structure.

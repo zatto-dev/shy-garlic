@@ -161,14 +161,14 @@ func (d *Document) AddService(group string, svc Service) error {
 
 func (d *Document) addService(group string, svc Service) error {
 	if svc.Name == "" {
-		return errors.New("service name is required")
+		return ErrNameRequired
 	}
 	gi, err := d.findGroup(group)
 	if err != nil {
 		return err
 	}
 	if _, _, err := d.findService(group, svc.Name); err == nil {
-		return fmt.Errorf("service %q already exists in group %q", svc.Name, group)
+		return fmt.Errorf("%w: service %q in group %q", ErrDuplicate, svc.Name, group)
 	}
 
 	svcs, err := d.node("groups", gi, "services")
@@ -360,10 +360,10 @@ func (d *Document) AddGroup(name string) error {
 
 func (d *Document) addGroup(name string) error {
 	if name == "" {
-		return errors.New("group name is required")
+		return ErrNameRequired
 	}
 	if _, err := d.findGroup(name); err == nil {
-		return fmt.Errorf("group %q already exists", name)
+		return fmt.Errorf("%w: group %q", ErrDuplicate, name)
 	}
 	groups, err := d.node("groups")
 	if err != nil {
@@ -448,7 +448,7 @@ func (d *Document) RenameGroup(oldName, newName string) error {
 
 func (d *Document) renameGroup(oldName, newName string) error {
 	if newName == "" {
-		return errors.New("group name is required")
+		return ErrNameRequired
 	}
 	if oldName == newName {
 		return nil

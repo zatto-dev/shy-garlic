@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -164,7 +163,7 @@ func (d *Document) sequence(path ...any) (*ast.SequenceNode, bool) {
 	return seq, ok
 }
 
-var errIndex = errors.New("position out of range")
+var errIndex = ErrPosition
 
 // MoveServiceTo moves the service to group toGroup at position index. The index is
 // the service's place in the target list AFTER the move (0 = first, len = last),

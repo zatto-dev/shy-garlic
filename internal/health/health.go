@@ -213,6 +213,9 @@ func (m *Monitor) loop(ctx context.Context, t Target) {
 	}
 }
 
+// ErrNoSuchService — CheckNow was asked about a key that is not configured.
+var ErrNoSuchService = errors.New("no such service")
+
 // minInterval — the floor for the check period, whatever the Target says.
 // A variable only so tests can run fast loops.
 var minInterval = time.Second
@@ -272,7 +275,7 @@ func (m *Monitor) CheckNow(ctx context.Context, key string) (Result, error) {
 	}
 	m.mu.RUnlock()
 	if !found {
-		return Result{}, errors.New("no such service")
+		return Result{}, ErrNoSuchService
 	}
 	r := Check(ctx, m.clientFor(target), target)
 	m.record(key, r)

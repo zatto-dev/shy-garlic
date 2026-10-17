@@ -671,13 +671,13 @@ func publicAddress(ip netip.Addr) bool {
 func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("u")
 	if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
-		http.Error(w, "bad url", http.StatusBadRequest)
+		plainError(w, r, http.StatusBadRequest, "error_icon_url")
 		return
 	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, src, nil)
 	if err != nil {
-		http.Error(w, "bad url", http.StatusBadRequest)
+		plainError(w, r, http.StatusBadRequest, "error_icon_url")
 		return
 	}
 	req.Header.Set("User-Agent", "ShyGarlic/"+Version)
@@ -687,12 +687,14 @@ func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, "fetch failed", http.StatusBadGateway)
+		slog.Warn("icon proxy: fetch failed", "err", err)
+		plainError(w, r, http.StatusBadGateway, "error_icon_upstream")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "upstream "+resp.Status, http.StatusBadGateway)
+		slog.Warn("icon proxy: upstream refused", "status", resp.Status)
+		plainError(w, r, http.StatusBadGateway, "error_icon_upstream")
 		return
 	}
 	// ! The Content-Type from the upstream used to be copied here VERBATIM, so
@@ -700,12 +702,13 @@ func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 	// with script-src 'unsafe-inline'. Now only the allowlist passes.
 	kind, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || !iconKinds[kind] {
-		http.Error(w, "upstream did not return an image", http.StatusBadGateway)
+		plainError(w, r, http.StatusBadGateway, "error_icon_upstream")
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		http.Error(w, "read failed", http.StatusBadGateway)
+		slog.Warn("icon proxy: read failed", "err", err)
+		plainError(w, r, http.StatusBadGateway, "error_icon_upstream")
 		return
 	}
 	w.Header().Set("Content-Type", kind)

@@ -27,7 +27,7 @@ func requireSameOrigin(next http.Handler) http.Handler {
 			return
 		}
 		if !fromSameOrigin(r) {
-			http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+			plainError(w, r, http.StatusForbidden, "error_cross_origin")
 			return
 		}
 		next.ServeHTTP(w, r)
