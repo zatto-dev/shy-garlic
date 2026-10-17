@@ -141,6 +141,10 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
+          # ! latest=false: metadata-action adds `latest` to every semver set by
+          # default. Only the explicit raw tag below may set it (0.14.0 shipped
+          # with `latest` pointing at the -git variant because of this).
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -150,6 +154,7 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}},suffix=-git
             type=semver,pattern={{major}}.{{minor}},suffix=-git
