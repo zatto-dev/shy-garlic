@@ -10,6 +10,8 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-17
+
 ### Added
 
 - selfh.st/icons as a second icon catalog. Names that Dashboard Icons lacks
@@ -33,13 +35,25 @@ the entries below say when it does.
   for that name. Names no catalog has are remembered for 10 minutes, a failing
   CDN host is skipped for 2 minutes, and the icons the config uses are fetched
   in the background after start and after every config change.
+- Background icon downloads are bounded: at most 32 at once (a further request
+  gets a short "pending" answer) and 8 connections per CDN host. With both
+  indexes complete, a name neither catalog has is answered from memory without
+  any request.
+- Offline, an icon already in the selfh.st cache is served even when the
+  Dashboard Icons lookup failed on the network. Without complete indexes
+  `/icon/` answers with `max-age=300` instead of a week.
+- The selfh.st index uses far less memory (live heap about 1.6 MiB down to
+  0.2 MiB): it is decoded as a stream and written to disk without being held
+  whole.
 - Only a 404 sends an icon lookup on to the next catalog; a network error
   does not.
 - An icon file over the 2 MiB limit is now refused instead of being cut off
-  at the limit and cached truncated.
+  at the limit and cached truncated. The same holds for a `zip` entry.
 
 ### Fixed
 
+- In `zip` mode nothing outside the zip is prefetched, and the icon credit
+  says only that the files are served unmodified.
 - The 0.14.0 release published `latest` pointing at the `-git` image instead
   of the distroless one. `latest` has been repointed to the distroless 0.14.0,
   and the release workflow no longer adds `latest` to the `-git` tags.
