@@ -5,7 +5,7 @@ type: application
 # version and appVersion are overridden by the release workflow with the git tag
 # (helm package --version X --app-version X); the values here are placeholders.
 version: 0.1.0
-appVersion: "0.13.2"
+appVersion: "0.14.0"
 icon: https://raw.githubusercontent.com/zatto-dev/shy-garlic/main/docs/img/logo.png
 home: https://github.com/zatto-dev/shy-garlic
 sources:

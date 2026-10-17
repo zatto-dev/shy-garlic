@@ -10,8 +10,18 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-17
+
 ### Upgrade notes
 
+- **Image tags: `latest` and `X.Y.Z` are now the distroless image**, as the
+  README always described. Until 0.13.2 they were the Alpine variant with git.
+  If the panel commits your config to a git repository, use the `-git` tag
+  (`ghcr.io/zatto-dev/shy-garlic:0.14.0-git`, or `git` to follow the latest);
+  the distroless image has no git, so those commits would stop.
+- **Log messages, CLI help and API errors are in English**, and structured log
+  keys changed (for example `version`, `service`, `file`, `db`). Update log
+  queries that match the old keys.
 - **Container image: the config now lives on the `/data` volume.** The image
   sets `SHYG_CONFIG=/data/shygarlic.yaml` and seeds it on the first start from
   `/etc/shygarlic/shygarlic.yaml` (the bundled sample, or your file if you
@@ -23,6 +33,12 @@ the entries below say when it does.
 
 ### Added
 
+- `deploy/compose/docker-compose.yml`: the compose example from the README as a
+  file, with a read-only Docker socket proxy for container discovery.
+- Releases carry an SBOM and build provenance for the images, and signed build
+  attestations for the archives and `checksums.txt`
+  (`gh attestation verify <file> --repo zatto-dev/shy-garlic`). Release notes
+  are taken from this changelog.
 - `--seed-config` / `SHYG_SEED_CONFIG`: copy a starting config to `--config`
   on first start when none exists yet. The Helm chart and the Kubernetes
   manifests use it instead of a shell init container, so they run the
@@ -440,6 +456,7 @@ First working version: the dashboard, the heartbeat, sign-in, and an editor
 that writes YAML back through byte-level splicing, so comments, anchors and
 formatting survive every edit made through the UI.
 
+[0.14.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.14.0
 [0.13.2]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.2
 [0.13.1]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.1
 [0.13.0]: https://github.com/zatto-dev/shy-garlic/releases/tag/v0.13.0
