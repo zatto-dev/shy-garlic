@@ -29,9 +29,9 @@
   <img src="/assets/logo.png" alt="" width="64" height="64" class="logo">
   <h1>Shy Garlic</h1>
   {{if .Setup}}
-    <p class="gate-description">{{.T.opis_setup}}</p>
+    <p class="gate-description">{{.T.setup_desc}}</p>
   {{else}}
-    <p class="gate-description">{{.T.opis_logowania}}</p>
+    <p class="gate-description">{{.T.sign_in_desc}}</p>
   {{end}}
 
   {{if .Error}}<p class="gate-error" role="alert">{{.Error}}</p>{{end}}
@@ -44,7 +44,7 @@
              autocapitalize="none" spellcheck="false">
     </label>
     <label>
-      <span>{{.T.haslo}}</span>
+      <span>{{.T.password}}</span>
       <input name="password" type="password" required
              autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}"
              {{if .Setup}}minlength="8"{{end}}>
@@ -55,12 +55,12 @@
       <input name="setup_token" required autocomplete="off" autocapitalize="none" spellcheck="false">
     </label>
     <p class="gate-hint">{{.T.setup_token_hint}}</p>{{end}}
-    <button type="submit" class="btn btn--primary btn--lg">{{if .Setup}}{{.T.zaloz_konto}}{{else}}{{.T.zaloguj}}{{end}}</button>
+    <button type="submit" class="btn btn--primary btn--lg">{{if .Setup}}{{.T.create_account}}{{else}}{{.T.sign_in_button}}{{end}}</button>
   </form>
 
   <p class="gate-lang">
     <a href="/lang?set={{.SecondLang}}" rel="nofollow"
-       title="{{.T.jezyk}}: {{.SecondLangName}}" aria-label="{{.T.jezyk}}: {{.SecondLangName}}"
+       title="{{.T.language}}: {{.SecondLangName}}" aria-label="{{.T.language}}: {{.SecondLangName}}"
        >{{.SecondLangShort}}</a>
   </p>
 

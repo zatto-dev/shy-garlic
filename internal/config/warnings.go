@@ -18,8 +18,8 @@ import (
 //     be checked. Without this the parser silently ignored the field.
 
 const (
-	KindKey     = "klucz"
-	KindAddress = "adres"
+	KindKey     = "key"
+	KindAddress = "address"
 	// KindCheck: check.interval / check.timeout outside the accepted range,
 	// replaced with the default (Key = field, Address = the value as written,
 	// Suggestion = the value used instead).

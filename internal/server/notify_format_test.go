@@ -44,10 +44,10 @@ func message(rr *httptest.ResponseRecorder) string {
 func TestNotifyGetShowsFormat(t *testing.T) {
 	s := testServer(t)
 	m := getNotify(t, s)
-	if m["format"] != "discord" || m["formatZrodlo"] != "domyslny" {
+	if m["format"] != "discord" || m["formatSource"] != "default" {
 		t.Errorf("default: %v", m)
 	}
-	list, _ := m["formaty"].([]any)
+	list, _ := m["formats"].([]any)
 	if len(list) != 6 || list[0] != "discord" || list[5] != "generic" {
 		t.Errorf("formats: %v", list)
 	}
@@ -65,7 +65,7 @@ func TestNotifyPutSavesFormatToDB(t *testing.T) {
 	if s.notifier.Format() != notify.FormatNtfy {
 		t.Errorf("format w powiadamiaczu: %q", s.notifier.Format())
 	}
-	if m := getNotify(t, s); m["format"] != "ntfy" || m["formatZrodlo"] != "baza" {
+	if m := getNotify(t, s); m["format"] != "ntfy" || m["formatSource"] != "database" {
 		t.Errorf("GET: %v", m)
 	}
 	// returning to the default deletes the row
@@ -106,8 +106,8 @@ func TestNotifyPutFormatFromEnvIs409(t *testing.T) {
 	if v, _ := s.st.Setting(s.ctx, "notify.format"); v != "" {
 		t.Errorf("DB touched: %q", v)
 	}
-	if m := getNotify(t, s); m["formatZrodlo"] != "srodowisko" {
-		t.Errorf("source: %v", m["formatZrodlo"])
+	if m := getNotify(t, s); m["formatSource"] != "env" {
+		t.Errorf("source: %v", m["formatSource"])
 	}
 }
 
@@ -156,7 +156,7 @@ func TestNotifyPutGuardsAddressShapeByFormat(t *testing.T) {
 	req := httptest.NewRequest("PUT", "/api/notify", strings.NewReader(`{"format":"gotify"}`))
 	req.Header.Set("Accept-Language", "pl")
 	s.handleNotifyPut(rr, req)
-	if message(rr) != i18n.T(i18n.PL, "webhook_adres_gotify") {
+	if message(rr) != i18n.T(i18n.PL, "webhook_address_gotify") {
 		t.Errorf("PL message: %q", message(rr))
 	}
 }
@@ -314,10 +314,10 @@ func TestUnknownFormatInDBDoesNotDisableAlerts(t *testing.T) {
 }
 
 func TestFormatTextsHaveBothLanguages(t *testing.T) {
-	keys := []string{"format_webhooka", "webhook_zly_format", "webhook_format_ze_srodowiska",
-		"webhook_adres_telegram", "webhook_adres_gotify", "format_generic"}
+	keys := []string{"webhook_format", "webhook_bad_format", "webhook_format_from_env",
+		"webhook_address_telegram", "webhook_address_gotify", "format_generic"}
 	for _, f := range notify.Formats {
-		keys = append(keys, "format_podpowiedz_"+string(f))
+		keys = append(keys, "format_hint_"+string(f))
 	}
 	for _, l := range []i18n.Lang{i18n.PL, i18n.EN} {
 		m := i18n.Map(l)

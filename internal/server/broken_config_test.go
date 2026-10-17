@@ -275,7 +275,7 @@ func TestRawEditorRepairsBrokenFile(t *testing.T) {
 	}
 }
 
-// The banner travels to open tabs in the SSE event "konfig".
+// The banner travels to open tabs in the SSE event "config".
 func TestBannerOverSSE(t *testing.T) {
 	s := serverOnContent(t, goodConfig)
 	if err := s.loadAfterStart(context.Background()); err != nil {
@@ -305,7 +305,7 @@ func TestBannerOverSSE(t *testing.T) {
 			switch {
 			case strings.HasPrefix(l, "event: "):
 				kind = strings.TrimPrefix(l, "event: ")
-			case strings.HasPrefix(l, "data: ") && kind == "konfig":
+			case strings.HasPrefix(l, "data: ") && kind == "config":
 				events <- strings.TrimPrefix(l, "data: ")
 				kind = ""
 			case l == "":
@@ -331,7 +331,7 @@ func TestBannerOverSSE(t *testing.T) {
 			t.Fatal(err)
 		}
 		if b.State != "error" || !strings.Contains(b.Error, "3") || b.Title == "" {
-			t.Errorf("zdarzenie konfig = %s", d)
+			t.Errorf("event config = %s", d)
 		}
 	case <-ctx.Done():
 		t.Fatal("no config event in SSE")

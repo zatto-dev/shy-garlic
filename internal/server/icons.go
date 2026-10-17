@@ -172,8 +172,11 @@ func (k *Catalog) Refresh(ctx context.Context) {
 	}
 }
 
+// legacyIndexFile is the pre-0.14 name of the name-index cache.
+const legacyIndexFile = "spis.json"
+
 func (k *Catalog) refreshNameIndex(ctx context.Context) {
-	file := filepath.Join(k.cacheDir, "spis.json")
+	file := filepath.Join(k.cacheDir, "index.json")
 	if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) < indexValidity {
 		if data, err := os.ReadFile(file); err == nil && k.setFromIndex(data) == nil {
 			slog.Info("icon catalog from cache", "icons", k.Count())
@@ -185,6 +188,9 @@ func (k *Catalog) refreshNameIndex(ctx context.Context) {
 		k.setNames(names)
 		if b, err := json.Marshal(names); err == nil {
 			_ = os.WriteFile(file, b, 0o644)
+			// the cache used to be called spis.json; it is only a cache, so the old file
+			// is ignored on read and removed once the new one is written
+			_ = os.Remove(filepath.Join(k.cacheDir, legacyIndexFile))
 		}
 		slog.Info("icon catalog fetched", "icons", k.Count(), "source", source)
 		return
@@ -348,36 +354,6 @@ func (k *Catalog) fallbackFromDisk(file string) {
 	k.indexCache()
 }
 
-func (k *Catalog) setFromTree(data []byte) error {
-	var d tree
-	if err := json.Unmarshal(data, &d); err != nil {
-		return err
-	}
-	if len(d.SVG) == 0 {
-		return fmt.Errorf("empty icon index")
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	k.names = make([]string, 0, len(d.SVG))
-	k.ext = make(map[string]string, len(d.SVG))
-	for _, f := range d.SVG {
-		n := strings.TrimSuffix(f, ".svg")
-		k.ext[n] = "svg"
-		k.names = append(k.names, n)
-	}
-	// some icons exist only as PNG — let them be selectable too
-	for _, f := range d.PNG {
-		n := strings.TrimSuffix(f, ".png")
-		if _, is := k.ext[n]; is {
-			continue
-		}
-		k.ext[n] = "png"
-		k.names = append(k.names, n)
-	}
-	sort.Strings(k.names)
-	return nil
-}
-
 // indexCache builds the index from the files we already have — a panel cut off from
 // the network still shows what it once downloaded.
 func (k *Catalog) indexCache() {
@@ -497,7 +473,7 @@ func (k *Catalog) fetch(ctx context.Context, name, ext string) ([]byte, string, 
 	// ! jsDelivr is sometimes "warm" — status 200, but zero body bytes, until it has
 	// itself fetched the file from GitHub. Without this guard such an empty payload
 	// landed in the on-disk cache FOR GOOD (icon files have no TTL like
-	// spis.json), so one failed moment of the CDN poisoned the icon forever —
+	// index.json), so one failed moment of the CDN poisoned the icon forever —
 	// that was the real reason for "broken" tiles in the icon search.
 	if len(data) == 0 {
 		return nil, "", fmt.Errorf("CDN: empty response body for %s.%s", name, ext)

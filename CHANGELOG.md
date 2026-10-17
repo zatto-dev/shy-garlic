@@ -64,6 +64,42 @@ the entries below say when it does.
 
 ### Changed
 
+- **Breaking (API): the HTTP/JSON contract is now English throughout.** This
+  is the 0.14.0 change and it is deliberate: the API is about to be announced
+  publicly, and a breaking rename is allowed while the version is below 1.0.
+  Scripts and dashboards that read the old names have to be updated.
+  - JSON keys, old to new: `wlaczony` to `enabled`, `zrodlo` to `source`
+    (`/api/notify`, and `/api/instance` options), `formatZrodlo` to
+    `formatSource`, `formaty` to `formats`, `prog` to `threshold` (read from
+    `/api/notify` and sent to `PUT /api/notify`), `opcje` to `options`
+    (`/api/instance`), option entries `klucz` / `wartosc` / `zrodlo` to `key` /
+    `value` / `source`, `dockerWylaczony` to `dockerDisabled` (`/api/info`),
+    `warianty` to `variants` (`/api/icons`), `iconWariantCiemny` /
+    `iconWariantJasny` to `iconVariantDark` / `iconVariantLight`
+    (`/api/service`), `zapis` to `writable` (the page's appearance object).
+  - Enum values: where a setting comes from is now `flag` / `env` / `default`
+    for instance options (was `flaga` / `srodowisko` / `domyslna`), and
+    `env` / `database` / `none` for the webhook address plus `env` / `database`
+    / `default` for the message format (was `srodowisko` / `baza` / `brak` and
+    `srodowisko` / `baza` / `domyslny`).
+  - Live-update (SSE) events on `/events`: `wyglad` to `appearance`, `uklad` to
+    `layout`, `konfig` to `config`. The default (unnamed) stream is unchanged.
+  - Page globals: `window.STAN_POCZATKOWY` to `window.INITIAL_STATE`,
+    `window.WYGLAD` to `window.APPEARANCE`.
+  - Form fields: the group-name dialog field `nazwa` is now `name` (browser-only,
+    never posted). The route placeholders `{nazwa}` in the wallpaper routes are
+    now `{name}`; the URLs themselves do not change.
+  - Interface text keys (`internal/i18n`) are English snake_case too; they are
+    internal, but anything that vendored the page script must follow.
+  - Other renames: the icon-name cache `spis.json` is now `index.json` (the old
+    file is ignored and removed on the next refresh), the default wallpaper file
+    name `tlo` is now `background`, and the history entry for a notification
+    threshold change is now translated like the others.
+
+  Browser preferences migrate by themselves: on first load the old
+  `localStorage` keys `shyg.wyglad` and `shyg-edycja` are copied to
+  `shyg.appearance` and `shyg.edit` and then removed, so nobody loses their
+  wallpaper choice or edit mode.
 - **Setup now needs the setup token** from the log (see Security). If you
   script first-run setup against `/setup`, add the `setup_token` field or use
   `SHYG_ADMIN_USER` / `SHYG_ADMIN_PASSWORD`.
@@ -72,6 +108,15 @@ the entries below say when it does.
   1.60).
 - **The service form and API accept `check.interval` / `check.timeout` between
   1 s and 24 h** (the upper bound is new).
+
+### Fixed
+
+- **Wallpaper brightness measurement works under the CSP.** `img-src` now also
+  allows `blob:` (and only there), which the page uses to measure an uploaded
+  image; before, the browser blocked that URL.
+- **An unusable wallpaper file name is reported as a bad file type** instead of
+  a generic upload failure (the check looked for a Polish word that never
+  appeared in the English error).
 
 ## [0.13.2] — 2026-10-16
 

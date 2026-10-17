@@ -149,9 +149,9 @@ type Options struct {
 // it also comes from a flag, does not go in here — /api/notify is for it, and it
 // masks it.
 type OptionInfo struct {
-	Key    string `json:"klucz"`
-	Value  string `json:"wartosc"`
-	Source string `json:"zrodlo"` // flag | srodowisko | domyslna
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+	Source string `json:"source"` // flag | env | default
 }
 
 func New(path string, st *store.Store, o Options) (*Server, error) {
@@ -250,23 +250,23 @@ func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
 	}
 	if len(b.Warnings) > 0 {
 		b.State = "warnings"
-		b.Title = i18n.T(l, "baner_ostrz_tytul")
+		b.Title = i18n.T(l, "banner_warn_title")
 	}
 	if err != nil {
 		b.State = "error"
-		key := "baner_blad_poprzednia"
+		key := "banner_error_previous"
 		switch source {
 		case "historia":
-			key = "baner_blad_historia"
+			key = "banner_error_history"
 		case "pusta":
-			key = "baner_blad_pusta"
+			key = "banner_error_empty"
 		}
 		b.Title = i18n.T(l, key)
 		switch {
 		case err.Line > 0 && err.Column > 0:
-			b.Error = fmt.Sprintf(i18n.T(l, "baner_pozycja"), err.Line, err.Column, err.Message)
+			b.Error = fmt.Sprintf(i18n.T(l, "banner_position"), err.Line, err.Column, err.Message)
 		case err.Line > 0:
-			b.Error = fmt.Sprintf(i18n.T(l, "baner_linia"), err.Line, err.Message)
+			b.Error = fmt.Sprintf(i18n.T(l, "banner_line"), err.Line, err.Message)
 		default:
 			b.Error = err.Message
 		}
@@ -282,18 +282,18 @@ func warningDescription(l i18n.Lang, o config.Warning) string {
 		return fmt.Sprintf(i18n.T(l, "banner_warn_credentials"), o.Service, o.Group, o.Address)
 	}
 	if o.Kind == config.KindAddress {
-		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Service, o.Group, o.Address)
+		return fmt.Sprintf(i18n.T(l, "banner_warn_address"), o.Service, o.Group, o.Address)
 	}
 	where := o.Path
 	if where == "" {
-		where = i18n.T(l, "baner_poziom_glowny")
+		where = i18n.T(l, "banner_top_level")
 	}
-	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Key, where)
+	t := fmt.Sprintf(i18n.T(l, "banner_warn_key"), o.Key, where)
 	if o.Suggestion != "" {
-		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Suggestion)
+		t += " " + fmt.Sprintf(i18n.T(l, "banner_warn_suggestion"), o.Suggestion)
 	}
 	if o.Line > 0 {
-		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Line) + ": " + t
+		t = fmt.Sprintf(i18n.T(l, "banner_warn_line"), o.Line) + ": " + t
 	}
 	return t
 }
@@ -681,8 +681,8 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("PUT /api/appearance", s.handleAppearancePut)
 	protected.HandleFunc("POST /api/background", s.handleBackgroundUpload)
 	protected.HandleFunc("GET /api/background", s.handleBackgroundList)
-	protected.HandleFunc("DELETE /api/background/{nazwa}", s.handleBackgroundRemove)
-	protected.HandleFunc("GET /bg/{nazwa}", s.handleBg)
+	protected.HandleFunc("DELETE /api/background/{name}", s.handleBackgroundRemove)
+	protected.HandleFunc("GET /bg/{name}", s.handleBg)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", s.requireLogin(protected))
@@ -733,7 +733,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		// ! style-src without 'unsafe-inline' stays — that is why the template has not
 		// a single style= attribute, and the background is set through CSSOM
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' data:; style-src 'self'; "+
+			"default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "+
 				"script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'; "+
 				"object-src 'none'; base-uri 'self'; form-action 'self'")
 		next.ServeHTTP(w, r)
@@ -802,11 +802,11 @@ type appearanceAPI struct {
 	View   string `json:"view"`
 }
 
-// appearanceWindow is window.WYGLAD — the same plus two things the UI has no
+// appearanceWindow is window.APPEARANCE — the same plus two things the UI has no
 // way to get: whether the appearance may be saved to the file and what the upload limit is.
 type appearanceWindow struct {
 	appearanceAPI
-	Writable bool `json:"zapis"`
+	Writable bool `json:"writable"`
 	LimitMB  int  `json:"limitMB"`
 }
 
@@ -883,7 +883,7 @@ func (s *Server) instanceAppearance() appearanceView {
 }
 
 func (w appearanceView) toAPI() appearanceAPI {
-	return appearanceAPI{Preset: w.Preset, Image: w.Image, Blur: w.Blur, Dim: w.Dim, Tone: w.Tone, View: w.View}
+	return appearanceAPI(w)
 }
 
 // gateAppearance — the background for /login and /setup. The wallpaper stays behind the login.
@@ -944,7 +944,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data.AppearanceJSON = template.JS("{}")
 	}
-	data.SearchIconsPlaceholder = fmt.Sprintf(i18n.T(lang, "szukaj_ikon"), s.icons.Count())
+	data.SearchIconsPlaceholder = fmt.Sprintf(i18n.T(lang, "search_icons"), s.icons.Count())
 	if u := UserFromRequest(r); u != nil {
 		data.User = u.Login
 	}
@@ -1111,7 +1111,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(out, "event: wyglad\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: appearance\ndata: %s\n\n", b); err != nil {
 			return false
 		}
 		if out.flush() != nil {
@@ -1126,7 +1126,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(out, "event: uklad\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: layout\ndata: %s\n\n", b); err != nil {
 			return false
 		}
 		if out.flush() != nil {
@@ -1142,7 +1142,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(out, "event: konfig\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: config\ndata: %s\n\n", b); err != nil {
 			return false
 		}
 		if out.flush() != nil {

@@ -155,7 +155,7 @@ func sanitizeName(raw, format string) (string, bool) {
 		body = strings.Trim(body[:maxBackgroundBody], ".-")
 	}
 	if body == "" {
-		body = "tlo"
+		body = "background"
 	}
 
 	name := body + "." + format
@@ -258,7 +258,7 @@ func (k *BackgroundStore) List() ([]BackgroundEntry, int64, error) {
 }
 
 // freeName adds a suffix while the name is taken. It never overwrites
-// someone else's file — two people uploading "tlo.png" get two files.
+// someone else's file — two people uploading "background.png" get two files.
 func (k *BackgroundStore) freeName(name string) (string, error) {
 	if _, err := k.root.Stat(name); errors.Is(err, os.ErrNotExist) {
 		return name, nil
@@ -458,7 +458,7 @@ func (k *BackgroundStore) SweepStale(inUse string) int {
 func (s *Server) handleBackgroundUpload(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.FromRequest(r)
 	if !s.backgrounds.Available() {
-		jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "tapeta_wylaczona"))
+		jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "wallpaper_uploads_off"))
 		return
 	}
 	// ! the FIRST line of the handler, before any parsing
@@ -468,7 +468,7 @@ func (s *Server) handleBackgroundUpload(w http.ResponseWriter, r *http.Request) 
 	case s.backgrounds.sem <- struct{}{}:
 		defer func() { <-s.backgrounds.sem }()
 	default:
-		jsonError(w, http.StatusConflict, i18n.T(lang, "tapeta_limit"))
+		jsonError(w, http.StatusConflict, i18n.T(lang, "wallpaper_limit"))
 		return
 	}
 	// the server has no ReadTimeout (deliberately, because of SSE), so one infinitely
@@ -525,16 +525,16 @@ func (s *Server) backgroundErrorResponse(w http.ResponseWriter, lang i18n.Lang, 
 	switch {
 	case errors.As(err, &tooLarge), strings.Contains(err.Error(), "request body too large"):
 		jsonError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf(i18n.T(lang, "tapeta_za_duza"), BackgroundLimitMB))
+			fmt.Sprintf(i18n.T(lang, "wallpaper_too_large"), BackgroundLimitMB))
 	case errors.Is(err, errBackgroundLimit):
-		jsonError(w, http.StatusConflict, i18n.T(lang, "tapeta_limit"))
+		jsonError(w, http.StatusConflict, i18n.T(lang, "wallpaper_limit"))
 	case errors.Is(err, errBackgroundsDisabled):
-		jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "tapeta_wylaczona"))
-	case strings.Contains(err.Error(), "format"), strings.Contains(err.Error(), "nazwa"):
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "tapeta_zly_typ"))
+		jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "wallpaper_uploads_off"))
+	case strings.Contains(err.Error(), "format"), strings.Contains(err.Error(), "name"):
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "wallpaper_bad_type"))
 	default:
 		slog.Warn("wallpaper upload failed", "err", err)
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_zapisu_tla"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_wallpaper_upload"))
 	}
 }
 
@@ -557,23 +557,23 @@ func (s *Server) handleBackgroundList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBackgroundRemove(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.FromRequest(r)
-	name := r.PathValue("nazwa")
+	name := r.PathValue("name")
 	if !config.BackgroundName.MatchString(name) {
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_wygladu"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_appearance"))
 		return
 	}
 	// a background in use is deleted only after the config change — otherwise the panel stays
 	// with a url() returning 404, and an appearance change should go through diff like any other
 	if s.instanceAppearance().Image == name {
-		jsonError(w, http.StatusConflict, i18n.T(lang, "tapeta_uzywana_blad"))
+		jsonError(w, http.StatusConflict, i18n.T(lang, "error_wallpaper_in_use"))
 		return
 	}
 	if err := s.backgrounds.Remove(name); err != nil {
 		if errors.Is(err, errBackgroundsDisabled) {
-			jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "tapeta_wylaczona"))
+			jsonError(w, http.StatusServiceUnavailable, i18n.T(lang, "wallpaper_uploads_off"))
 			return
 		}
-		jsonError(w, http.StatusNotFound, i18n.T(lang, "blad_wygladu"))
+		jsonError(w, http.StatusNotFound, i18n.T(lang, "error_appearance"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -581,7 +581,7 @@ func (s *Server) handleBackgroundRemove(w http.ResponseWriter, r *http.Request) 
 
 // handleBg serves an uploaded wallpaper — only to logged-in users.
 func (s *Server) handleBg(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("nazwa")
+	name := r.PathValue("name")
 	f, fi, kind, err := s.backgrounds.Open(name)
 	if err != nil {
 		// 404 also for a bad name: we do not reveal what exists and what does not

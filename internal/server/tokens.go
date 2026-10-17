@@ -216,10 +216,10 @@ func (s *Server) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	token, entry, err := s.st.NewAPIToken(r.Context(), req.Name, author)
 	switch {
 	case errors.Is(err, store.ErrTokenName):
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_token_nazwa"))
+		jsonError(w, http.StatusBadRequest, i18n.T(lang, "error_token_name"))
 		return
 	case errors.Is(err, store.ErrTooManyTokens):
-		jsonError(w, http.StatusConflict, i18n.T(lang, "blad_token_limit"))
+		jsonError(w, http.StatusConflict, i18n.T(lang, "error_token_limit"))
 		return
 	case err != nil:
 		jsonError(w, http.StatusInternalServerError, err.Error())
