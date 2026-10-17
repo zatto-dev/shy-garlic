@@ -36,6 +36,9 @@ import (
 //
 // `zip` mode (an optional icons.zip file) gives the full set right away, without a
 // single outbound request — for networks cut off from the internet.
+//
+// Two catalogs feed it: Dashboard Icons (homarr-labs, below) first, and
+// selfh.st/icons for the names Dashboard Icons lacks — see icons_selfhst.go.
 
 const (
 	cdnIcons = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main"
@@ -63,15 +66,36 @@ type toneVariant struct {
 
 type Catalog struct {
 	mu       sync.RWMutex
-	names    []string          // sorted, without extensions
-	ext      map[string]string // name → "svg" | "png"
+	names    []string          // sorted, without extensions; both catalogs, each name once
+	ext      map[string]string // Dashboard Icons (or icons.zip): name → "svg" | "png"
 	cacheDir string
 	mode     string // "zip" or "cdn"
 
 	aliases  map[string][]string    // name → other names by which it can also be found
 	variants map[string]toneVariant // name → separate files for the dark/light panel theme (when present)
+	selfhst  selfhstIndex           // the second catalog, used for names Dashboard Icons lacks
 	zipIdx   map[string]*zip.File
 	client   *http.Client
+}
+
+// rebuildNamesLocked merges both catalogs into the sorted name list. The caller
+// holds k.mu for writing.
+func (k *Catalog) rebuildNamesLocked() {
+	k.names = make([]string, 0, len(k.ext)+len(k.selfhst.names))
+	for n := range k.ext {
+		k.names = append(k.names, n)
+	}
+	for n := range k.selfhst.names {
+		if _, inHomarr := k.ext[n]; !inHomarr {
+			k.names = append(k.names, n)
+		}
+	}
+	sort.Strings(k.names)
+}
+
+// badIconName rejects anything that could leave the cache directory.
+func badIconName(name string) bool {
+	return strings.ContainsAny(name, `/\`) || strings.Contains(name, "..")
 }
 
 func NewCatalog(zipPath, cacheDir string) *Catalog {
@@ -107,13 +131,22 @@ func (k *Catalog) Count() int {
 }
 
 // Variants returns the file names with dark and light ink for a given icon, when
-// Dashboard Icons keeps such a pair. An empty string in both fields = this icon
+// its catalog keeps such a pair. An empty string in both fields = this icon
 // has no separate variants, the caller should use the plain base name.
+// The pair follows the catalog that serves the name: a name Dashboard Icons has
+// never gets selfh.st's variants.
 func (k *Catalog) Variants(name string) (dark, light string) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	w, ok := k.variants[name]
-	if !ok || w.Dark == "" || w.Light == "" {
+	var w toneVariant
+	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
+		w = k.selfhst.variants[ref]
+	} else if hw, ok := k.variants[name]; ok {
+		w = hw
+	} else if _, inHomarr := k.ext[name]; !inHomarr {
+		w = k.selfhst.variants[name]
+	}
+	if w.Dark == "" || w.Light == "" {
 		return "", ""
 	}
 	return w.Dark, w.Light
@@ -170,6 +203,8 @@ func (k *Catalog) Refresh(ctx context.Context) {
 	if _, err := k.fromMetadata(ctx); err != nil {
 		slog.Debug("light/dark variants unavailable", "err", err)
 	}
+
+	k.refreshSelfhst(ctx)
 }
 
 // legacyIndexFile is the pre-0.14 name of the name-index cache.
@@ -331,11 +366,7 @@ func (k *Catalog) setNames(ext map[string]string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.ext = ext
-	k.names = make([]string, 0, len(ext))
-	for n := range ext {
-		k.names = append(k.names, n)
-	}
-	sort.Strings(k.names)
+	k.rebuildNamesLocked()
 }
 
 func (k *Catalog) setFromIndex(data []byte) error {
@@ -363,56 +394,79 @@ func (k *Catalog) indexCache() {
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.names = nil
 	for _, e := range entries {
 		n := e.Name()
 		switch {
 		case strings.HasSuffix(n, ".svg"):
-			b := strings.TrimSuffix(n, ".svg")
-			k.ext[b] = "svg"
-			k.names = append(k.names, b)
+			k.ext[strings.TrimSuffix(n, ".svg")] = "svg"
 		case strings.HasSuffix(n, ".png"):
 			b := strings.TrimSuffix(n, ".png")
 			if _, is := k.ext[b]; !is {
 				k.ext[b] = "png"
-				k.names = append(k.names, b)
 			}
 		}
 	}
-	sort.Strings(k.names)
+	k.rebuildNamesLocked()
 }
 
 // ── reading a single icon ────────────────────────────────────────────────────
 
 func (k *Catalog) Has(name string) bool {
+	if badIconName(name) {
+		return false
+	}
+	ref, explicit := strings.CutPrefix(name, selfhstPrefix)
 	k.mu.RLock()
-	_, ok := k.ext[name]
+	_, inHomarr := k.ext[name]
+	_, inSelfhst := k.selfhst.names[ref]
 	k.mu.RUnlock()
-	if ok {
+	if (inHomarr && !explicit) || inSelfhst {
 		return true
 	}
 	if k.cacheDir == "" {
 		return false
 	}
-	for _, ext := range []string{"svg", "png"} {
-		if _, err := os.Stat(filepath.Join(k.cacheDir, name+"."+ext)); err == nil {
-			return true
+	dirs := []string{k.cacheDir, k.selfhstCacheDir()}
+	if explicit {
+		dirs = dirs[1:]
+	}
+	for _, dir := range dirs {
+		for _, ext := range []string{"svg", "png"} {
+			if _, err := os.Stat(filepath.Join(dir, ref+"."+ext)); err == nil {
+				return true
+			}
 		}
 	}
 	return false
 }
 
 // Read returns the icon content and its MIME type.
-// Order: zip → on-disk cache → CDN (and a write to the cache).
+// Order: zip → on-disk cache → CDN (and a write to the cache). A name Dashboard
+// Icons does not know goes to selfh.st; `selfhst:<name>` goes there directly.
 func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error) {
-	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+	if badIconName(name) {
 		return nil, "", fmt.Errorf("bad icon name")
+	}
+	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
+		if ref == "" {
+			return nil, "", fmt.Errorf("bad icon name")
+		}
+		return k.readSelfhst(ctx, ref)
 	}
 
 	k.mu.RLock()
 	ext, known := k.ext[name]
+	homarrIndexed := len(k.ext) > 0
+	_, inSelfhst := k.selfhst.files[name]
+	selfhstIndexed := k.selfhst.loaded
 	zipIdx := k.zipIdx
 	k.mu.RUnlock()
+	// both indexes agree the name is selfh.st's alone — no detour through Dashboard
+	// Icons. Without the Dashboard Icons index we cannot know that it lacks the
+	// name, so it is still asked first (the name might be in both).
+	if !known && inSelfhst && homarrIndexed {
+		return k.readSelfhst(ctx, name)
+	}
 	if !known {
 		ext = "svg"
 	}
@@ -428,18 +482,35 @@ func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error)
 		}
 	}
 
-	if k.cacheDir != "" {
-		for _, e := range []string{ext, "svg", "png"} {
-			// ! the file exists but has 0 bytes = the previous download left a poisoned
-			// cache (see the comment in fetch). We skip such a file and try to download
-			// again, instead of serving emptiness over and over.
-			if data, err := os.ReadFile(filepath.Join(k.cacheDir, name+"."+e)); err == nil && len(data) > 0 {
-				return data, iconKind(e), nil
-			}
-		}
+	if data, kind, ok := readCached(k.cacheDir, name, ext); ok {
+		return data, kind, nil
 	}
 
-	return k.fetch(ctx, name, ext)
+	data, kind, err := k.fetchFrom(ctx, cdnIcons, k.cacheDir, name, ext)
+	// a name Dashboard Icons does not list: selfh.st is the last resort when it has
+	// the name, or when its index is missing (zip mode, no network at start)
+	if err != nil && !known && (inSelfhst || !selfhstIndexed) {
+		if sData, sKind, sErr := k.readSelfhst(ctx, name); sErr == nil {
+			return sData, sKind, nil
+		}
+	}
+	return data, kind, err
+}
+
+// readCached looks for name in a cache directory, the expected extension first.
+func readCached(dir, name, ext string) ([]byte, string, bool) {
+	if dir == "" {
+		return nil, "", false
+	}
+	for _, e := range []string{ext, "svg", "png"} {
+		// ! the file exists but has 0 bytes = the previous download left a poisoned
+		// cache (see the comment in fetchFrom). We skip such a file and try to download
+		// again, instead of serving emptiness over and over.
+		if data, err := os.ReadFile(filepath.Join(dir, name+"."+e)); err == nil && len(data) > 0 {
+			return data, iconKind(e), true
+		}
+	}
+	return nil, "", false
 }
 
 // iconKind maps an icon file extension to a MIME type.
@@ -450,8 +521,9 @@ func iconKind(ext string) string {
 	return "image/svg+xml"
 }
 
-func (k *Catalog) fetch(ctx context.Context, name, ext string) ([]byte, string, error) {
-	url := fmt.Sprintf("%s/%s/%s.%s", cdnIcons, ext, name, ext)
+// fetchFrom downloads <base>/<ext>/<name>.<ext> and stores it in dir.
+func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([]byte, string, error) {
+	url := fmt.Sprintf("%s/%s/%s.%s", base, ext, name, ext)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
@@ -478,10 +550,10 @@ func (k *Catalog) fetch(ctx context.Context, name, ext string) ([]byte, string, 
 	if len(data) == 0 {
 		return nil, "", fmt.Errorf("CDN: empty response body for %s.%s", name, ext)
 	}
-	if k.cacheDir != "" {
-		tmp := filepath.Join(k.cacheDir, "."+name+"."+ext+".tmp")
+	if dir != "" && os.MkdirAll(dir, 0o755) == nil {
+		tmp := filepath.Join(dir, "."+name+"."+ext+".tmp")
 		if os.WriteFile(tmp, data, 0o644) == nil {
-			_ = os.Rename(tmp, filepath.Join(k.cacheDir, name+"."+ext))
+			_ = os.Rename(tmp, filepath.Join(dir, name+"."+ext))
 		}
 	}
 	return data, iconKind(ext), nil
@@ -510,7 +582,12 @@ func (k *Catalog) Search(q string, limit int) []string {
 			middle = append(middle, n)
 		default:
 			// alias: "8311 community" should find the icon "8311"
-			for _, a := range k.aliases[n] {
+			// (selfh.st's display name plays the alias: "llama.cpp" → llama-cpp)
+			aliases := k.aliases[n]
+			if aliases == nil {
+				aliases = k.selfhst.aliases[n]
+			}
+			for _, a := range aliases {
 				if strings.Contains(strings.ToLower(a), q) {
 					middle = append(middle, n)
 					break

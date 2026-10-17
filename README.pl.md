@@ -190,7 +190,14 @@ panelu, i po pierwszym pobraniu nie dostaje już nic. Widzi natomiast, raz,
 serwer proszący o plik. Jeśli i to jest za dużo — `--icons icons.zip` wozi
 komplet w jednym pliku i sprowadza liczbę zapytań na zewnątrz do zera.
 
-Katalog ma ponad 4000 pozycji, wyszukiwanych po nazwie i po aliasie.
+Katalog ma ponad 5000 pozycji, wyszukiwanych po nazwie i po aliasie. Łączy dwie
+kolekcje: najpierw [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache-2.0), a nazwy, których tam brakuje (np. `llama-cpp`), uzupełnia
+[selfh.st/icons](https://github.com/selfhst/icons) (CC BY 4.0). Gdy nazwa jest
+w obu, wygrywa Dashboard Icons; `icon: selfhst:<nazwa>` prosi jawnie o grafikę
+z selfh.st. Obie kolekcje mają osobny cache (`<cache>/selfhst/` dla selfh.st),
+więc jedna nie nadpisuje drugiej. Grafiki ikon należą do właścicieli znaków
+towarowych.
 
 ## Umie zajrzeć do Twoich kontenerów
 

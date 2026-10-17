@@ -190,7 +190,14 @@ and gets nothing at all after the first fetch. What it does see, once, is a
 server asking for a file. If even that is too much, `--icons icons.zip` ships
 the complete set in one file and makes the number of outbound requests zero.
 
-The catalog holds more than 4,000 icons, searchable by name and by alias.
+The catalog holds more than 5,000 icons, searchable by name and by alias. It
+merges two collections: [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache-2.0) comes first, and [selfh.st/icons](https://github.com/selfhst/icons)
+(CC BY 4.0) fills the names Dashboard Icons does not have, such as `llama-cpp`.
+When both have a name, Dashboard Icons wins; `icon: selfhst:<name>` asks for the
+selfh.st artwork explicitly. The two are cached apart (`<cache>/selfhst/` for
+selfh.st), so one never overwrites the other. Icon artwork belongs to its
+respective trademark owners.
 
 ## It can read your containers
 

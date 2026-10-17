@@ -10,6 +10,17 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Added
+
+- selfh.st/icons as a second icon catalog. Names that Dashboard Icons lacks
+  (e.g. `llama-cpp`) are now served, with dark/light variants where selfh.st
+  has them, and show up in the icon picker. Dashboard Icons still wins every
+  name it has, so existing icons do not change; `icon: selfhst:<name>` picks
+  the selfh.st artwork explicitly. selfh.st files are cached separately in
+  `<cache>/selfhst/`. `zip` mode still makes no index requests; a name the
+  zip does not have is looked up on the CDNs as before, now with selfh.st
+  after Dashboard Icons.
+
 ### Fixed
 
 - The 0.14.0 release published `latest` pointing at the `-git` image instead
