@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// SHYG-46: zapis ma przeżyć plik zamontowany jako pojedynczy bind-mount (rename
-// → EBUSY), katalog bez prawa zapisu (EACCES) i inny system plików (EXDEV), a
-// symlink do configu nie może zostać podmieniony na zwykły plik.
+// SHYG-46: saving must survive a file mounted as a single bind-mount (rename
+// → EBUSY), a directory without write permission (EACCES) and another file system (EXDEV), and
+// a symlink to the config must not be replaced with a regular file.
 
-func otwórzDoZapisu(t *testing.T, p string) *Document {
+func openForWrite(t *testing.T, p string) *Document {
 	t.Helper()
 	d, err := Open(p)
 	if err != nil {
@@ -24,25 +24,25 @@ func otwórzDoZapisu(t *testing.T, p string) *Document {
 	return d
 }
 
-// podmień ustawia zmienną na czas testu.
-func podmieńRename(t *testing.T, f func(string, string) error) {
+// replaceRename sets the variable for the duration of the test.
+func replaceRename(t *testing.T, f func(string, string) error) {
 	t.Helper()
-	stara := zamieńPlik
-	zamieńPlik = f
-	t.Cleanup(func() { zamieńPlik = stara })
+	oldName := replaceFile
+	replaceFile = f
+	t.Cleanup(func() { replaceFile = oldName })
 }
 
-func TestSaveZachowujeSymlink(t *testing.T) {
-	kat := t.TempDir()
-	cel := filepath.Join(kat, "dane", "prawdziwy.yaml")
-	os.MkdirAll(filepath.Dir(cel), 0o755)
-	os.WriteFile(cel, wczytajBasic(t), 0o640)
-	link := filepath.Join(kat, "shygarlic.yaml")
-	if err := os.Symlink(cel, link); err != nil {
+func TestSavePreservesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dane", "prawdziwy.yaml")
+	os.MkdirAll(filepath.Dir(target), 0o755)
+	os.WriteFile(target, loadBasic(t), 0o640)
+	link := filepath.Join(dir, "shygarlic.yaml")
+	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
 
-	d := otwórzDoZapisu(t, link)
+	d := openForWrite(t, link)
 	if err := d.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -51,163 +51,163 @@ func TestSaveZachowujeSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("symlink został podmieniony na zwykły plik")
+		t.Fatal("symlink was replaced with a regular file")
 	}
-	zapisane, _ := os.ReadFile(cel)
-	if string(zapisane) != string(d.Bytes()) {
-		t.Error("cel symlinka nie dostał nowej treści")
+	saved, _ := os.ReadFile(target)
+	if string(saved) != string(d.Bytes()) {
+		t.Error("the symlink target did not get the new content")
 	}
-	ents, _ := os.ReadDir(filepath.Dir(cel))
-	if len(ents) != 1 {
-		t.Errorf("w katalogu celu został śmieć: %v", ents)
+	entries, _ := os.ReadDir(filepath.Dir(target))
+	if len(entries) != 1 {
+		t.Errorf("junk left in the target directory: %v", entries)
 	}
-	if ents, _ := os.ReadDir(kat); len(ents) != 2 { // dane/ + link
-		t.Errorf("w katalogu symlinka powstały pliki: %v", ents)
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 { // data/ + link
+		t.Errorf("files appeared in the symlink's directory: %v", entries)
 	}
 }
 
-func TestSaveFallbackNaZapisWMiejscuPrzyEBUSYIEXDEV(t *testing.T) {
-	for nazwa, errno := range map[string]error{"EBUSY": syscall.EBUSY, "EXDEV": syscall.EXDEV} {
-		t.Run(nazwa, func(t *testing.T) {
+func TestSaveFallsBackToInPlaceWriteOnEBUSYAndEXDEV(t *testing.T) {
+	for name, errno := range map[string]error{"EBUSY": syscall.EBUSY, "EXDEV": syscall.EXDEV} {
+		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "shygarlic.yaml")
-			os.WriteFile(p, wczytajBasic(t), 0o640)
-			przed, _ := os.Stat(p)
-			podmieńRename(t, func(string, string) error {
+			os.WriteFile(p, loadBasic(t), 0o640)
+			before, _ := os.Stat(p)
+			replaceRename(t, func(string, string) error {
 				return &os.LinkError{Op: "rename", Err: errno}
 			})
 
-			d := otwórzDoZapisu(t, p)
+			d := openForWrite(t, p)
 			if err := d.Save(); err != nil {
-				t.Fatalf("Save powinien spaść na zapis w miejscu: %v", err)
+				t.Fatalf("Save should fall back to an in-place write: %v", err)
 			}
-			zapisane, _ := os.ReadFile(p)
-			if string(zapisane) != string(d.Bytes()) {
-				t.Error("treść na dysku ≠ dokument")
+			saved, _ := os.ReadFile(p)
+			if string(saved) != string(d.Bytes()) {
+				t.Error("content on disk ≠ document")
 			}
-			po, _ := os.Stat(p)
-			if !os.SameFile(przed, po) {
-				t.Error("plik został podmieniony — przy bind-mouncie to jedyny sposób, żeby się nie udało")
+			after, _ := os.Stat(p)
+			if !os.SameFile(before, after) {
+				t.Error("the file was replaced — with a bind-mount that is the only way for it to fail")
 			}
-			if po.Mode().Perm() != 0o640 {
-				t.Errorf("uprawnienia = %v", po.Mode().Perm())
+			if after.Mode().Perm() != 0o640 {
+				t.Errorf("permissions = %v", after.Mode().Perm())
 			}
-			if ents, _ := os.ReadDir(dir); len(ents) != 1 {
-				t.Errorf("został plik tymczasowy: %v", ents)
+			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+				t.Errorf("temp file left behind: %v", entries)
 			}
-			// kolejny zapis z tego samego dokumentu: hash zaktualizowany
+			// another save from the same document: hash updated
 			if err := d.SetServiceField("Media", "Sonarr", "url", "http://x:2"); err != nil {
 				t.Fatal(err)
 			}
 			if err := d.Save(); err != nil {
-				t.Errorf("drugi Save: %v", err)
+				t.Errorf("second Save: %v", err)
 			}
 		})
 	}
 }
 
-func TestSaveFallbackNieOminaStrażnikaZmianNaDysku(t *testing.T) {
+func TestSaveFallbackDoesNotBypassChangedOnDiskGuard(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shygarlic.yaml")
-	src := wczytajBasic(t)
+	src := loadBasic(t)
 	os.WriteFile(p, src, 0o644)
-	podmieńRename(t, func(string, string) error {
-		// ktoś edytuje plik dokładnie między próbą rename a zapisem w miejscu
+	replaceRename(t, func(string, string) error {
+		// someone edits the file exactly between the rename attempt and the in-place write
 		os.WriteFile(p, append(append([]byte{}, src...), []byte("\n# cudza edycja\n")...), 0o644)
 		return &os.LinkError{Op: "rename", Err: syscall.EBUSY}
 	})
 
-	d := otwórzDoZapisu(t, p)
+	d := openForWrite(t, p)
 	if err := d.Save(); !errors.Is(err, ErrChangedOnDisk) {
-		t.Fatalf("Save = %v, chcę ErrChangedOnDisk", err)
+		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 	}
-	teraz, _ := os.ReadFile(p)
-	if !contains(string(teraz), "# cudza edycja") {
-		t.Error("fallback nadpisał cudzą zmianę")
+	now, _ := os.ReadFile(p)
+	if !contains(string(now), "# cudza edycja") {
+		t.Error("fallback overwrote someone else's change")
 	}
 }
 
-func TestSaveInnyBłądRenameNieUruchamiaFallbacku(t *testing.T) {
+func TestSaveOtherRenameErrorDoesNotTriggerFallback(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shygarlic.yaml")
-	src := wczytajBasic(t)
+	src := loadBasic(t)
 	os.WriteFile(p, src, 0o644)
-	podmieńRename(t, func(string, string) error {
+	replaceRename(t, func(string, string) error {
 		return &os.LinkError{Op: "rename", Err: syscall.ENOSPC}
 	})
-	d := otwórzDoZapisu(t, p)
+	d := openForWrite(t, p)
 	if err := d.Save(); !errors.Is(err, syscall.ENOSPC) {
-		t.Fatalf("Save = %v, chcę ENOSPC", err)
+		t.Fatalf("Save = %v, want ENOSPC", err)
 	}
-	if teraz, _ := os.ReadFile(p); string(teraz) != string(src) {
-		t.Error("plik zmieniony mimo błędu, który nie jest powodem do fallbacku")
+	if now, _ := os.ReadFile(p); string(now) != string(src) {
+		t.Error("file changed despite an error that is not a reason for a fallback")
 	}
-	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
-		t.Errorf("został plik tymczasowy: %v", ents)
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("temp file left behind: %v", entries)
 	}
 }
 
-func TestSaveKatalogBezZapisuEACCES(t *testing.T) {
+func TestSaveDirectoryWithoutWriteEACCES(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("root ignoruje uprawnienia katalogu")
+		t.Skip("root ignores directory permissions")
 	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shygarlic.yaml")
-	os.WriteFile(p, wczytajBasic(t), 0o644) // sam plik zapisywalny
-	d := otwórzDoZapisu(t, p)
+	os.WriteFile(p, loadBasic(t), 0o644) // the file itself is writable
+	d := openForWrite(t, p)
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o755) })
 
 	if err := d.Save(); err != nil {
-		t.Fatalf("Save w katalogu bez zapisu: %v", err)
+		t.Fatalf("Save in a directory without write permission: %v", err)
 	}
-	if zapisane, _ := os.ReadFile(p); string(zapisane) != string(d.Bytes()) {
-		t.Error("treść nie trafiła do pliku")
+	if saved, _ := os.ReadFile(p); string(saved) != string(d.Bytes()) {
+		t.Error("content did not reach the file")
 	}
 }
 
-// Zapis w miejscu, który pada w połowie (ENOSPC/EIO), nie może zostawić
-// użytkownikowi okrojonego pliku.
-func TestZapisWMiejscuPrzywracaOryginałPoBłędzieZapisu(t *testing.T) {
+// An in-place write that fails halfway (ENOSPC/EIO) must not leave
+// the user with a truncated file.
+func TestInPlaceWriteRestoresOriginalAfterWriteError(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	oryginał := wczytajBasic(t)
-	os.WriteFile(p, oryginał, 0o640)
-	d := otwórzDoZapisu(t, p)
-	podmieńRename(t, func(string, string) error { return syscall.EBUSY }) // wymuś fallback
+	original := loadBasic(t)
+	os.WriteFile(p, original, 0o640)
+	d := openForWrite(t, p)
+	replaceRename(t, func(string, string) error { return syscall.EBUSY }) // force the fallback
 
-	stary := piszDoPliku
-	piszDoPliku = func(f *os.File, b []byte) (int, error) {
+	oldValue := writeToFile
+	writeToFile = func(f *os.File, b []byte) (int, error) {
 		n, _ := f.Write(b[:len(b)/2])
 		return n, syscall.ENOSPC
 	}
-	t.Cleanup(func() { piszDoPliku = stary })
+	t.Cleanup(func() { writeToFile = oldValue })
 
 	err := d.Save()
 	if !errors.Is(err, syscall.ENOSPC) {
-		t.Fatalf("err = %v, chcę ENOSPC", err)
+		t.Fatalf("err = %v, want ENOSPC", err)
 	}
-	if got, _ := os.ReadFile(p); string(got) != string(oryginał) {
-		t.Fatalf("plik nie wrócił do oryginału (%d B zamiast %d B)", len(got), len(oryginał))
+	if got, _ := os.ReadFile(p); string(got) != string(original) {
+		t.Fatalf("file did not return to the original (%d B instead of %d B)", len(got), len(original))
 	}
 }
 
-func TestZapisWMiejscuPrzyBłędzieFsyncPrzywracaOryginał(t *testing.T) {
+func TestInPlaceWriteOnFsyncErrorRestoresOriginal(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.yaml")
-	oryginał := wczytajBasic(t)
-	os.WriteFile(p, oryginał, 0o640)
-	d := otwórzDoZapisu(t, p)
-	podmieńRename(t, func(string, string) error { return syscall.EBUSY })
+	original := loadBasic(t)
+	os.WriteFile(p, original, 0o640)
+	d := openForWrite(t, p)
+	replaceRename(t, func(string, string) error { return syscall.EBUSY })
 
-	stary := synchronizujPlik
-	synchronizujPlik = func(*os.File) error { return syscall.EIO }
-	t.Cleanup(func() { synchronizujPlik = stary })
+	oldValue := syncFile
+	syncFile = func(*os.File) error { return syscall.EIO }
+	t.Cleanup(func() { syncFile = oldValue })
 
 	if err := d.Save(); !errors.Is(err, syscall.EIO) {
-		t.Fatalf("err = %v, chcę EIO", err)
+		t.Fatalf("err = %v, want EIO", err)
 	}
-	if got, _ := os.ReadFile(p); string(got) != string(oryginał) {
-		t.Fatal("plik nie wrócił do oryginału")
+	if got, _ := os.ReadFile(p); string(got) != string(original) {
+		t.Fatal("file did not return to the original")
 	}
 }

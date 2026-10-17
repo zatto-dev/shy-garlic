@@ -7,17 +7,17 @@ import (
 	"time"
 )
 
-// Duration istnieje, bo YAML nie ma typu czasu, a gołe time.Duration
-// deserializuje się z liczby nanosekund — nikt nie napisze `interval: 30000000000`.
-// Przyjmujemy zapis Go ("30s", "2m") oraz gołe liczby traktowane jako sekundy.
+// Duration exists because YAML has no duration type, and a bare time.Duration
+// deserializes from a number of nanoseconds — nobody will write `interval: 30000000000`.
+// We accept Go notation ("30s", "2m") and bare numbers treated as seconds.
 type Duration time.Duration
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 func (d Duration) String() string          { return time.Duration(d).String() }
 
-// UnmarshalYAML bierze wartość przez dekoder, a nie surowe bajty: goccy podaje
-// w bajtach skalar RAZEM z komentarzem z końca linii, więc `interval: 1m  # x`
-// nie przechodził ParseDuration i kończył jako 1s z gałęzi „gołe sekundy".
+// UnmarshalYAML takes the value through the decoder, not raw bytes: goccy gives
+// a scalar in bytes TOGETHER with the end-of-line comment, so `interval: 1m  # x`
+// failed ParseDuration and ended up as 1s from the "bare seconds" branch.
 func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var s string
 	if err := unmarshal(&s); err != nil {
@@ -37,7 +37,7 @@ func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		*d = Duration(v)
 		return nil
 	}
-	// gołe sekundy: `interval: 30`
+	// bare seconds: `interval: 30`
 	secs, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q", s)

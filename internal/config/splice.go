@@ -6,22 +6,22 @@ import (
 	"strings"
 )
 
-// replaceRange podmienia bajty [start,end) i przeparsowuje dokument.
-// Po każdej mutacji offsety w AST są nieaktualne, więc reparse jest obowiązkowy.
+// replaceRange replaces bytes [start,end) and re-parses the document.
+// After every mutation the AST offsets are stale, so reparse is mandatory.
 func (d *Document) replaceRange(start, end int, repl []byte) error {
 	next := slices.Concat(d.src[:start:start], repl, d.src[end:])
 	prev := d.src
 	d.src = next
 	if err := d.reparse(); err != nil {
 		d.src = prev
-		_ = d.reparse() // wróć do stanu sprzed zmiany
+		_ = d.reparse() // back to the state before the change
 		return err
 	}
 	return nil
 }
 
-// quoteLike formatuje wartość tak, żeby pasowała do stylu, który już jest w pliku.
-// old to oryginalne bajty wartości (mogą zawierać cudzysłowy).
+// quoteLike formats the value so it matches the style already used in the file.
+// old is the original bytes of the value (may contain quotes).
 func quoteLike(old []byte, value string) string {
 	if len(old) > 0 && (old[0] == '"' || old[0] == '\'') {
 		return quoteWith(rune(old[0]), value)
@@ -34,7 +34,7 @@ func quoteLike(old []byte, value string) string {
 
 func quoteWith(q rune, v string) string {
 	if q == '\'' {
-		// w YAML apostrof w wartości cytowanej pojedynczo podwaja się
+		// in YAML an apostrophe in a single-quoted value is doubled
 		return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 	}
 	var b strings.Builder
@@ -57,8 +57,8 @@ func quoteWith(q rune, v string) string {
 	return b.String()
 }
 
-// needsQuoting mówi, czy gołe zapisanie wartości zmieniłoby jej znaczenie
-// albo rozwaliło plik.
+// needsQuoting says whether writing the value bare would change its meaning
+// or break the file.
 func needsQuoting(v string) bool {
 	if v == "" {
 		return true
@@ -76,7 +76,7 @@ func needsQuoting(v string) bool {
 	case '&', '*', '!', '%', '@', '`', '>', '|', '{', '[', ',', '?', '#', '-', ':', '\'', '"':
 		return true
 	}
-	// wartość, która sama z siebie stałaby się liczbą, boolem albo nullem
+	// a value that on its own would become a number, bool or null
 	if _, err := strconv.ParseFloat(v, 64); err == nil {
 		return true
 	}
@@ -87,7 +87,7 @@ func needsQuoting(v string) bool {
 	return !plainRoundTrips(v)
 }
 
-// lineIndent zwraca wcięcie (w bajtach) linii, w której leży offset.
+// lineIndent returns the indent (in bytes) of the line containing the offset.
 func (d *Document) lineIndent(off int) int {
 	start := d.lineStart(off)
 	n := 0

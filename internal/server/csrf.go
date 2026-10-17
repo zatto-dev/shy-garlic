@@ -9,24 +9,24 @@ import (
 	"strings"
 )
 
-// Ochrona przed żądaniami z obcej strony i przed ślepą wiarą w nagłówki proxy.
+// Protection against requests from a foreign site and against blind trust in proxy headers.
 //
-// ! multipart/form-data jest jednym z trzech typów „prostego żądania", więc
-// endpoint wgrywania tapety NIE dostaje przypadkowej ochrony preflightem, którą
-// mają dzisiejsze żądania JSON. Jedna warstwa domyka to razem z dziurami, które
-// panel ma dziś: POST /setup bez ciasteczka na świeżej instancji (auto-submit z
-// obcej strony = założenie konta administratora), CSRF na /login i /logout oraz
-// POST /api/check i /api/notify/test, które nie mają ciała do sprawdzenia.
+// ! multipart/form-data is one of the three "simple request" types, so the
+// wallpaper upload endpoint does NOT get the accidental preflight protection that
+// today's JSON requests have. One layer closes this together with the holes the
+// panel has today: POST /setup without a cookie on a fresh instance (auto-submit
+// from a foreign site = creating an administrator account), CSRF on /login and
+// /logout, and POST /api/check and /api/notify/test, which have no body to check.
 
-// wymagajSameOrigin przepuszcza odczyty, a mutacje tylko z naszego originu.
-func wymagajSameOrigin(next http.Handler) http.Handler {
+// requireSameOrigin lets reads through, and mutations only from our own origin.
+func requireSameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !zTegoSamegoOrigin(r) {
+		if !fromSameOrigin(r) {
 			http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
 			return
 		}
@@ -34,29 +34,29 @@ func wymagajSameOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// zTegoSamegoOrigin czyta trzy źródła, od najpewniejszego. Sec-Fetch-Site
-// wysyła każda żywa przeglądarka i nie da się go podrobić z JS-a; Origin i
-// Referer są zapasem dla klientów bez niego (curl, stare silniki, skrypty).
-func zTegoSamegoOrigin(r *http.Request) bool {
+// fromSameOrigin reads three sources, from the most reliable. Sec-Fetch-Site is
+// sent by every live browser and cannot be forged from JS; Origin and
+// Referer are a fallback for clients without it (curl, old engines, scripts).
+func fromSameOrigin(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "none":
 		return true
 	case "same-site", "cross-site":
-		// ! sąsiad na tej samej domenie rejestrowalnej to typowa topologia
-		// homelabu i dokładnie ten przypadek, którego SameSite=Lax nie łapie
+		// ! a neighbour on the same registrable domain is the typical homelab topology
+		// and exactly the case SameSite=Lax does not catch
 		return false
 	}
 	if o := r.Header.Get("Origin"); o != "" {
-		return tenSamHost(o, r)
+		return sameHost(o, r)
 	}
 	if ref := r.Header.Get("Referer"); ref != "" {
-		return tenSamHost(ref, r)
+		return sameHost(ref, r)
 	}
 	return false
 }
 
-func tenSamHost(surowy string, r *http.Request) bool {
-	u, err := url.Parse(surowy)
+func sameHost(raw string, r *http.Request) bool {
+	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return false
 	}
@@ -66,33 +66,34 @@ func tenSamHost(surowy string, r *http.Request) bool {
 	if u.Scheme == "https" {
 		return true
 	}
-	return u.Scheme == "http" && !poHTTPS(r)
+	return u.Scheme == "http" && !overHTTPS(r)
 }
 
-// ── zaufane proxy ────────────────────────────────────────────────────────────
+// ── trusted proxy ────────────────────────────────────────────────────────────
 
-// zaufaneProxy — sieci, którym wolno mówić X-Forwarded-*. Domyślnie PUSTA.
+// trustedProxy — networks allowed to say X-Forwarded-*. EMPTY by default.
 //
-// ! Bez tej listy limiter prób logowania omijało się jednym nagłówkiem na
-// żądanie (każde z innym X-Forwarded-For to inny „adres"), a X-Forwarded-Proto
-// pozwalał wymusić albo zdjąć flagę Secure z ciasteczka sesji.
-var zaufaneProxy []netip.Prefix
+// ! Without this list the login attempt limiter could be bypassed with a single
+// header per request (each with a different X-Forwarded-For is a different
+// "address"), and X-Forwarded-Proto allowed forcing or removing the Secure flag
+// on the session cookie.
+var trustedProxy []netip.Prefix
 
-// UstawZaufaneProxy przyjmuje listę CIDR-ów (dopuszcza też gołe adresy).
-func UstawZaufaneProxy(lista []string) error {
-	out, err := parsujPrefiksy("zaufane proxy", lista)
+// SetTrustedProxy accepts a list of CIDRs (bare addresses are allowed too).
+func SetTrustedProxy(list []string) error {
+	out, err := parsePrefixes("zaufane proxy", list)
 	if err != nil {
 		return err
 	}
-	zaufaneProxy = out
+	trustedProxy = out
 	return nil
 }
 
-// parsujPrefiksy zamienia listę CIDR-ów i gołych adresów na prefiksy; puste
-// wpisy i spacje są pomijane.
-func parsujPrefiksy(co string, lista []string) ([]netip.Prefix, error) {
+// parsePrefixes turns a list of CIDRs and bare addresses into prefixes; empty
+// entries and spaces are skipped.
+func parsePrefixes(what string, list []string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
-	for _, s := range lista {
+	for _, s := range list {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			continue
@@ -101,7 +102,7 @@ func parsujPrefiksy(co string, lista []string) ([]netip.Prefix, error) {
 		if err != nil {
 			a, err2 := netip.ParseAddr(s)
 			if err2 != nil {
-				return nil, fmt.Errorf("%s %q: %w", co, s, err)
+				return nil, fmt.Errorf("%s %q: %w", what, s, err)
 			}
 			p = netip.PrefixFrom(a, a.BitLen())
 		}
@@ -110,9 +111,9 @@ func parsujPrefiksy(co string, lista []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-func wPrefiksach(a netip.Addr, lista []netip.Prefix) bool {
+func inPrefixes(a netip.Addr, list []netip.Prefix) bool {
 	a = a.Unmap()
-	for _, p := range lista {
+	for _, p := range list {
 		if p.Contains(a) {
 			return true
 		}
@@ -120,7 +121,7 @@ func wPrefiksach(a netip.Addr, lista []netip.Prefix) bool {
 	return false
 }
 
-func adresPołączenia(r *http.Request) (netip.Addr, bool) {
+func connAddress(r *http.Request) (netip.Addr, bool) {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
@@ -132,49 +133,49 @@ func adresPołączenia(r *http.Request) (netip.Addr, bool) {
 	return a.Unmap(), true
 }
 
-func odZaufanegoProxy(r *http.Request) bool {
-	if len(zaufaneProxy) == 0 {
+func fromTrustedProxy(r *http.Request) bool {
+	if len(trustedProxy) == 0 {
 		return false
 	}
-	a, ok := adresPołączenia(r)
-	return ok && wPrefiksach(a, zaufaneProxy)
+	a, ok := connAddress(r)
+	return ok && inPrefixes(a, trustedProxy)
 }
 
-// adresKlienta ustala, kto naprawdę łączy się z panelem.
+// clientAddress determines who is really connecting to the panel.
 //
-// Połączenie od niezaufanego peera: jego adres, nagłówki proxy ignorowane.
-// Od zaufanego proxy: X-Forwarded-For czytany OD PRAWEJ — każde proxy dopisuje
-// na koniec adres, od którego dostało żądanie, więc skrajnie prawy wpis, który
-// nie jest zaufanym proxy, to klient widziany przez najbardziej zewnętrzne
-// zaufane proxy. Wpisy z lewej klient potrafi wymyślić sam, więc nie mają głosu.
+// A connection from an untrusted peer: its address, proxy headers ignored.
+// From a trusted proxy: X-Forwarded-For read FROM THE RIGHT — each proxy appends
+// at the end the address it received the request from, so the rightmost entry that
+// is not a trusted proxy is the client as seen by the outermost trusted proxy.
+// Entries on the left can be made up by the client, so they have no say.
 //
-// ok == false: nagłówek jest nieczytelny (śmieć zamiast adresu). Wołający ma
-// wtedy odmówić, a nie zgadywać; addr zawiera adres połączenia, do limitów.
-func adresKlienta(r *http.Request) (addr netip.Addr, ok bool) {
-	peer, _ := adresPołączenia(r)
-	if !odZaufanegoProxy(r) {
+// ok == false: the header is unreadable (junk instead of an address). The caller
+// should then refuse rather than guess; addr holds the connection address, for limits.
+func clientAddress(r *http.Request) (addr netip.Addr, ok bool) {
+	peer, _ := connAddress(r)
+	if !fromTrustedProxy(r) {
 		return peer, peer.IsValid()
 	}
-	var wpisy []string
+	var entries []string
 	for _, h := range r.Header.Values("X-Forwarded-For") {
 		for _, e := range strings.Split(h, ",") {
 			if e = strings.TrimSpace(e); e != "" {
-				wpisy = append(wpisy, e)
+				entries = append(entries, e)
 			}
 		}
 	}
-	if len(wpisy) == 0 {
+	if len(entries) == 0 {
 		return peer, peer.IsValid()
 	}
-	for i := len(wpisy) - 1; i >= 0; i-- {
-		a, err := netip.ParseAddr(wpisy[i])
+	for i := len(entries) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(entries[i])
 		if err != nil {
 			return peer, false
 		}
 		a = a.Unmap()
-		if wPrefiksach(a, zaufaneProxy) {
+		if inPrefixes(a, trustedProxy) {
 			if i == 0 {
-				return a, true // cały łańcuch to zaufane proxy — bierzemy pierwsze
+				return a, true // the whole chain is trusted proxies — we take the first one
 			}
 			continue
 		}
@@ -183,8 +184,8 @@ func adresKlienta(r *http.Request) (addr netip.Addr, ok bool) {
 	return peer, false
 }
 
-// maWpisyXFF mówi, czy X-Forwarded-For niesie choć jeden niepusty wpis.
-func maWpisyXFF(r *http.Request) bool {
+// hasXFFEntries tells whether X-Forwarded-For carries at least one non-empty entry.
+func hasXFFEntries(r *http.Request) bool {
 	for _, h := range r.Header.Values("X-Forwarded-For") {
 		for _, e := range strings.Split(h, ",") {
 			if strings.TrimSpace(e) != "" {
@@ -195,11 +196,11 @@ func maWpisyXFF(r *http.Request) bool {
 	return false
 }
 
-// adresIP zwraca adres klienta jako tekst — klucz limitów i logów.
-// ! Wcześniej brał PIERWSZY wpis X-Forwarded-For, czyli ten, który klient
-// wpisuje sam — zmiana jednego nagłówka dawała „nowy adres" w limiterze.
-func adresIP(r *http.Request) string {
-	if a, ok := adresKlienta(r); ok {
+// ipAddress returns the client address as text — the key for limits and logs.
+// ! It used to take the FIRST X-Forwarded-For entry, i.e. the one the client
+// writes itself — changing one header gave a "new address" in the limiter.
+func ipAddress(r *http.Request) string {
+	if a, ok := clientAddress(r); ok {
 		return a.String()
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -208,20 +209,20 @@ func adresIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// nagłówkiProxy — ślady tego, że żądanie przeszło przez pośrednika.
-var nagłówkiProxy = []string{
+// proxyHeaders — traces that the request passed through an intermediary.
+var proxyHeaders = []string{
 	"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-Ip",
 	"Forwarded", "Cf-Connecting-Ip", "True-Client-Ip", "X-Client-Ip",
 }
 
-// zPośrednikaBezZaufania mówi, że żądanie nosi ślady proxy, którego nie
-// wpisano na listę zaufanych. Adres połączenia to wtedy adres pośrednika, nie
-// klienta, więc nie wolno na jego podstawie niczego odblokować.
-func zPośrednikaBezZaufania(r *http.Request) bool {
-	if odZaufanegoProxy(r) {
+// fromUntrustedProxy says the request bears traces of a proxy that was not put
+// on the trusted list. The connection address is then the intermediary's, not the
+// client's, so nothing may be unlocked on its basis.
+func fromUntrustedProxy(r *http.Request) bool {
+	if fromTrustedProxy(r) {
 		return false
 	}
-	for _, h := range nagłówkiProxy {
+	for _, h := range proxyHeaders {
 		if r.Header.Get(h) != "" {
 			return true
 		}
@@ -229,11 +230,11 @@ func zPośrednikaBezZaufania(r *http.Request) bool {
 	return false
 }
 
-// poHTTPS mówi, czy żądanie przyszło szyfrowanym kanałem — od tego zależy flaga
-// Secure na ciasteczku sesji.
-func poHTTPS(r *http.Request) bool {
+// overHTTPS tells whether the request came over an encrypted channel — the Secure
+// flag on the session cookie depends on it.
+func overHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return odZaufanegoProxy(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	return fromTrustedProxy(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

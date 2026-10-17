@@ -15,66 +15,66 @@ import (
 	"github.com/zatto-dev/shy-garlic/internal/store"
 )
 
-const ciasteczkoSesji = "shyg_session"
+const sessionCookie = "shyg_session"
 
-// limitFormularza — formularze logowania/setupu/języka to kilka pól; reszta to
-// próba zapchania pamięci.
-const limitFormularza = 64 << 10
+// limitForm — the login/setup/language forms are a few fields; the rest is an
+// attempt to clog the memory.
+const formLimit = 64 << 10
 
-type kluczKontekstu string
+type contextKey string
 
-const kluczUżytkownika kluczKontekstu = "user"
+const userKey contextKey = "user"
 
-// UżytkownikZŻądania zwraca zalogowanego użytkownika, jeśli jest.
-func UżytkownikZŻądania(r *http.Request) *store.Użytkownik {
-	u, _ := r.Context().Value(kluczUżytkownika).(*store.Użytkownik)
+// UserFromRequest returns the logged-in user, if there is one.
+func UserFromRequest(r *http.Request) *store.User {
+	u, _ := r.Context().Value(userKey).(*store.User)
 	return u
 }
 
-// ── ograniczanie prób logowania ──────────────────────────────────────────────
+// ── login attempt limiting ───────────────────────────────────────────────────
 
 type limiter struct {
-	mu    sync.Mutex
-	próby map[string][]time.Time
-	próg  int
+	mu        sync.Mutex
+	attempts  map[string][]time.Time
+	threshold int
 
-	// maksGlobalnie: ile nieudanych prób na minutę przyjmujemy łącznie ze
-	// WSZYSTKICH adresów, zanim wstrzymamy kolejne (0 = bez limitu globalnego).
-	// To bezpiecznik na rozproszone zgadywanie z wielu adresów (rotacja /64,
-	// botnet); blokada jest chwilowa — wygasa, gdy okno minuty się przesunie.
-	maksGlobalnie int
-	globalnie     []time.Time
+	// globalMax: how many failed attempts per minute we accept in total from ALL
+	// addresses before holding off further ones (0 = no global limit). It is a fuse
+	// against distributed guessing from many addresses (/64 rotation, botnet); the
+	// block is temporary — it expires when the one-minute window moves on.
+	globalMax int
+	global    []time.Time
 
-	maksKluczy int              // twarda granica pamięci
-	teraz      func() time.Time // wstrzykiwane w testach
+	maxKeys int              // hard memory bound
+	now     func() time.Time // injected in tests
 }
 
-func nowyLimiter() *limiter {
-	l := nowyLimiterZProgiem(5)
-	l.maksGlobalnie = maksPorażekLogowaniaNaMinutę
+func newLimiter() *limiter {
+	l := newLimiterWithThreshold(5)
+	l.globalMax = maxLoginFailuresPerMinute
 	return l
 }
 
-func nowyLimiterZProgiem(próg int) *limiter {
-	return &limiter{próby: map[string][]time.Time{}, próg: próg,
-		maksKluczy: maksAdresówWLimiterze, teraz: time.Now}
+func newLimiterWithThreshold(threshold int) *limiter {
+	return &limiter{attempts: map[string][]time.Time{}, threshold: threshold,
+		maxKeys: limiterMaxAddresses, now: time.Now}
 }
 
-// maksAdresówWLimiterze — twarda górna granica pamięci: mapa rośnie o adres
-// przy każdym pierwszym błędzie, a /metrics może stać w internecie.
-const maksAdresówWLimiterze = 10000
+// limiterMaxAddresses — hard upper memory bound: the map grows by one address
+// on every first failure, and /metrics may be exposed to the internet.
+const limiterMaxAddresses = 10000
 
-// maksPorażekLogowaniaNaMinutę — globalny bezpiecznik logowania (wszystkie adresy razem).
-const maksPorażekLogowaniaNaMinutę = 30
+// maxLoginFailuresPerMinute — global login fuse (all addresses together).
+const maxLoginFailuresPerMinute = 30
 
 const (
-	oknoLimitera         = 5 * time.Minute
-	oknoLimituGlobalnego = time.Minute
+	limiterWindow     = 5 * time.Minute
+	globalLimitWindow = time.Minute
 )
 
-// kluczLimitera: IPv6 liczymy po prefiksie /64 (jedna sieć domowa dostaje
-// 2^64 adresów, więc limit per pełny adres nic nie dawał), IPv4 po pełnym adresie.
-func kluczLimitera(ip string) string {
+// limiterKey: IPv6 is counted by the /64 prefix (one home network gets
+// 2^64 addresses, so a per-full-address limit did nothing), IPv4 by the full address.
+func limiterKey(ip string) string {
 	a, err := netip.ParseAddr(ip)
 	if err != nil {
 		return ip
@@ -88,121 +88,121 @@ func kluczLimitera(ip string) string {
 	return a.String()
 }
 
-// wolno zwraca false, gdy z tego adresu było już `próg` nieudanych prób w 5 minut
-// albo gdy globalny limit porażek na minutę jest wyczerpany.
-func (l *limiter) wolno(ip string) bool {
+// allow returns false when this address already had `threshold` failed attempts
+// in 5 minutes or when the global failure-per-minute limit is exhausted.
+func (l *limiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	teraz := l.teraz()
-	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) >= l.maksGlobalnie {
+	now := l.now()
+	if l.globalMax > 0 && len(l.freshGlobal(now)) >= l.globalMax {
 		return false
 	}
-	klucz := kluczLimitera(ip)
-	próg := teraz.Add(-oknoLimitera)
-	świeże := l.próby[klucz][:0]
-	for _, t := range l.próby[klucz] {
-		if t.After(próg) {
-			świeże = append(świeże, t)
+	key := limiterKey(ip)
+	threshold := now.Add(-limiterWindow)
+	fresh := l.attempts[key][:0]
+	for _, t := range l.attempts[key] {
+		if t.After(threshold) {
+			fresh = append(fresh, t)
 		}
 	}
-	if len(świeże) == 0 {
-		delete(l.próby, klucz)
+	if len(fresh) == 0 {
+		delete(l.attempts, key)
 	} else {
-		l.próby[klucz] = świeże
+		l.attempts[key] = fresh
 	}
-	return len(świeże) < l.próg
+	return len(fresh) < l.threshold
 }
 
-func (l *limiter) świeżeGlobalnie(teraz time.Time) []time.Time {
-	od := teraz.Add(-oknoLimituGlobalnego)
+func (l *limiter) freshGlobal(now time.Time) []time.Time {
+	from := now.Add(-globalLimitWindow)
 	i := 0
-	for i < len(l.globalnie) && !l.globalnie[i].After(od) {
+	for i < len(l.global) && !l.global[i].After(from) {
 		i++
 	}
-	l.globalnie = l.globalnie[i:]
-	return l.globalnie
+	l.global = l.global[i:]
+	return l.global
 }
 
-func (l *limiter) zapiszPorażkę(ip string) {
+func (l *limiter) recordFailure(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	teraz := l.teraz()
-	klucz := kluczLimitera(ip)
-	if _, znany := l.próby[klucz]; !znany && len(l.próby) >= l.maksKluczy {
-		l.zwolnijMiejsce(teraz)
+	now := l.now()
+	key := limiterKey(ip)
+	if _, known := l.attempts[key]; !known && len(l.attempts) >= l.maxKeys {
+		l.freeSpace(now)
 	}
-	l.próby[klucz] = append(l.próby[klucz], teraz)
-	if l.maksGlobalnie > 0 && len(l.świeżeGlobalnie(teraz)) < l.maksGlobalnie {
-		l.globalnie = append(l.globalnie, teraz)
+	l.attempts[key] = append(l.attempts[key], now)
+	if l.globalMax > 0 && len(l.freshGlobal(now)) < l.globalMax {
+		l.global = append(l.global, now)
 	}
 }
 
-// zwolnijMiejsce robi miejsce na nowy klucz, nie zapominając wszystkich naraz:
-// najpierw wygasłe wpisy, a jeśli to za mało — jeden, najdawniej używany.
-func (l *limiter) zwolnijMiejsce(teraz time.Time) {
-	próg := teraz.Add(-oknoLimitera)
-	for k, ts := range l.próby {
-		if len(ts) == 0 || !ts[len(ts)-1].After(próg) {
-			delete(l.próby, k)
+// freeSpace makes room for a new key without forgetting everything at once:
+// first the expired entries, and if that is not enough — the single least recently used one.
+func (l *limiter) freeSpace(now time.Time) {
+	threshold := now.Add(-limiterWindow)
+	for k, ts := range l.attempts {
+		if len(ts) == 0 || !ts[len(ts)-1].After(threshold) {
+			delete(l.attempts, k)
 		}
 	}
-	if len(l.próby) < l.maksKluczy {
+	if len(l.attempts) < l.maxKeys {
 		return
 	}
-	var najstarszy string
-	var kiedy time.Time
-	for k, ts := range l.próby {
-		if o := ts[len(ts)-1]; najstarszy == "" || o.Before(kiedy) {
-			najstarszy, kiedy = k, o
+	var oldest string
+	var when time.Time
+	for k, ts := range l.attempts {
+		if o := ts[len(ts)-1]; oldest == "" || o.Before(when) {
+			oldest, when = k, o
 		}
 	}
-	delete(l.próby, najstarszy)
+	delete(l.attempts, oldest)
 }
 
-// adresIP i poHTTPS mieszkają w csrf.go — obie zależą od listy zaufanych proxy.
+// ipAddress and overHTTPS live in csrf.go — both depend on the trusted proxy list.
 
-// bezpiecznyCel zwraca `next` tylko wtedy, gdy jest ścieżką wewnątrz panelu;
-// w każdym innym przypadku "/". Jedyne miejsce prawdy dla przekierowań po
-// logowaniu i po zmianie języka.
+// safeTarget returns `next` only when it is a path inside the panel;
+// in every other case "/". The single source of truth for redirects after
+// login and after a language change.
 //
-// ! Sam test `HasPrefix("/") && !HasPrefix("//")` przepuszczał `/\evil.com`:
-// przeglądarki traktują `\` jak `/`, więc Location: /\evil.com to adres
-// zewnętrzny. Odrzucamy backslash (także zakodowany), znaki sterujące i
-// wszystko, co url.Parse widzi jako schemat albo host.
-func bezpiecznyCel(next string) string {
-	const domyślny = "/"
+// ! The test `HasPrefix("/") && !HasPrefix("//")` alone let `/\evil.com` through:
+// browsers treat `\` like `/`, so Location: /\evil.com is an external address.
+// We reject a backslash (also encoded), control characters and everything that
+// url.Parse sees as a scheme or host.
+func safeTarget(next string) string {
+	const def = "/"
 	if next == "" || next[0] != '/' || strings.HasPrefix(next, "//") {
-		return domyślny
+		return def
 	}
 	for _, r := range next {
 		if r == '\\' || r < 0x20 || r == 0x7f {
-			return domyślny
+			return def
 		}
 	}
-	// zakodowany backslash albo znak sterujący: dekodujemy i sprawdzamy jeszcze raz
-	if dek, err := url.PathUnescape(next); err != nil {
-		return domyślny
+	// encoded backslash or control character: we decode and check once more
+	if decoded, err := url.PathUnescape(next); err != nil {
+		return def
 	} else {
-		for _, r := range dek {
+		for _, r := range decoded {
 			if r == '\\' || r < 0x20 || r == 0x7f {
-				return domyślny
+				return def
 			}
 		}
-		if strings.HasPrefix(dek, "//") {
-			return domyślny
+		if strings.HasPrefix(decoded, "//") {
+			return def
 		}
 	}
 	u, err := url.Parse(next)
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || !strings.HasPrefix(u.Path, "/") {
-		return domyślny
+		return def
 	}
 	return next
 }
 
-// celZReferera — powrót na stronę, z której przyszło żądanie, ale tylko jeśli
-// Referer wskazuje TEN SAM host. GET /lang nie jest chroniony przez
-// wymagajSameOrigin, więc obcy Referer to był otwarty redirect.
-func celZReferera(r *http.Request) string {
+// targetFromReferer — go back to the page the request came from, but only if the
+// Referer points to the SAME host. GET /lang is not protected by
+// requireSameOrigin, so a foreign Referer was an open redirect.
+func targetFromReferer(r *http.Request) string {
 	ref := r.Header.Get("Referer")
 	if ref == "" {
 		return "/"
@@ -211,46 +211,46 @@ func celZReferera(r *http.Request) string {
 	if err != nil || !strings.EqualFold(u.Host, r.Host) {
 		return "/"
 	}
-	return bezpiecznyCel(u.RequestURI())
+	return safeTarget(u.RequestURI())
 }
 
 // ── middleware ───────────────────────────────────────────────────────────────
 
-// wymagajLogowania przepuszcza tylko z ważną sesją. Gdy w bazie nie ma jeszcze
-// żadnego konta, przekierowuje na /setup — panel nie może stać otworem.
+// requireLogin lets through only a valid session. When there is no account in the
+// DB yet, it redirects to /setup — the panel must not stand wide open.
 //
-// Poza sesją są dwa wąskie wyjątki, oba tylko dla GET (patrz tokeny.go):
-// token API na trzech trasach tylko-do-odczytu i nieuwierzytelnione /metrics
-// dla sieci z --metrics-allow. Trasy tokenowe i /api/* nigdy nie odsyłają na
-// /login — klient maszynowy dostaje 401.
-func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
+// Outside a session there are two narrow exceptions, both only for GET (see tokens.go):
+// an API token on three read-only routes and unauthenticated /metrics for
+// networks from --metrics-allow. Token routes and /api/* never redirect to
+// /login — a machine client gets 401.
+func (s *Server) requireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == "/metrics" && s.metrykiZCIDR(r) {
+		if r.Method == http.MethodGet && r.URL.Path == "/metrics" && s.metricsFromCIDR(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		_, maBearer := bearerZNagłówka(r)
-		maszynowa := trasaTokenowa(r) && (maBearer || r.URL.Path == "/metrics")
+		_, hasBearer := bearerFromHeader(r)
+		machine := tokenRoute(r) && (hasBearer || r.URL.Path == "/metrics")
 
-		if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
-			if maszynowa {
-				odmówBezSesji(w, r)
+		if n, err := s.st.UserCount(r.Context()); err == nil && n == 0 {
+			if machine {
+				denyWithoutSession(w, r)
 				return
 			}
 			http.Redirect(w, r, "/setup", http.StatusSeeOther)
 			return
 		}
 
-		c, err := r.Cookie(ciasteczkoSesji)
+		c, err := r.Cookie(sessionCookie)
 		if err == nil {
-			if u, err := s.st.Sesja(r.Context(), c.Value); err == nil {
-				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), kluczUżytkownika, u)))
+			if u, err := s.st.Session(r.Context(), c.Value); err == nil {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
 				return
 			}
 		}
 
-		if trasaTokenowa(r) && maBearer {
-			if s.uwierzytelnijToken(w, r) {
+		if tokenRoute(r) && hasBearer {
+			if s.authenticateToken(w, r) {
 				next.ServeHTTP(w, r)
 			}
 			return
@@ -258,158 +258,158 @@ func (s *Server) wymagajLogowania(next http.Handler) http.Handler {
 
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" ||
 			r.Header.Get("Accept") == "text/event-stream" {
-			odmówBezSesji(w, r)
+			denyWithoutSession(w, r)
 			return
 		}
-		cel := "/login"
+		target := "/login"
 		if r.URL.Path != "/" {
-			cel += "?next=" + url.QueryEscape(r.URL.Path)
+			target += "?next=" + url.QueryEscape(r.URL.Path)
 		}
-		http.Redirect(w, r, cel, http.StatusSeeOther)
+		http.Redirect(w, r, target, http.StatusSeeOther)
 	})
 }
 
-func (s *Server) ustawSesję(w http.ResponseWriter, r *http.Request, userID int64) error {
-	token, wygasa, err := s.st.NowaSesja(r.Context(), userID)
+func (s *Server) setSession(w http.ResponseWriter, r *http.Request, userID int64) error {
+	token, expires, err := s.st.NewSession(r.Context(), userID)
 	if err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     ciasteczkoSesji,
+		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
-		Expires:  wygasa,
+		Expires:  expires,
 		HttpOnly: true,
-		Secure:   poHTTPS(r),
-		// ! Strict, nie Lax: panel nie ma ani jednego przepływu wejściowego z
-		// zewnątrz, więc koszt jest zerowy, a Lax nie broni przed sąsiadem na
-		// tej samej domenie rejestrowalnej — czyli przed typowym homelabem,
-		// gdzie obok panelu stoi kilkanaście self-hostowanych apek.
+		Secure:   overHTTPS(r),
+		// ! Strict, not Lax: the panel has not a single inbound flow from outside, so the
+		// cost is zero, and Lax does not protect against a neighbour on the same
+		// registrable domain — that is, against a typical homelab where a dozen
+		// self-hosted apps stand next to the panel.
 		SameSite: http.SameSiteStrictMode,
 	})
 	return nil
 }
 
-// ── strony ───────────────────────────────────────────────────────────────────
+// ── pages ────────────────────────────────────────────────────────────────────
 
-type widokLogowania struct {
-	Błąd   string
-	Login  string
-	Next   string
-	Wersja string
-	Setup  bool
-	Tytuł  string
+type loginView struct {
+	Error   string
+	Login   string
+	Next    string
+	Version string
+	Setup   bool
+	Title   string
 
-	Lang             string
-	T                map[string]string
-	DrugiJezyk       string
-	DrugiJezykNazwa  string
-	DrugiJezykKrotko string
+	Lang            string
+	T               map[string]string
+	SecondLang      string
+	SecondLangName  string
+	SecondLangShort string
 
-	// Wyglad — tło bramy. ! Nigdy „photo" i nigdy z nazwą pliku: /bg/ stoi za
-	// logowaniem, a zdjęcie użytkownika (razem z EXIF-em) nie ma prawa wyciec
-	// do kogoś, kto się jeszcze nie przedstawił.
-	Wyglad wyglądWidok
+	// Appearance — the gate background. ! Never "photo" and never with a file name: /bg/ sits
+	// behind the login, and the user's photo (together with its EXIF) must not leak
+	// to someone who has not introduced themselves yet.
+	Appearance appearanceView
 }
 
-// handleLang przełącza język i wraca tam, skąd użytkownik przyszedł.
+// handleLang switches the language and goes back to where the user came from.
 //
-// Obsługuje POST z formularza i GET z parametrem — bo proxy przed panelem
-// (bramki SSO, WAF-y) potrafią zjeść POST-a, a przełącznik języka ma działać
-// wszędzie, także w przeglądarce bez JavaScriptu.
+// Handles a POST from a form and a GET with a parameter — because proxies in front
+// of the panel (SSO gates, WAFs) can swallow a POST, and the language switch
+// must work everywhere, also in a browser without JavaScript.
 func (s *Server) handleLang(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
+	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	_ = r.ParseForm()
-	l := i18n.Rozpoznaj(r.FormValue("lang"))
+	l := i18n.ParseLang(r.FormValue("lang"))
 	if l == "" {
-		l = i18n.Rozpoznaj(r.URL.Query().Get("set"))
+		l = i18n.ParseLang(r.URL.Query().Get("set"))
 	}
 	if l == "" {
 		l = i18n.EN
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: i18n.Ciasteczko, Value: string(l), Path: "/",
+		Name: i18n.CookieName, Value: string(l), Path: "/",
 		MaxAge: 365 * 24 * 3600, HttpOnly: false,
-		Secure: poHTTPS(r), SameSite: http.SameSiteLaxMode,
+		Secure: overHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
 	next := r.FormValue("next")
-	cel := bezpiecznyCel(next)
-	if cel == "/" && next != "/" { // brak albo zły next → wracamy skąd przyszło
-		cel = celZReferera(r)
+	target := safeTarget(next)
+	if target == "/" && next != "/" { // missing or bad next → go back to where it came from
+		target = targetFromReferer(r)
 	}
-	http.Redirect(w, r, cel, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleLoginGET(w http.ResponseWriter, r *http.Request) {
-	if n, err := s.st.LiczbaUżytkowników(r.Context()); err == nil && n == 0 {
+	if n, err := s.st.UserCount(r.Context()); err == nil && n == 0 {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
-	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
-		if _, err := s.st.Sesja(r.Context(), c.Value); err == nil {
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if _, err := s.st.Session(r.Context(), c.Value); err == nil {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 	}
-	lang := i18n.Wybierz(r)
-	s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
-		Next: r.URL.Query().Get("next"), Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+	lang := i18n.FromRequest(r)
+	s.renderLogin(w, s.withLang(lang, loginView{
+		Next: r.URL.Query().Get("next"), Version: Version, Title: i18n.T(lang, "logowanie")}))
 }
 
 func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
+	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
-	hasło := r.FormValue("password")
-	next := bezpiecznyCel(r.FormValue("next"))
+	password := r.FormValue("password")
+	next := safeTarget(r.FormValue("next"))
 
-	ip := adresIP(r)
-	if !s.lim.wolno(ip) {
-		slog.Warn("za dużo prób logowania", "ip", ip)
+	ip := ipAddress(r)
+	if !s.lim.allow(ip) {
+		slog.Warn("too many login attempts", "ip", ip)
 		w.WriteHeader(http.StatusTooManyRequests)
-		lang := i18n.Wybierz(r)
-		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
-			Błąd: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
-			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+		lang := i18n.FromRequest(r)
+		s.renderLogin(w, s.withLang(lang, loginView{
+			Error: i18n.T(lang, "za_duzo_prob"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "logowanie")}))
 		return
 	}
 
-	u, err := s.st.Sprawdź(r.Context(), login, hasło)
+	u, err := s.st.Authenticate(r.Context(), login, password)
 	if err != nil {
-		s.lim.zapiszPorażkę(ip)
-		slog.Warn("nieudane logowanie", "login", login, "ip", ip)
+		s.lim.recordFailure(ip)
+		slog.Warn("login failed", "login", login, "ip", ip)
 		w.WriteHeader(http.StatusUnauthorized)
-		lang := i18n.Wybierz(r)
-		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
-			Błąd: i18n.T(lang, "zle_dane"), Login: login, Next: next,
-			Wersja: Version, Tytuł: i18n.T(lang, "logowanie")}))
+		lang := i18n.FromRequest(r)
+		s.renderLogin(w, s.withLang(lang, loginView{
+			Error: i18n.T(lang, "zle_dane"), Login: login, Next: next,
+			Version: Version, Title: i18n.T(lang, "logowanie")}))
 		return
 	}
-	if err := s.ustawSesję(w, r, u.ID); err != nil {
+	if err := s.setSession(w, r, u.ID); err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
 	}
-	slog.Info("zalogowany", "login", u.Login, "ip", ip)
+	slog.Info("logged in", "login", u.Login, "ip", ip)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(ciasteczkoSesji); err == nil {
-		_ = s.st.UsuńSesję(r.Context(), c.Value)
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		_ = s.st.RemoveSession(r.Context(), c.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: ciasteczkoSesji, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: poHTTPS(r), SameSite: http.SameSiteStrictMode,
+		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: overHTTPS(r), SameSite: http.SameSiteStrictMode,
 	})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// handleSetup działa wyłącznie dopóki nie ma ani jednego konta.
+// handleSetup works only as long as there is not a single account.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	n, err := s.st.LiczbaUżytkowników(r.Context())
+	n, err := s.st.UserCount(r.Context())
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -419,77 +419,76 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		lang := i18n.Wybierz(r)
-		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{
-			Setup: true, Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
+		lang := i18n.FromRequest(r)
+		s.renderLogin(w, s.withLang(lang, loginView{
+			Setup: true, Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, limitFormularza)
+	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
-	hasło := r.FormValue("password")
-	u, err := s.st.DodajUżytkownika(r.Context(), login, hasło)
+	password := r.FormValue("password")
+	u, err := s.st.AddUser(r.Context(), login, password)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		lang := i18n.Wybierz(r)
-		komunikat := i18n.T(lang, "blad_konta")
+		lang := i18n.FromRequest(r)
+		message := i18n.T(lang, "blad_konta")
 		if strings.Contains(err.Error(), "8 characters") {
-			komunikat = i18n.T(lang, "haslo_za_krotkie")
+			message = i18n.T(lang, "haslo_za_krotkie")
 		} else if strings.Contains(err.Error(), "too short") {
-			komunikat = i18n.T(lang, "login_za_krotki")
+			message = i18n.T(lang, "login_za_krotki")
 		}
-		s.renderLogin(w, s.zJęzykiem(lang, widokLogowania{Setup: true, Błąd: komunikat, Login: login,
-			Wersja: Version, Tytuł: i18n.T(lang, "pierwsze_urucho")}))
+		s.renderLogin(w, s.withLang(lang, loginView{Setup: true, Error: message, Login: login,
+			Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
 		return
 	}
-	if err := s.ustawSesję(w, r, u.ID); err != nil {
+	if err := s.setSession(w, r, u.ID); err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
 	}
-	slog.Info("utworzono konto administratora", "login", u.Login)
+	slog.Info("admin account created", "login", u.Login)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (s *Server) renderLogin(w http.ResponseWriter, dane widokLogowania) {
+func (s *Server) renderLogin(w http.ResponseWriter, data loginView) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.tmpl.ExecuteTemplate(w, "login.html", dane); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
 		slog.Error("render login", "err", err)
 	}
 }
 
-// BootstrapUżytkownika tworzy konto z ENV przy starcie (SHYG_ADMIN_USER +
-// SHYG_ADMIN_PASSWORD) — wygodne przy pierwszym deployu bez wchodzenia w UI.
-func BootstrapUżytkownika(ctx context.Context, st *store.Store, login, hasło string) error {
-	if login == "" || hasło == "" {
+// BootstrapUser creates an account from ENV at start-up (SHYG_ADMIN_USER +
+// SHYG_ADMIN_PASSWORD) — handy on the first deploy without going into the UI.
+func BootstrapUser(ctx context.Context, st *store.Store, login, password string) error {
+	if login == "" || password == "" {
 		return nil
 	}
-	n, err := st.LiczbaUżytkowników(ctx)
+	n, err := st.UserCount(ctx)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	if _, err := st.DodajUżytkownika(ctx, login, hasło); err != nil && !errors.Is(err, store.ErrJużIstnieje) {
+	if _, err := st.AddUser(ctx, login, password); err != nil && !errors.Is(err, store.ErrUserExists) {
 		return err
 	}
-	slog.Info("konto administratora utworzone z ENV", "login", login)
+	slog.Info("admin account created from ENV", "login", login)
 	return nil
 }
 
-
-// zJęzykiem uzupełnia widok logowania o teksty, przełącznik języka i tło.
-func (s *Server) zJęzykiem(l i18n.Lang, w widokLogowania) widokLogowania {
+// withLang completes the login view with texts, the language switch and the background.
+func (s *Server) withLang(l i18n.Lang, w loginView) loginView {
 	w.Lang = string(l)
-	w.T = i18n.Mapa(l)
-	d := drugi(l)
-	w.DrugiJezyk = string(d)
-	w.DrugiJezykNazwa = d.Nazwa()
-	w.DrugiJezykKrotko = d.Krótko()
-	w.Wyglad = s.wyglądBramy()
+	w.T = i18n.Map(l)
+	d := second(l)
+	w.SecondLang = string(d)
+	w.SecondLangName = d.Name()
+	w.SecondLangShort = d.Short()
+	w.Appearance = s.gateAppearance()
 	return w
 }

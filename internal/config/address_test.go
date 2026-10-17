@@ -2,12 +2,12 @@ package config
 
 import "testing"
 
-func TestPoprawnyAdresUsługi(t *testing.T) {
+func TestValidServiceAddress(t *testing.T) {
 	for _, c := range []struct {
-		adres      string
-		ok, klikal bool
+		address       string
+		ok, clickable bool
 	}{
-		{"", true, false}, // usługa bez sprawdzania
+		{"", true, false}, // service without a check
 		{"http://x", true, true},
 		{"https://x.example:8443/p?q=1", true, true},
 		{"HTTPS://X.EXAMPLE", true, true},
@@ -26,11 +26,11 @@ func TestPoprawnyAdresUsługi(t *testing.T) {
 		{"https://x\n", false, false},
 		{"http://x/\x00", false, false},
 	} {
-		if got := PoprawnyAdresUsługi(c.adres); got != c.ok {
-			t.Errorf("PoprawnyAdresUsługi(%q) = %v, chcę %v", c.adres, got, c.ok)
+		if got := ValidServiceAddress(c.address); got != c.ok {
+			t.Errorf("ValidServiceAddress(%q) = %v, want %v", c.address, got, c.ok)
 		}
-		if got := AdresKlikalny(c.adres); got != c.klikal {
-			t.Errorf("AdresKlikalny(%q) = %v, chcę %v", c.adres, got, c.klikal)
+		if got := ClickableAddress(c.address); got != c.clickable {
+			t.Errorf("ClickableAddress(%q) = %v, want %v", c.address, got, c.clickable)
 		}
 	}
 }

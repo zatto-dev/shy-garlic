@@ -5,33 +5,33 @@ import (
 	"strings"
 )
 
-// Diff pokazuje, co dokładnie zmieni się w pliku — w formacie unified, tym
-// samym, który każdy zna z gita.
+// Diff shows exactly what will change in the file — in unified format, the
+// same one everybody knows from git.
 //
-// To nie jest ozdoba. Research konkurencji (2026-08-14) wykazał, że obejścia
-// dodające edytor UI do paneli YAML-owych nie zdobyły użytkowników nie dlatego,
-// że były niepotrzebne, tylko dlatego, że nikt nie ufał im z zapisem do
-// własnego pliku. Pokazanie diffa PRZED zapisem jest odpowiedzią na to
-// wprost: nie musisz nam wierzyć, po prostu zobacz.
+// This is not decoration. Competitor research (2026-08-14) showed that
+// workarounds adding a UI editor to YAML-driven dashboards did not win users
+// not because they were unnecessary, but because nobody trusted them to write
+// to their own file. Showing the diff BEFORE saving answers that directly:
+// you don't have to take our word for it, just look.
 //
-// Własna implementacja zamiast biblioteki, bo pliki konfiguracyjne mają
-// kilkaset linii, a zależność mniej to zależność mniej.
-func Diff(stary, nowy []byte, kontekst int) string {
-	if kontekst < 0 {
-		kontekst = 3
+// Own implementation instead of a library, because config files are a few
+// hundred lines long, and one dependency less is one dependency less.
+func Diff(oldValue, newValue []byte, context int) string {
+	if context < 0 {
+		context = 3
 	}
-	a := podzielLinie(stary)
-	b := podzielLinie(nowy)
-	if równe(a, b) {
+	a := splitLines(oldValue)
+	b := splitLines(newValue)
+	if equalLines(a, b) {
 		return ""
 	}
 
-	wspólne := lcs(a, b)
-	kroki := ścieżka(a, b, wspólne)
-	return sklejHunki(a, b, kroki, kontekst)
+	common := lcs(a, b)
+	steps := editScript(a, b, common)
+	return joinHunks(a, b, steps, context)
 }
 
-func podzielLinie(b []byte) []string {
+func splitLines(b []byte) []string {
 	s := string(b)
 	s = strings.TrimSuffix(s, "\n")
 	if s == "" {
@@ -40,7 +40,7 @@ func podzielLinie(b []byte) []string {
 	return strings.Split(s, "\n")
 }
 
-func równe(a, b []string) bool {
+func equalLines(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -52,8 +52,8 @@ func równe(a, b []string) bool {
 	return true
 }
 
-// lcs buduje tablicę długości najdłuższego wspólnego podciągu.
-// O(n·m) — przy plikach rzędu setek linii to mikrosekundy.
+// lcs builds the table of longest-common-subsequence lengths.
+// O(n·m) — for files of hundreds of lines that is microseconds.
 func lcs(a, b []string) [][]int {
 	t := make([][]int, len(a)+1)
 	for i := range t {
@@ -73,107 +73,107 @@ func lcs(a, b []string) [][]int {
 	return t
 }
 
-type krok struct {
-	znak  byte // ' ', '-', '+'
-	tekst string
+type step struct {
+	char byte // ' ', '-', '+'
+	text string
 }
 
-func ścieżka(a, b []string, t [][]int) []krok {
-	var out []krok
+func editScript(a, b []string, t [][]int) []step {
+	var out []step
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
 		switch {
 		case a[i] == b[j]:
-			out = append(out, krok{' ', a[i]})
+			out = append(out, step{' ', a[i]})
 			i++
 			j++
 		case t[i+1][j] >= t[i][j+1]:
-			out = append(out, krok{'-', a[i]})
+			out = append(out, step{'-', a[i]})
 			i++
 		default:
-			out = append(out, krok{'+', b[j]})
+			out = append(out, step{'+', b[j]})
 			j++
 		}
 	}
 	for ; i < len(a); i++ {
-		out = append(out, krok{'-', a[i]})
+		out = append(out, step{'-', a[i]})
 	}
 	for ; j < len(b); j++ {
-		out = append(out, krok{'+', b[j]})
+		out = append(out, step{'+', b[j]})
 	}
 	return out
 }
 
-// sklejHunki wycina z pełnej ścieżki tylko fragmenty ze zmianami plus kontekst.
-func sklejHunki(a, b []string, kroki []krok, kontekst int) string {
-	// które kroki są interesujące
-	ważne := make([]bool, len(kroki))
-	for i, k := range kroki {
-		if k.znak == ' ' {
+// joinHunks cuts from the full edit script only the fragments with changes plus context.
+func joinHunks(a, b []string, steps []step, context int) string {
+	// which steps are interesting
+	keep := make([]bool, len(steps))
+	for i, k := range steps {
+		if k.char == ' ' {
 			continue
 		}
-		od := max(0, i-kontekst)
-		do := min(len(kroki)-1, i+kontekst)
-		for j := od; j <= do; j++ {
-			ważne[j] = true
+		from := max(0, i-context)
+		to := min(len(steps)-1, i+context)
+		for j := from; j <= to; j++ {
+			keep[j] = true
 		}
 	}
 
 	var b3 strings.Builder
 	i := 0
-	liniaA, liniaB := 1, 1
-	for i < len(kroki) {
-		if !ważne[i] {
-			switch kroki[i].znak {
+	lineA, lineB := 1, 1
+	for i < len(steps) {
+		if !keep[i] {
+			switch steps[i].char {
 			case ' ':
-				liniaA++
-				liniaB++
+				lineA++
+				lineB++
 			case '-':
-				liniaA++
+				lineA++
 			case '+':
-				liniaB++
+				lineB++
 			}
 			i++
 			continue
 		}
 
-		początekA, początekB := liniaA, liniaB
-		var ileA, ileB int
-		var treść strings.Builder
-		for i < len(kroki) && ważne[i] {
-			k := kroki[i]
-			treść.WriteByte(k.znak)
-			treść.WriteString(k.tekst)
-			treść.WriteByte('\n')
-			switch k.znak {
+		beginA, beginB := lineA, lineB
+		var countA, countB int
+		var content strings.Builder
+		for i < len(steps) && keep[i] {
+			k := steps[i]
+			content.WriteByte(k.char)
+			content.WriteString(k.text)
+			content.WriteByte('\n')
+			switch k.char {
 			case ' ':
-				ileA++
-				ileB++
-				liniaA++
-				liniaB++
+				countA++
+				countB++
+				lineA++
+				lineB++
 			case '-':
-				ileA++
-				liniaA++
+				countA++
+				lineA++
 			case '+':
-				ileB++
-				liniaB++
+				countB++
+				lineB++
 			}
 			i++
 		}
-		fmt.Fprintf(&b3, "@@ -%d,%d +%d,%d @@\n", początekA, ileA, początekB, ileB)
-		b3.WriteString(treść.String())
+		fmt.Fprintf(&b3, "@@ -%d,%d +%d,%d @@\n", beginA, countA, beginB, countB)
+		b3.WriteString(content.String())
 	}
 	return b3.String()
 }
 
-// PodsumujDiff opisuje zmianę jednym zdaniem: ile linii doszło, ile zniknęło.
-func PodsumujDiff(d string) (dodane, usunięte int) {
+// SummarizeDiff describes the change in one sentence: how many lines were added, how many removed.
+func SummarizeDiff(d string) (added, removed int) {
 	for _, l := range strings.Split(d, "\n") {
 		switch {
 		case strings.HasPrefix(l, "+"):
-			dodane++
+			added++
 		case strings.HasPrefix(l, "-"):
-			usunięte++
+			removed++
 		}
 	}
 	return

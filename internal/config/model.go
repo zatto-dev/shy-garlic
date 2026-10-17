@@ -1,9 +1,9 @@
-// Package config czyta i zapisuje konfigurację Shy Garlic.
+// Package config reads and writes the Shy Garlic configuration.
 //
-// Dwa niezależne widoki tego samego pliku:
-//   - Load() → Config: widok semantyczny, do odczytu (serwer, heartbeat, render).
-//   - Parse() → Document: widok tekstowy, do edycji. Zapis to splice bajtowy
-//     w oryginale, więc bajty, których nikt nie zmienił, zostają nietknięte.
+// Two independent views of the same file:
+//   - Load() → Config: semantic view, read-only (server, heartbeat, render).
+//   - Parse() → Document: text view, for editing. Saving is a byte splice
+//     into the original, so bytes nobody changed stay untouched.
 package config
 
 import (
@@ -12,31 +12,32 @@ import (
 	"time"
 )
 
-// Domyślne parametry sprawdzania, gdy usługa ich nie podaje.
+// Default check parameters, used when a service gives none.
 const (
 	DefaultInterval = 30 * time.Second
 	DefaultTimeout  = 5 * time.Second
 )
 
-// DefaultExpect — kody uznawane za „usługa żyje".
+// DefaultExpect — codes treated as "the service is alive".
 //
-// ! 401 i 403 są tu celowo: usługa, która odpowiada „musisz się zalogować",
-// żyje. Research konkurencji (2026-08-14) pokazał, że Homepage, Homarr i Glance
-// mylą te kody z awarią albo odwrotnie — świecą na zielono cokolwiek wróci.
+// ! 401 and 403 are here on purpose: a service that answers "you must log in"
+// is alive. Competitor research (2026-08-14) showed that Homepage, Homarr and
+// Glance confuse these codes with an outage or the other way round — they light
+// up green whatever comes back.
 var DefaultExpect = []int{200, 301, 302, 401, 403}
 
-// ── wygląd ───────────────────────────────────────────────────────────────────
+// ── appearance ───────────────────────────────────────────────────────────────
 //
-// Blok `appearance` to domyślny wygląd CAŁEJ instancji. Plik zostaje źródłem
-// prawdy; przeglądarka może go u siebie nadpisać (localStorage), ale to, co tu
-// stoi, widzą wszyscy i wszędzie. Wartości są zamknięte allowlistami, bo lądują
-// w atrybutach HTML i w regułach CSS.
+// The `appearance` block is the default look of the WHOLE instance. The file
+// stays the source of truth; the browser may override it locally (localStorage),
+// but what stands here is seen by everyone, everywhere. Values are closed by
+// allowlists, because they land in HTML attributes and CSS rules.
 
 var (
-	PresetyTła = []string{"aurora", "nebula", "graphite", "dawn", "fog", "photo"}
-	TonyTła    = []string{"dark", "light"}
-	Widoki     = []string{"grid", "bento", "list"}
-	Rozmiary   = []string{"sm", "md", "lg"}
+	BackgroundPresets = []string{"aurora", "nebula", "graphite", "dawn", "fog", "photo"}
+	BackgroundTones   = []string{"dark", "light"}
+	Views             = []string{"grid", "bento", "list"}
+	Sizes             = []string{"sm", "md", "lg"}
 )
 
 const (
@@ -44,21 +45,21 @@ const (
 	MaxDim      = 80
 	PresetPhoto = "photo"
 
-	DomyślnyPreset  = "aurora"
-	DomyślnyBlur    = 10
-	DomyślnyDim     = 50
-	DomyślnyTon     = "dark"
-	DomyślnyWidok   = "grid"
-	DomyślnyRozmiar = "md"
+	DefaultPreset = "aurora"
+	DefaultBlur   = 10
+	DefaultDim    = 50
+	DefaultTone   = "dark"
+	DefaultView   = "grid"
+	DefaultSize   = "md"
 
-	// DomyślnyPróg — jedno nieudane sprawdzenie to jeszcze nie awaria.
-	DomyślnyPróg = 2
+	// DefaultThreshold — one failed check is not an outage yet.
+	DefaultThreshold = 2
 )
 
-// TonPresetu — każdy preset ma z góry ustaloną jasność tła, więc niesie ze sobą
-// jedyny ton tekstu, w którym da się go czytać. `photo` go nie ma: tam jasność
-// zna dopiero przeglądarka, po zmierzeniu luminancji wgranego obrazu.
-var TonPresetu = map[string]string{
+// PresetTone — every preset has a predetermined background brightness, so it
+// carries the only text tone it is readable in. `photo` has none: there the
+// brightness is only known to the browser, after measuring the luminance of the uploaded image.
+var PresetTone = map[string]string{
 	"aurora":   "dark",
 	"nebula":   "dark",
 	"graphite": "dark",
@@ -66,26 +67,26 @@ var TonPresetu = map[string]string{
 	"fog":      "light",
 }
 
-// TonDla zwraca ton pasujący do presetu.
+// ToneFor returns the tone that matches the preset.
 //
-// ! Bez tego wybór jasnego presetu zostawiał ton po poprzednim, ciemnym — czyli
-// jasny tekst na kremowym tle. Ton nie może mieć jednej wartości domyślnej, bo
-// poprawna zależy od tego, co jest pod spodem.
-func TonDla(preset string) string {
-	if t, ok := TonPresetu[preset]; ok {
+// ! Without it, choosing a light preset kept the tone from the previous, dark
+// one — light text on a cream background. The tone cannot have a single default,
+// because the correct one depends on what is underneath.
+func ToneFor(preset string) string {
+	if t, ok := PresetTone[preset]; ok {
 		return t
 	}
-	return DomyślnyTon
+	return DefaultTone
 }
 
-// NazwaTła — jedyne miejsce prawdy o nazwie pliku tapety; używa jej i config,
-// i serwer. Alfabet nie zawiera ani jednego znaku o znaczeniu w ścieżce, w CSS
-// ani w nagłówku HTTP, więc nazwa, która przez niego przeszła, jest bezpieczna
-// wszędzie, gdzie potem trafi.
-var NazwaTła = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+// BackgroundName — the single source of truth about the wallpaper file name; used by both config
+// and the server. The alphabet contains not a single character meaningful in a path, in CSS
+// or in an HTTP header, so a name that passed it is safe
+// wherever it ends up.
+var BackgroundName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// Dozwolone mówi, czy wartość stoi na liście dopuszczalnych.
-func Dozwolone(v string, lista []string) bool { return slices.Contains(lista, v) }
+// Allowed says whether the value is on the list of permitted ones.
+func Allowed(v string, list []string) bool { return slices.Contains(list, v) }
 
 type Config struct {
 	Title      string     `yaml:"title"`
@@ -95,19 +96,19 @@ type Config struct {
 	Groups     []Group    `yaml:"groups"`
 }
 
-// Notify — konfiguracja powiadomień, która NIE jest sekretem.
+// Notify — notification configuration that is NOT a secret.
 //
-// ! Adresu webhooka tu nie ma i nie będzie. Ten plik jest pokazywany w UI i
-// commitowany, a URL webhooka jest poświadczeniem — kto go ma, ten pisze na
-// kanał. Adres mieszka w SQLite, obok haseł i sesji.
+// ! The webhook address is not here and never will be. This file is shown in the UI and
+// committed, and the webhook URL is a credential — whoever has it can post to
+// the channel. The address lives in SQLite, next to passwords and sessions.
 type Notify struct {
 	Threshold int `yaml:"threshold"`
 }
 
-// Discovery — co panel ma podpowiadać przy dodawaniu usługi.
+// Discovery — what the panel should suggest when adding a service.
 //
-// ! Wskaźnik, bo trzeba odróżnić „nie napisano nic" (wtedy podpowiadamy, jeśli
-// gniazdo jest dostępne) od świadomego `docker: false`.
+// ! A pointer, because we must tell "nothing written" (then we suggest if the
+// socket is available) from a deliberate `docker: false`.
 type Discovery struct {
 	Docker *bool `yaml:"docker"`
 }
@@ -121,13 +122,13 @@ type Background struct {
 	Preset string `yaml:"preset"`
 	Image  string `yaml:"image"`
 	Blur   int    `yaml:"blur"`
-	// Dim — krycie dolnego końca warstwy przyciemniającej, w procentach.
-	// Górny koniec to zawsze Dim × 0,56 — proporcja z pierwotnych .28/.5,
-	// żeby przyciemnienie narastało ku dołowi, gdzie stoją kafle.
+	// Dim — opacity of the lower end of the dimming layer, in percent.
+	// The upper end is always Dim × 0.56 — a proportion from the original .28/.5,
+	// so the dimming grows towards the bottom, where the tiles stand.
 	//
-	// ! Sam kolor tekstu nie wystarcza: na zdjęciu o dużym kontraście
-	// wewnętrznym część kafli leży na jasnym, a część na ciemnym tle, więc
-	// czytelność ratuje dopiero mocniejsze przyciemnienie.
+	// ! Text colour alone is not enough: on a photo with high internal
+	// contrast some tiles lie on a bright and some on a dark background, so
+	// readability is only saved by stronger dimming.
 	Dim  int    `yaml:"dim"`
 	Tone string `yaml:"tone"`
 }
@@ -141,34 +142,34 @@ type Service struct {
 	Name string `yaml:"name"`
 	URL  string `yaml:"url"`
 	Icon string `yaml:"icon"`
-	// Size — rozmiar kafla w widoku bento; puste znaczy DomyślnyRozmiar.
+	// Size — tile size in the bento view; empty means DefaultSize.
 	Size string `yaml:"size"`
-	// Description — jedna linia pod nazwą kafla (opcjonalna). Dziedziczy się
-	// przez merge-key jak każde inne pole.
+	// Description — one line under the tile name (optional). Inherited
+	// through merge-key like any other field.
 	Description string `yaml:"description"`
-	// Tags — etykiety do wyszukiwania i filtrowania; małe chipy w widoku listy.
-	Tags  Tagi  `yaml:"tags"`
+	// Tags — labels for search and filtering; small chips in the list view.
+	Tags  Tags  `yaml:"tags"`
 	Check Check `yaml:"check"`
 }
 
-// Check — semantyka heartbeatu pojedynczej usługi.
+// Check — the heartbeat semantics of a single service.
 type Check struct {
 	Interval Duration `yaml:"interval"`
 	Timeout  Duration `yaml:"timeout"`
 	Expect   []int    `yaml:"expect"`
-	// Insecure — homelab często stoi na samopodpisanym certyfikacie
-	// (Proxmox, iDRAC, NAS-y). Bez tego panel pokazywałby fałszywe "down".
+	// Insecure — a homelab often runs on a self-signed certificate
+	// (Proxmox, iDRAC, NAS boxes). Without it the panel would show a false "down".
 	Insecure bool `yaml:"insecure"`
 
-	// Kontrola treści (SHYG-48), tylko http(s).
+	// Content check (SHYG-48), http(s) only.
 	//
-	// Path zastępuje ścieżkę (i query) z `url` TYLKO na czas sprawdzania —
-	// schemat, host i port zostają. Odpowiednik „użyj /healthz zamiast strony
-	// głównej". Musi zaczynać się od `/`.
+	// Path replaces the path (and query) from `url` ONLY for the duration of the check —
+	// scheme, host and port stay. The equivalent of "use /healthz instead of the
+	// home page". Must start with `/`.
 	Path string `yaml:"path"`
-	// Contains — tekst, który musi być w pierwszym 1 MiB odpowiedzi; Not… —
-	// którego nie może być. Niezgodność to stan `degraded` (serwer żyje, ale
-	// odpowiada czymś innym), nie `down`.
+	// Contains — text that must be in the first 1 MiB of the response; Not… —
+	// text that must not be. A mismatch is the `degraded` state (the server is alive, but
+	// answers with something else), not `down`.
 	Contains    string `yaml:"contains"`
 	NotContains string `yaml:"not_contains"`
 }
