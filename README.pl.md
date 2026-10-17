@@ -566,7 +566,7 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 
 | Warstwa                      | Co                                                                                                  | Dlaczego akurat tu                                                                                                                                                            |
 | ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
+| Flagi i zmienne środowiskowe | `--addr`, `--config`, `--seed-config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | musi być znane, zanim wstanie serwer, albo jest własnością deployu — a `--trusted-proxy` rozstrzyga, komu wolno ustawiać `X-Forwarded-For`, więc nie może być klikalne z panelu |
 | Ten plik                     | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | treść produktu: jawna, czytelna, bezpieczna w commicie                                                                                                                        |
 | Baza SQLite                  | adres i format webhooka, tokeny API (skrót), konta, sesje, historia                                                              | **poświadczenia i stan** — baza nie jest commitowana                                                                                                                           |
 | Przeglądarka                 | Twoje nadpisanie wyglądu                                                                            | dotyczy jednej przeglądarki i nikogo więcej                                                                                                                                    |
@@ -574,6 +574,11 @@ po tym, **kiedy wartość musi być znana** i **czy wolno jej trafić do gita**.
 Każda flaga ma odpowiednik w zmiennej środowiskowej z przedrostkiem `SHYG_`
 (`SHYG_ADDR`, `SHYG_CONFIG`, …). Ustawienia → Instancja pokazują je wszystkie
 razem ze źródłem każdej wartości: flaga, zmienna czy wartość domyślna.
+
+`--seed-config` (`SHYG_SEED_CONFIG`) przy pierwszym starcie kopiuje config
+startowy pod `--config`, tylko gdy configu jeszcze nie ma — chart Helm
+i manifesty Kubernetes zasilają tak wolumen z ConfigMapy. Istniejącego configu
+nigdy nie nadpisuje.
 
 ! **Adresu webhooka nie ma w pliku i nie będzie.** Panel ten plik pokazuje i
 commituje, a URL jest poświadczeniem.

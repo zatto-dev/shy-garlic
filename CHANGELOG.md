@@ -10,6 +10,13 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Added
+
+- `--seed-config` / `SHYG_SEED_CONFIG`: copy a starting config to `--config`
+  on first start when none exists yet. The Helm chart and the Kubernetes
+  manifests use it instead of a shell init container, so they run the
+  distroless image.
+
 ### Security
 
 - **A bad interval or timeout no longer crashes the panel.** A negative,
