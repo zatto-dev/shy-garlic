@@ -2,7 +2,7 @@
 # Goal from the SPEC: under 25 MB. The frontend, icons and templates live in embed.FS,
 # so the image has neither node_modules nor any files to lose.
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # dependencies first — the layer is cached between builds
@@ -40,7 +40,7 @@ CMD ["serve", "-config", "/etc/shygarlic/shygarlic.yaml", "-addr", ":8080"]
 # The distroless image has neither a shell nor git, so config commits do not
 # work in it. Whoever wants them builds this target:
 #   docker build --target git -t shy-garlic:git .
-FROM alpine:3.21 AS git
+FROM alpine:3.24 AS git
 RUN apk add --no-cache git ca-certificates tzdata && adduser -D -u 65532 nonroot \
  && mkdir -p /data && chown 65532:65532 /data
 COPY --from=build /out/shyg /shyg
