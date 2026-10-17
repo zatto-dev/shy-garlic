@@ -493,7 +493,7 @@ func (s *Server) handleBackgroundUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	defer part.Close()
 	if part.FormName() != "file" {
-		jsonError(w, http.StatusBadRequest, "expected a single part named \"file\"")
+		apiFail(w, r, http.StatusBadRequest, "error_upload_shape")
 		return
 	}
 
@@ -512,7 +512,7 @@ func (s *Server) handleBackgroundUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	if _, err := mr.NextPart(); !errors.Is(err, io.EOF) {
 		_ = s.backgrounds.Remove(entry.Name)
-		jsonError(w, http.StatusBadRequest, "expected exactly one part")
+		apiFail(w, r, http.StatusBadRequest, "error_upload_shape")
 		return
 	}
 	slog.Info("wallpaper uploaded", "name", entry.Name, "bytes", entry.Bytes)
@@ -546,7 +546,7 @@ func (s *Server) handleBackgroundList(w http.ResponseWriter, r *http.Request) {
 				"count": 0, "limitFiles": backgroundFilesLimit, "limitBytes": backgroundByteLimit})
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	jsonReply(w, http.StatusOK, map[string]any{

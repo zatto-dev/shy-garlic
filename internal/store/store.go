@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +26,9 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserNotFound       = errors.New("user not found")
 	ErrUserExists         = errors.New("user already exists")
+	ErrLoginShort         = errors.New("login too short")
+	ErrPasswordShort      = errors.New("password must be at least 8 characters")
+	ErrVersionNotFound    = errors.New("version not found")
 	// ErrSetupDone: the first account already exists, so setup is closed.
 	ErrSetupDone = errors.New("setup already done")
 )
@@ -341,10 +343,10 @@ func (s *Store) UserCount(ctx context.Context) (int, error) {
 
 func (s *Store) AddUser(ctx context.Context, login, password string) (*User, error) {
 	if len(login) < 2 {
-		return nil, errors.New("login too short")
+		return nil, ErrLoginShort
 	}
 	if len(password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+		return nil, ErrPasswordShort
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -352,7 +354,10 @@ func (s *Store) AddUser(ctx context.Context, login, password string) (*User, err
 	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO users (login, hash) VALUES (?, ?)`, login, string(h))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil, ErrUserExists
+		}
+		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &User{ID: id, Login: login, CreatedAt: time.Now()}, nil
@@ -364,10 +369,10 @@ func (s *Store) AddUser(ctx context.Context, login, password string) (*User, err
 // Returns ErrSetupDone when an account already exists.
 func (s *Store) AddFirstUser(ctx context.Context, login, password string) (*User, error) {
 	if len(login) < 2 {
-		return nil, errors.New("login too short")
+		return nil, ErrLoginShort
 	}
 	if len(password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
+		return nil, ErrPasswordShort
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -379,7 +384,7 @@ func (s *Store) AddFirstUser(ctx context.Context, login, password string) (*User
 		// only a UNIQUE violation means "that account exists"; a closed or broken
 		// database must not be reported as success-by-existence
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
+			return nil, ErrUserExists
 		}
 		return nil, err
 	}
@@ -392,7 +397,7 @@ func (s *Store) AddFirstUser(ctx context.Context, login, password string) (*User
 
 func (s *Store) ChangePassword(ctx context.Context, userID int64, newPassword string) error {
 	if len(newPassword) < 8 {
-		return errors.New("password must be at least 8 characters")
+		return ErrPasswordShort
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -644,7 +649,7 @@ func (s *Store) Version(ctx context.Context, id int64) (*Version, error) {
 		`SELECT id, at, author, opis, tresc, diff FROM config_versions WHERE id = ?`, id).
 		Scan(&w.ID, &w.At, &w.Author, &w.Description, &w.Content, &w.Diff)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("version not found")
+		return nil, ErrVersionNotFound
 	}
 	return &w, err
 }

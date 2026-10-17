@@ -93,33 +93,27 @@ func (s *Server) withEditOpen(w http.ResponseWriter, r *http.Request, descriptio
 
 	before, err := configBytes(s.path)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "cannot read the config: "+err.Error())
+		apiError(w, r, fmt.Errorf("read config: %w", err))
 		return false
 	}
 	d, err := open(s.path)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "cannot open the config: "+err.Error())
+		apiError(w, r, fmt.Errorf("open config: %w", err))
 		return false
 	}
 	if err := fn(d); err != nil {
-		code := http.StatusBadRequest
-		message := err.Error()
-		switch {
-		case errors.Is(err, config.ErrServiceNotFound), errors.Is(err, config.ErrGroupNotFound):
-			code = http.StatusNotFound
-		case errors.Is(err, config.ErrDuplicate):
-			code = http.StatusConflict
-			message = i18n.T(i18n.FromRequest(r), "error_name_duplicate")
-		case errors.Is(err, config.ErrInheritedField):
-			message = i18n.T(i18n.FromRequest(r), "error_field_inherited")
-		case errors.Is(err, config.ErrUnsupportedLayout):
-			message = i18n.T(i18n.FromRequest(r), "error_file_layout")
+		if code, key, ok := classify(err); ok {
+			apiFail(w, r, code, key)
+			return false
 		}
-		jsonError(w, code, message)
+		// an edit the engine refused for a reason we have no wording for: the
+		// caller gets a plain refusal, the details stay in the log
+		slog.Warn("config edit refused", "path", r.URL.Path, "err", err)
+		apiFail(w, r, http.StatusBadRequest, "error_bad_request")
 		return false
 	}
 	if _, err := config.Load(d.Bytes()); err != nil {
-		jsonError(w, http.StatusInternalServerError, "the change would produce an invalid file: "+err.Error())
+		apiError(w, r, fmt.Errorf("the change would produce an invalid file: %w", err))
 		return false
 	}
 
@@ -141,10 +135,10 @@ func (s *Server) withEditOpen(w http.ResponseWriter, r *http.Request, descriptio
 
 	if err := d.Save(); err != nil {
 		if errors.Is(err, config.ErrChangedOnDisk) {
-			jsonError(w, http.StatusConflict, i18n.T(i18n.FromRequest(r), "file_conflict"))
+			apiFail(w, r, http.StatusConflict, "file_conflict")
 			return false
 		}
-		jsonError(w, http.StatusInternalServerError, "save failed: "+err.Error())
+		apiError(w, r, fmt.Errorf("save failed: %w", err))
 		return false
 	}
 
@@ -286,11 +280,11 @@ func validEntryName(v string) bool {
 func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 	var req serviceRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if req.Name == "" || req.Group == "" {
-		jsonError(w, http.StatusBadRequest, "name and group are required")
+		apiFail(w, r, http.StatusBadRequest, "error_group_and_name")
 		return
 	}
 	if !validEntryName(req.Name) || !validEntryName(req.Group) || (req.NewName != "" && !validEntryName(req.NewName)) ||
@@ -408,11 +402,11 @@ func (req serviceRequest) checkChange(current config.Check) (config.CheckChange,
 func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	var req serviceRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if req.Name == "" || req.Group == "" {
-		jsonError(w, http.StatusBadRequest, "name and group are required")
+		apiFail(w, r, http.StatusBadRequest, "error_group_and_name")
 		return
 	}
 	if !validEntryName(req.Name) || !validEntryName(req.Group) || (req.NewName != "" && !validEntryName(req.NewName)) ||
@@ -531,7 +525,7 @@ func (s *Server) handleServiceDelete(w http.ResponseWriter, r *http.Request) {
 	group := r.URL.Query().Get("group")
 	name := r.URL.Query().Get("name")
 	if !validEntryName(group) || !validEntryName(name) {
-		jsonError(w, http.StatusBadRequest, "provide group and name")
+		apiFail(w, r, http.StatusBadRequest, "error_group_and_name")
 		return
 	}
 	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_service_deleted"), name, group)
@@ -551,7 +545,7 @@ func (s *Server) handleServiceMove(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if req.ToGroup == "" {
@@ -583,7 +577,7 @@ func (s *Server) handleGroupMove(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if !validEntryName(req.Name) || req.Index == nil {
@@ -606,19 +600,12 @@ func (s *Server) handleTitlePut(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := i18n.FromRequest(r)
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	title, err := config.NormalizeTitle(req.Title)
 	if err != nil {
-		key := "error_title_chars"
-		switch {
-		case errors.Is(err, config.ErrTitleEmpty):
-			key = "error_title_empty"
-		case errors.Is(err, config.ErrTitleTooLong):
-			key = "error_title_long"
-		}
-		jsonError(w, http.StatusBadRequest, i18n.T(lang, key))
+		apiError(w, r, err)
 		return
 	}
 	description := fmt.Sprintf(i18n.T(lang, "desc_title_changed"), title)
@@ -634,7 +621,7 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil || req.Name == "" {
-		jsonError(w, http.StatusBadRequest, "provide name")
+		apiFail(w, r, http.StatusBadRequest, "error_name_required")
 		return
 	}
 	if !validEntryName(req.Name) {
@@ -653,7 +640,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		NewName string `json:"newName"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil || req.Name == "" || req.NewName == "" {
-		jsonError(w, http.StatusBadRequest, "provide name and newName")
+		apiFail(w, r, http.StatusBadRequest, "error_names_required")
 		return
 	}
 	if !validEntryName(req.NewName) {
@@ -686,7 +673,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if !validEntryName(name) {
-		jsonError(w, http.StatusBadRequest, "provide name")
+		apiFail(w, r, http.StatusBadRequest, "error_name_required")
 		return
 	}
 	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_group_deleted"), name),
@@ -700,7 +687,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 	raw, err := configBytes(s.path)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	jsonReply(w, http.StatusOK, map[string]any{"yaml": string(raw)})
@@ -713,11 +700,11 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		YAML string `json:"yaml"`
 	}
 	if err := decodeJSONLimit(w, r, &req, configLimit); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if _, err := config.Load([]byte(req.YAML)); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid YAML: "+err.Error())
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "error_invalid_yaml"), err))
 		return
 	}
 	if s.withEditOpen(w, r, i18n.T(i18n.FromRequest(r), "desc_manual_edit"), nil, config.OpenRaw,
@@ -757,7 +744,7 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		jsonError(w, http.StatusBadRequest, "provide key")
+		apiFail(w, r, http.StatusBadRequest, "error_key_required")
 		return
 	}
 	n := 60
@@ -766,7 +753,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	h, err := s.st.History(r.Context(), key, n)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	availability, samples, _ := s.st.Availability(r.Context(), key, 24*time.Hour)
@@ -793,7 +780,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
 	list, err := s.st.Users(r.Context())
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	type u struct {
@@ -813,11 +800,11 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if _, err := s.st.AddUser(r.Context(), strings.TrimSpace(req.Login), req.Password); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	jsonReply(w, http.StatusCreated, map[string]any{"ok": true})
@@ -826,21 +813,21 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "bad id")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_id")
 		return
 	}
 	me := UserFromRequest(r)
 	if me != nil && me.ID == id {
-		jsonError(w, http.StatusBadRequest, "you cannot delete your own account")
+		apiFail(w, r, http.StatusBadRequest, "error_delete_self")
 		return
 	}
 	list, _ := s.st.Users(r.Context())
 	if len(list) <= 1 {
-		jsonError(w, http.StatusBadRequest, "this is the last account — the panel would be left without access")
+		apiFail(w, r, http.StatusBadRequest, "error_last_account")
 		return
 	}
 	if err := s.st.RemoveUser(r.Context(), id); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	jsonReply(w, http.StatusOK, map[string]any{"ok": true})
@@ -852,12 +839,12 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		New string `json:"new"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	me := UserFromRequest(r)
 	if me == nil {
-		jsonError(w, http.StatusUnauthorized, "no session")
+		apiFail(w, r, http.StatusUnauthorized, "error_no_session")
 		return
 	}
 	// ! The old password is a login oracle for whoever holds a session cookie
@@ -872,11 +859,11 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := s.st.Authenticate(r.Context(), me.Login, req.Old); err != nil {
 		s.lim.recordFailure(limit)
-		jsonError(w, http.StatusForbidden, "the current password does not match")
+		apiFail(w, r, http.StatusForbidden, "error_password_wrong")
 		return
 	}
 	if err := s.st.ChangePassword(r.Context(), me.ID, req.New); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	// ! A password change must kick out the rest of the sessions. Someone with a stolen
@@ -895,7 +882,7 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleVersionsList(w http.ResponseWriter, r *http.Request) {
 	list, err := s.st.Versions(r.Context(), 30)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	type entry struct {
@@ -918,12 +905,12 @@ func (s *Server) handleVersionsList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleVersionOne(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "bad id")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_id")
 		return
 	}
 	v, err := s.st.Version(r.Context(), id)
 	if err != nil {
-		jsonError(w, http.StatusNotFound, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	jsonReply(w, http.StatusOK, map[string]any{
@@ -937,16 +924,16 @@ func (s *Server) handleVersionOne(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "bad id")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_id")
 		return
 	}
 	v, err := s.st.Version(r.Context(), id)
 	if err != nil {
-		jsonError(w, http.StatusNotFound, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	if _, err := config.Load([]byte(v.Content)); err != nil {
-		jsonError(w, http.StatusBadRequest, "this version does not parse: "+err.Error())
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "error_version_unparsable"), err))
 		return
 	}
 	description := fmt.Sprintf(i18n.T(i18n.FromRequest(r), "desc_version_restored"), v.ID, v.Description)
@@ -963,7 +950,7 @@ func (s *Server) handleVersionRestore(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	serviceKey := r.URL.Query().Get("key")
 	if serviceKey == "" {
-		jsonError(w, http.StatusBadRequest, "provide key")
+		apiFail(w, r, http.StatusBadRequest, "error_key_required")
 		return
 	}
 
@@ -984,7 +971,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if svc == nil {
-		jsonError(w, http.StatusNotFound, "no such service")
+		apiFail(w, r, http.StatusNotFound, "error_service_not_found")
 		return
 	}
 
@@ -994,7 +981,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 	history, err := s.st.History(r.Context(), serviceKey, n)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	day, _ := s.st.Stats(r.Context(), serviceKey, 24*time.Hour)
@@ -1053,12 +1040,12 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCheckNow(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		jsonError(w, http.StatusBadRequest, "provide key")
+		apiFail(w, r, http.StatusBadRequest, "error_key_required")
 		return
 	}
 	res, err := s.monitor.CheckNow(r.Context(), key)
 	if err != nil {
-		jsonError(w, http.StatusNotFound, err.Error())
+		apiError(w, r, err)
 		return
 	}
 	// result straight into the history, so the chart shows it
@@ -1148,7 +1135,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 		Threshold *int    `json:"threshold"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 
@@ -1204,7 +1191,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 
 	if req.Webhook != nil {
 		if err := s.st.SetSetting(r.Context(), "notify.webhook", address); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			apiError(w, r, err)
 			return
 		}
 		s.notifier.SetWebhook(address)
@@ -1215,7 +1202,7 @@ func (s *Server) handleNotifyPut(w http.ResponseWriter, r *http.Request) {
 			newValue = "" // default is not in the DB
 		}
 		if err := s.st.SetSetting(r.Context(), "notify.format", newValue); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			apiError(w, r, err)
 			return
 		}
 		s.notifier.SetFormat(notify.Format(*req.Format))
@@ -1355,7 +1342,7 @@ func (s *Server) handleAppearancePut(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.FromRequest(r)
 	var req appearanceRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 
@@ -1466,7 +1453,7 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.docker == nil || !s.docker.Available() {
-		jsonError(w, http.StatusNotFound, "Docker socket unavailable")
+		apiFail(w, r, http.StatusNotFound, "error_docker_unavailable")
 		return
 	}
 	host, _, err := net.SplitHostPort(r.Host)
@@ -1479,7 +1466,8 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 
 	candidates, err := s.docker.Candidates(r.Context(), host)
 	if err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		slog.Error("docker discovery failed", "err", err)
+		apiFail(w, r, http.StatusBadGateway, "error_docker_failed")
 		return
 	}
 
@@ -1533,11 +1521,11 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		Services []serviceRequest `json:"services"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "bad JSON")
+		apiFail(w, r, http.StatusBadRequest, "error_bad_json")
 		return
 	}
 	if len(req.Services) == 0 {
-		jsonError(w, http.StatusBadRequest, "empty list")
+		apiFail(w, r, http.StatusBadRequest, "error_empty_list")
 		return
 	}
 	for _, u := range req.Services {
