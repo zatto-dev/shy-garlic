@@ -32,7 +32,7 @@ keeps the chart-created PersistentVolumeClaim, so data survives an accident.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `ghcr.io/zatto-dev/shy-garlic` | Image repository. |
-| `image.tag` | `""` | Empty = the chart's `appVersion`. Pin a release, do not use `latest`. |
+| `image.tag` | `""` | Empty = `<appVersion>-git` (Alpine + git; the init container needs `sh`). Pin a release, do not use `latest`. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `imagePullSecrets` | `[]` | Pull secrets. |
 | `nameOverride` / `fullnameOverride` | `""` | Name overrides. |

@@ -5,7 +5,9 @@
 
 image:
   repository: ghcr.io/zatto-dev/shy-garlic
-  # Empty = the chart's appVersion. Pin a release; do not use `latest`.
+  # Empty = <appVersion>-git: the Alpine variant with git, because the seed-config
+  # init container needs `sh` (the default distroless image has none) and config
+  # commits need git. Pin a release; do not use `latest`.
   tag: ""
   pullPolicy: IfNotPresent
 

@@ -4,16 +4,63 @@ on:
   push:
     tags: ['v*']
 
+# Everything read-only by default; each job asks for exactly what it writes.
 permissions:
-  contents: write   # creating the Release and uploading files
-  packages: write   # publishing the image to GHCR
+  contents: read
 
 jobs:
-  binaries:
+  # The full CI (tests, fuzz, staticcheck, govulncheck, Docker and chart builds)
+  # must be green for the tagged commit before anything is published.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Cheap checks that fail in seconds, before the expensive jobs: the tag is
+  # a clean semver, CHANGELOG has a section for it, and the version bump PR
+  # (CONTRIBUTING.md, "Releasing") was not forgotten.
+  prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tag, CHANGELOG and manifests agree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag ${TAG} is not vX.Y.Z (or vX.Y.Z-rc.N)"
+            exit 1
+          fi
+          .github/scripts/changelog-notes.sh "$version" CHANGELOG.md > /dev/null
+          # The kustomize base installs the published `-git` image variant
+          # (its init container needs `sh`), so the tag must follow the release.
+          if ! grep -Fq "newTag: \"${version}-git\"" deploy/kubernetes/kustomization.yaml; then
+            echo "::error file=deploy/kubernetes/kustomization.yaml::images.newTag must be \"${version}-git\" for ${TAG}"
+            exit 1
+          fi
+          if ! grep -Fq "?ref=${TAG}\"" deploy/kubernetes/kustomization.yaml; then
+            echo "::error file=deploy/kubernetes/kustomization.yaml::the install comment must use ?ref=${TAG}"
+            exit 1
+          fi
+          if ! grep -Eq "^appVersion: \"?${version}\"?\$" charts/shy-garlic/Chart.yaml; then
+            echo "::error file=charts/shy-garlic/Chart.yaml::appVersion must be ${version} for ${TAG}"
+            exit 1
+          fi
+
+  binaries:
+    needs: [ci, prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write      # creating the Release and uploading files
+      id-token: write      # keyless signing of the build provenance (Sigstore)
+      attestations: write  # storing the attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27'
           check-latest: true
@@ -33,7 +80,20 @@ jobs:
             tar -czf "dist/shyg_${VERSION}_${GOOS}_${GOARCH}.tar.gz" -C dist shyg
             rm dist/shyg
           done
-          cd dist && sha256sum *.tar.gz > checksums.txt
+          cd dist && sha256sum -- *.tar.gz > checksums.txt
+
+      # `gh attestation verify shyg_X_linux_amd64.tar.gz --repo zatto-dev/shy-garlic`
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+
+      # The release notes are the CHANGELOG section of this version - the same
+      # text people read in the repo, not an auto-generated commit list.
+      - name: Extract release notes from CHANGELOG
+        run: .github/scripts/changelog-notes.sh "${GITHUB_REF_NAME#v}" CHANGELOG.md > release-notes.md
 
       # gh is preinstalled on the runner. Our own command instead of a third-party
       # action is one dependency less in the supply chain — and one thing
@@ -42,48 +102,109 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          flags=""
+          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          # shellcheck disable=SC2086 # flags is empty or one word
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes-file release-notes.md \
             --verify-tag \
+            $flags \
             dist/*
 
+  # Two images from one Dockerfile:
+  #   X.Y.Z, X.Y, latest   distroless, no shell, no git (the README's default image)
+  #   X.Y.Z-git, X.Y-git, git   Alpine with git, for config commits from the UI
+  # `latest` and `X.Y` are not moved by pre-release tags (vX.Y.Z-rc.N).
   image:
+    needs: [ci, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write      # publishing the image to GHCR
+      id-token: write      # keyless signing of the build provenance (Sigstore)
+      attestations: write  # storing the attestation
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # GITHUB_TOKEN is enough for GHCR — no secrets to rotate.
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
-      # ! --target git is required. The `git` stage is the last one in the Dockerfile,
-      # so a build without a target would give it anyway — but an explicit target guards
-      # against someone reordering the stages and silently shipping distroless
-      # without git, which would break the config commits.
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - id: meta-git
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},suffix=-git
+            type=semver,pattern={{major}}.{{minor}},suffix=-git
+            type=raw,value=git,enable=${{ !contains(github.ref_name, '-') }}
+
+      # ! Explicit `target:` on both builds. The default image is the LAST stage of
+      # the Dockerfile; naming the targets guards against someone reordering the
+      # stages and silently publishing the wrong variant as `latest`.
+      # SBOM and max-mode provenance are attached to the image as OCI attestations.
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: distroless
+          platforms: linux/amd64,linux/arm64
+          push: true
+          sbom: true
+          provenance: mode=max
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=distroless
+          cache-to: type=gha,scope=distroless,mode=max
+
+      - id: build-git
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: git
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta-git.outputs.tags }}
+          labels: ${{ steps.meta-git.outputs.labels }}
+          cache-from: type=gha,scope=git
+          cache-to: type=gha,scope=git,mode=max
+
+      # GitHub-signed provenance, verifiable with `gh attestation verify
+      # oci://ghcr.io/zatto-dev/shy-garlic:X.Y.Z --repo zatto-dev/shy-garlic`.
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest git-variant image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build-git.outputs.digest }}
+          push-to-registry: true
 
       # Visibility guard. A GHCR package created by a workflow in an organization
       # is PRIVATE by default, and GitHub has no API to change that — it is done
@@ -104,20 +225,27 @@ jobs:
           token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])') \
             || fail "no anonymous token"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer ${token}" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-            "https://ghcr.io/v2/${repo}/manifests/${tag}")
-          [ "$code" = "200" ] || fail "HTTP ${code}"
-          echo "OK: ghcr.io/${repo}:${tag} is public"
+          for t in "${tag}" "${tag}-git"; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://ghcr.io/v2/${repo}/manifests/${t}")
+            [ "$code" = "200" ] || fail "tag ${t}: HTTP ${code}"
+            echo "OK: ghcr.io/${repo}:${t} is public"
+          done
 
   # Helm chart as OCI at ghcr.io/zatto-dev/charts/shy-garlic. The chart version
   # and appVersion come from the tag, so `helm install ... --version X` gives
   # exactly the image that came out in the same release.
   chart:
+    needs: [ci, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write      # publishing the chart to GHCR
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Helm (pinned version + checksum)
         run: .github/scripts/install-helm.sh

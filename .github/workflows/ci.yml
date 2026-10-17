@@ -4,16 +4,26 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow calls this one and waits for it: a tag cannot ship
+  # a build that CI would have rejected.
+  workflow_call:
 
 permissions:
   contents: read
 
+# A new push to a PR branch cancels the run for the previous one. Runs on main
+# and the release run (event_name is the caller's, i.e. push) are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27'
           check-latest: true
@@ -27,11 +37,39 @@ jobs:
             go test ./internal/config -run '^$' -fuzz "^${f}\$" -fuzztime 20s
           done
 
+  # Static analysis and supply chain. Tools are installed from pinned versions
+  # (not @latest), so a new tool release cannot turn the build red on its own;
+  # Dependabot does not track `go install` lines, bump them by hand.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          check-latest: true
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          staticcheck ./...
+      # Reports only vulnerabilities in code the binary actually reaches.
+      # A fresh CVE in the database can fail an unrelated PR - that is intended.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck ./...
+
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27'
           check-latest: true
@@ -39,10 +77,33 @@ jobs:
       # another architecture does not surface only when tagging.
       - run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/shyg
 
+  # Both Dockerfile targets build on every PR (no push), so a broken Dockerfile or
+  # base-image bump is caught here and not on the tag. amd64 only: arm64 under
+  # QEMU is slow, and the Go code for it is already compiled in `build`.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [distroless, git]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          build-args: VERSION=ci
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+
   chart:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: .github/scripts/install-helm.sh
       # The chart and the kustomize base each carry a copy of the example
       # config (a chart cannot read files outside its directory).
