@@ -10,6 +10,69 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Security
+
+- **A bad interval or timeout no longer crashes the panel.** A negative,
+  sub-second, absurdly large or non-numeric `check.interval` / `check.timeout`
+  in the file used to take the whole process down on every start, so a
+  container restarted in a loop. Values outside 1 s to 24 h are now replaced
+  with the default and named in the config banner; the check loop also guards
+  itself against a panic.
+- **The first account can only be created by whoever runs the instance.**
+  `/setup` now asks for a one-time token that the panel prints in its log at
+  start, and the first account is created atomically, so parallel requests can
+  no longer produce several administrators. `SHYG_ADMIN_USER` /
+  `SHYG_ADMIN_PASSWORD` still skip setup.
+- **New `--allowed-host` / `SHYG_ALLOWED_HOSTS`**: the panel answers only to the
+  host names you list (everything else gets `421`), which blocks DNS rebinding.
+  Empty keeps today's behaviour.
+- **Health checks and the webhook can no longer reach link-local addresses**
+  (`169.254.0.0/16`, `fe80::/10`, i.e. cloud metadata endpoints). Your own LAN
+  stays reachable. "Send test message" no longer shows network error details;
+  they go to the log.
+- **Passwords inside a service `url:` no longer leak** into notifications, page
+  source, the service dialog, `/api/service` and check errors; the banner warns
+  about such addresses. Editing a service does not strip them from the file.
+- **Expired sessions really expire.** Session expiry was compared as text and
+  was off by the server's UTC offset, so in time zones east of UTC a session
+  stayed valid for hours after it should have ended. Existing sessions are
+  converted on start.
+- **Group names with control characters can no longer corrupt the config file**
+  when written through the editor, and the API refuses such names for groups and
+  services. Adding a group is read back and undone if the file would not load.
+- **Deeply nested YAML is rejected** (more than 64 levels) with a clear error
+  instead of exhausting memory.
+- **HTTP server limits:** header, read and write timeouts and a header size cap,
+  at most 8 live-update streams per account, and the wallpaper upload keeps its
+  own deadline.
+- **The database and its `-wal` / `-shm` files are created private** (`0600`,
+  data directory `0700`); existing files are tightened on start.
+- **Changing a password is rate-limited** like sign-in.
+- **Icon fetching blocks more non-public ranges:** NAT64, 6to4, Teredo,
+  `198.18.0.0/15`, `192.0.0.0/24`, `240.0.0.0/4` and `0.0.0.0/8`.
+- **Smaller hardening:** `Strict-Transport-Security` over HTTPS, a minimal
+  `Permissions-Policy`, no directory listing under `/assets/`, and failed
+  sign-ins are logged with a fingerprint of the login instead of the text typed.
+
+- **Hardening follow-ups:** the config nesting check follows quoted multi-line
+  text correctly (it could be bypassed, and rejected valid descriptions with
+  brackets); a live-update stream whose client stops reading is closed after 30 s
+  instead of holding its slot; the Oracle and Azure metadata addresses are
+  blocked too; `/healthz` ignores `--allowed-host` so Kubernetes probes work
+  (the Helm chart gets `allowedHosts`); database failures during first-run
+  setup are no longer reported as "account exists".
+
+### Changed
+
+- **Setup now needs the setup token** from the log (see Security). If you
+  script first-run setup against `/setup`, add the `setup_token` field or use
+  `SHYG_ADMIN_USER` / `SHYG_ADMIN_PASSWORD`.
+- **Go 1.27.** The module, the Docker build and CI use Go 1.27.2; direct
+  dependencies are updated (`golang.org/x/crypto` 0.58, `modernc.org/sqlite`
+  1.60).
+- **The service form and API accept `check.interval` / `check.timeout` between
+  1 s and 24 h** (the upper bound is new).
+
 ## [0.13.2] — 2026-10-16
 
 ### Fixed

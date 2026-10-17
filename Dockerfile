@@ -2,7 +2,7 @@
 # Goal from the SPEC: under 25 MB. The frontend, icons and templates live in embed.FS,
 # so the image has neither node_modules nor any files to lose.
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # dependencies first — the layer is cached between builds

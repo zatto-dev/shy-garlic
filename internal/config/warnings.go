@@ -20,6 +20,12 @@ import (
 const (
 	KindKey     = "klucz"
 	KindAddress = "adres"
+	// KindCheck: check.interval / check.timeout outside the accepted range,
+	// replaced with the default (Key = field, Address = the value as written,
+	// Suggestion = the value used instead).
+	KindCheck = "check"
+	// KindCredentials: a service url: carries user:password@.
+	KindCredentials = "credentials"
 )
 
 // Warning describes one suspicious place in the config. A structure, not
@@ -239,7 +245,9 @@ func AddressWarnings(cfg *Config) []Warning {
 	for _, g := range cfg.Groups {
 		for _, s := range g.Services {
 			if !ValidServiceAddress(s.URL) {
-				out = append(out, Warning{Kind: KindAddress, Group: g.Name, Service: s.Name, Address: s.URL})
+				out = append(out, Warning{Kind: KindAddress, Group: g.Name, Service: s.Name, Address: RedactURL(s.URL)})
+			} else if HasCredentials(s.URL) {
+				out = append(out, Warning{Kind: KindCredentials, Group: g.Name, Service: s.Name, Address: RedactURL(s.URL)})
 			}
 		}
 	}

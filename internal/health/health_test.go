@@ -2,8 +2,11 @@ package health
 
 import (
 	"context"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +100,7 @@ func TestCheckTimeout(t *testing.T) {
 func TestMonitorChecksOnItsOwn(t *testing.T) {
 	s := statusServer(200)
 	defer s.Close()
+	fastLoops(t)
 
 	m := New()
 	defer m.Close()
@@ -187,4 +191,90 @@ func TestSetTargetsConcurrently(t *testing.T) {
 		t.Fatal("Close wisi — zostały osierocone pętle")
 	}
 	m.wg.Wait() // nothing may remain after Close
+}
+
+// fastLoops lowers the one-second floor of the check period for the test.
+func fastLoops(t *testing.T) {
+	t.Helper()
+	old := minInterval
+	minInterval = 10 * time.Millisecond
+	t.Cleanup(func() { minInterval = old })
+}
+
+// An interval from a hand-edited file used to reach time.NewTicker as-is and a
+// non-positive one panicked the goroutine, i.e. the whole process.
+func TestLoopSurvivesNonPositiveInterval(t *testing.T) {
+	s := statusServer(200)
+	defer s.Close()
+	fastLoops(t)
+
+	for _, interval := range []time.Duration{0, -5 * time.Second, time.Duration(math.MinInt64)} {
+		m := New()
+		ctx, cancel := context.WithCancel(context.Background())
+		changes, unsubscribe := m.Subscribe()
+		m.SetTargets(ctx, []Target{{Key: "k", URL: s.URL, Interval: interval, Timeout: time.Second}})
+		select {
+		case <-changes:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("interval %v: no check ran", interval)
+		}
+		unsubscribe()
+		cancel()
+		m.Close()
+	}
+}
+
+func TestIntervalFloorIsOneSecond(t *testing.T) {
+	if minInterval != time.Second {
+		t.Fatalf("minInterval = %v, want 1s", minInterval)
+	}
+}
+
+// A panic inside a check becomes a failed result, not a dead process.
+func TestSafeCheckTurnsPanicIntoDown(t *testing.T) {
+	m := New()
+	defer m.Close()
+	m.client = nil // clientFor returns nil → Check panics on the nil client
+	r := m.safeCheck(context.Background(), Target{Key: "k", URL: "http://127.0.0.1:1"})
+	if r.State != StateDown || r.Err != "internal error" {
+		t.Fatalf("result = %+v, want down / internal error", r)
+	}
+}
+
+func TestCheckRefusesLinkLocal(t *testing.T) {
+	for _, address := range []string{"http://169.254.169.254/latest/meta-data/", "tcp://169.254.169.254:80", "http://[fe80::1]:80/"} {
+		start := time.Now()
+		r := Check(context.Background(), New().client, Target{URL: address, Timeout: 3 * time.Second})
+		if r.State != StateDown || !strings.Contains(r.Err, "blocked") {
+			t.Errorf("%s: result = %+v, want down with \"blocked\"", address, r)
+		}
+		if time.Since(start) > time.Second {
+			t.Errorf("%s: took %v — the connection was attempted", address, time.Since(start))
+		}
+	}
+}
+
+type failingTransport struct{ msg string }
+
+func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New(f.msg)
+}
+
+// net/http error texts can quote the requested URL; shortError passes long ones
+// through whole, and Result.Err goes to /api/status, the history and notifications.
+func TestCheckErrorHidesCredentials(t *testing.T) {
+	client := &http.Client{Transport: failingTransport{
+		msg: "upstream refused http://admin:hunter2@nas.lan:5000/share because of a long and detailed reason"}}
+	r := Check(context.Background(), client, Target{URL: "http://admin:hunter2@nas.lan:5000/", Timeout: time.Second})
+	if r.State != StateDown || !strings.Contains(r.Err, "upstream refused") {
+		t.Fatalf("result = %+v", r)
+	}
+	for _, leak := range []string{"hunter2", "admin"} {
+		if strings.Contains(r.Err, leak) {
+			t.Errorf("Err %q leaks %q", r.Err, leak)
+		}
+	}
+	if !strings.Contains(r.Err, "http://nas.lan:5000/share") {
+		t.Errorf("Err %q lost the address", r.Err)
+	}
 }

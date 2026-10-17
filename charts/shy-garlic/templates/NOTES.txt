@@ -23,7 +23,10 @@ Shy Garlic {{ .Chart.AppVersion }} is installing.
      (keys SHYG_ADMIN_USER / SHYG_ADMIN_PASSWORD). Sign in with it.
 {{- else }}
      Nobody can get past /setup until an account exists, so open it first and
-     create the administrator. Once one exists, /setup is closed.
+     create the administrator. /setup asks for a one-time setup token that the
+     pod prints in its log:
+       kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "shy-garlic.fullname" . }} | grep setup_token
+     Once an account exists, /setup is closed.
 {{- end }}
 
 Notes:

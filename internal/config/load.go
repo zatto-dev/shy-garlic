@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
+	"time"
 )
 
 // Load reads the configuration semantically: expands merge keys (`<<: *defaults`),
@@ -26,12 +28,46 @@ func Load(src []byte) (*Config, error) {
 	}
 	for gi := range cfg.Groups {
 		for si := range cfg.Groups[gi].Services {
+			cfg.LoadWarnings = append(cfg.LoadWarnings,
+				sanitizeCheckDurations(&cfg.Groups[gi].Services[si].Check, cfg.Groups[gi].Name, cfg.Groups[gi].Services[si].Name)...)
 			applyDefaults(&cfg.Groups[gi].Services[si].Check)
 			applySize(&cfg.Groups[gi].Services[si])
 			applyDescription(&cfg.Groups[gi].Services[si])
 		}
 	}
 	return &cfg, nil
+}
+
+// sanitizeCheckDurations resets an interval or timeout outside
+// [MinCheckDuration, MaxCheckDuration] to "not given" (applyDefaults then fills in
+// the default). 0 is "not given" already and stays silent.
+//
+// ! Deliberately no error, same as applyAppearance: a negative, NaN or absurdly
+// large value in a hand-edited file used to reach time.NewTicker and panic the
+// process on every start. Now the panel starts, the value is replaced and the
+// banner says so.
+func sanitizeCheckDurations(c *Check, group, service string) []Warning {
+	var out []Warning
+	for _, f := range []struct {
+		key string
+		d   *Duration
+		def time.Duration
+	}{{"interval", &c.Interval, DefaultInterval}, {"timeout", &c.Timeout, DefaultTimeout}} {
+		v := f.d.Duration()
+		if v == 0 || (v >= MinCheckDuration && v <= MaxCheckDuration) {
+			continue
+		}
+		written := f.d.String()
+		if v == math.MaxInt64 || v == math.MinInt64 {
+			written = "out of range"
+		}
+		slog.Warn("check duration out of range, using the default",
+			"service", service, "field", f.key, "value", written, "using", f.def.String())
+		out = append(out, Warning{Kind: KindCheck, Group: group, Service: service,
+			Key: f.key, Address: written, Suggestion: f.def.String()})
+		*f.d = 0
+	}
+	return out
 }
 
 func applyDefaults(c *Check) {

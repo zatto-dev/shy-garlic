@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zatto-dev/shy-garlic/internal/netguard"
 )
 
 // Message formats (SHYG-50). The webhook address and the format live next to each other in
@@ -198,11 +200,21 @@ func New(webhook string, threshold int) *Notifier {
 		webhook:   webhook,
 		format:    FormatDiscord,
 		threshold: threshold,
-		client:    &http.Client{Timeout: 10 * time.Second},
+		client:    &http.Client{Timeout: 10 * time.Second, Transport: guardedTransport()},
 		state:     map[string]*serviceState{},
 		queues:    map[string]*serviceQueue{},
 		sem:       make(chan struct{}, maxConcurrentSends),
 	}
+}
+
+// guardedTransport is the default transport (proxy settings from the environment
+// included) with the link-local block installed: a webhook address must not be
+// usable to reach a cloud metadata endpoint. LAN addresses stay allowed — ntfy
+// and Gotify usually live there.
+func guardedTransport() *http.Transport {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = netguard.Dialer(30 * time.Second).DialContext
+	return tr
 }
 
 func (p *Notifier) Enabled() bool { return p.Webhook() != "" }

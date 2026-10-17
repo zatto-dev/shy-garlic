@@ -32,6 +32,39 @@ Knowing where the boundary is drawn saves everyone time.
 - **Whoever can sign in can edit the config file.** That is the product: the
   UI is an editor for that file. There are no per-user permissions, and adding
   an account grants the same rights as the account that created it.
+- **First run is protected by a setup token.** A fresh instance has no
+  accounts, and `/setup` would make whoever reached it first the administrator,
+  and the administrator can edit the config file. So the panel prints a random,
+  one-time setup token in its log at start and refuses `/setup` without it
+  (wrong tokens count against the sign-in rate limit). The token is kept in
+  memory only and is dropped when the account is created. `SHYG_ADMIN_USER` /
+  `SHYG_ADMIN_PASSWORD` create the account at start and skip setup. The first
+  account is created in one database statement, so simultaneous requests cannot
+  produce several administrators.
+- **`--allowed-host` guards against DNS rebinding.** A web page you visit can
+  make your browser talk to a panel on your own network under the page's name.
+  With `--allowed-host` / `SHYG_ALLOWED_HOSTS` set to the names you actually use,
+  requests for any other `Host` get `421`. Empty means no check (the default).
+  Loopback names always pass. If you expose the panel beyond the LAN, set it.
+- **Whoever can sign in can make the panel request addresses on your network.**
+  Health checks, `check.path`, `tcp://` targets and the webhook go wherever the
+  config says, and private LAN addresses are the point of the product, so they
+  are allowed. Link-local addresses (`169.254.0.0/16`, `fe80::/10`, which carry
+  cloud metadata services) are blocked for health checks and the webhook, and
+  icon fetching refuses every private, loopback, link-local and tunnelling range.
+  With `HTTP_PROXY`/`HTTPS_PROXY` set, the webhook goes through that proxy and
+  the guard sees the proxy's address, not the target's; that is deliberate (a
+  corporate proxy filters on its own). The block also covers the OCI
+  (`192.0.0.192`) and Azure (`168.63.129.16`) metadata addresses.
+  The failure text of "send test message" is deliberately generic; the details
+  go to the log. Treat a panel account like shell access to the network the
+  panel sits in.
+- **Credentials in a service `url:` (`http://user:pass@host`) are not hidden in
+  the file**, because the file is shown and committed (see below). The panel
+  strips them from notifications, from the page, from `/api/service` and from
+  check errors, and the config banner warns about each one. The health check
+  itself still uses them. Prefer a health endpoint that needs no
+  credentials, and keep the file out of public repositories.
 - **`--trusted-proxy` decides who may set `X-Forwarded-For`.** Leave it empty
   unless a proxy really sits in front of the panel. Setting it too widely lets
   a client forge its own address, which affects both the log and the sign-in
@@ -63,7 +96,9 @@ Knowing where the boundary is drawn saves everyone time.
 
 - No external security review has been carried out. That is the reason the
   version number still starts with a zero.
-- There is no rate limit on the API beyond sign-in and failed API tokens.
+- There is no rate limit on the API beyond sign-in, password change and failed
+  API tokens. Each account may hold at most 8 live-update (`/events`) streams
+  open at once.
 - Sign-in has a global cap of 30 failed attempts per minute on top of the
   per-address limit (IPv6 counted per /64). An attacker spread over many
   addresses can keep that cap tripped and so block new sign-ins, including the

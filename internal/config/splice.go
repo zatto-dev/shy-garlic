@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,28 +34,49 @@ func quoteLike(old []byte, value string) string {
 }
 
 func quoteWith(q rune, v string) string {
-	if q == '\'' {
+	// ! A single-quoted scalar cannot carry control characters: a raw CR or LF is
+	// folded by the parser (a group named "a\rb" corrupted the file), and there is
+	// no escape syntax. Fall back to double quotes, which have one.
+	if q == '\'' && !hasControl(v) {
 		// in YAML an apostrophe in a single-quoted value is doubled
 		return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 	}
 	var b strings.Builder
 	b.WriteByte('"')
 	for _, r := range v {
-		switch r {
-		case '"':
+		switch {
+		case r == '"':
 			b.WriteString(`\"`)
-		case '\\':
+		case r == '\\':
 			b.WriteString(`\\`)
-		case '\n':
+		case r == '\n':
 			b.WriteString(`\n`)
-		case '\t':
+		case r == '\t':
 			b.WriteString(`\t`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case isControl(r):
+			// every other control character, DEL, NEL and the Unicode line/paragraph
+			// separators — YAML treats several of them as line breaks
+			if r <= 0xff {
+				fmt.Fprintf(&b, `\x%02X`, r)
+			} else {
+				fmt.Fprintf(&b, `\u%04X`, r)
+			}
 		default:
 			b.WriteRune(r)
 		}
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+func isControl(r rune) bool {
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029
+}
+
+func hasControl(v string) bool {
+	return strings.ContainsFunc(v, isControl)
 }
 
 // needsQuoting says whether writing the value bare would change its meaning
@@ -66,7 +88,7 @@ func needsQuoting(v string) bool {
 	if strings.TrimSpace(v) != v {
 		return true
 	}
-	if strings.ContainsAny(v, "\n\r\t") {
+	if hasControl(v) {
 		return true
 	}
 	if strings.Contains(v, ": ") || strings.HasSuffix(v, ":") || strings.Contains(v, " #") {

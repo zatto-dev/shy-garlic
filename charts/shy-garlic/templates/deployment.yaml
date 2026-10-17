@@ -78,6 +78,10 @@ spec:
             - name: SHYG_TRUSTED_PROXY
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.allowedHosts }}
+            - name: SHYG_ALLOWED_HOSTS
+              value: {{ join "," . | quote }}
+            {{- end }}
             {{- if include "shy-garlic.adminSecretName" . }}
             - name: SHYG_ADMIN_USER
               valueFrom:
