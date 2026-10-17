@@ -8,30 +8,30 @@ import (
 	"github.com/goccy/go-yaml/ast"
 )
 
-// Zmiana kolejności: usługi w grupie, usługi między grupami, same grupy.
+// Reordering: services within a group, services between groups, the groups themselves.
 //
-// Każdy ruch to dwa splice'y na oryginalnym tekście — wycięcie bloku i wstawienie
-// go w nowym miejscu. Blok niesie komentarze przyklejone nad wpisem i pola,
-// których panel nie zna; nic nie jest składane od nowa z modelu.
+// Every move is two splices on the original text — cutting the block and inserting
+// it in the new place. The block carries comments glued above the entry and fields
+// the panel does not know; nothing is rebuilt from the model.
 
-// elementListy to zakres bajtów jednego elementu listy (`- name: ...`) razem z
-// komentarzem przyklejonym nad nim, bez pustych linii po nim.
-type elementListy struct {
-	początek, koniec, dash int
+// listElement is the byte range of one list element (`- name: ...`) together with the
+// comment glued above it, without the blank lines after it.
+type listElement struct {
+	begin, end, dash int
 }
 
-// początekZKomentarzem cofa początek linii o komentarze stojące bezpośrednio
-// nad wpisem — te same, które zabiera RemoveService.
+// startWithComment moves the line start back over comments standing directly
+// above the entry — the same ones RemoveService takes.
 //
-// ! Do wpisu należy tylko komentarz stojący w kolumnie jego myślnika. Komentarz
-// wcięty głębiej to ogon POPRZEDNIEGO wpisu (np. zakomentowana usługa pod
-// ostatnią usługą grupy) i musi zostać na swoim miejscu.
-func (d *Document) początekZKomentarzem(off, dash int) int {
+// ! Only a comment standing in the column of the entry's dash belongs to the entry. A
+// comment indented deeper is the tail of the PREVIOUS entry (e.g. a commented-out service under
+// the group's last service) and must stay where it is.
+func (d *Document) startWithComment(off, dash int) int {
 	start := d.lineStart(off)
 	for start > 0 {
-		pk := start - 1
-		ps := d.lineStart(pk)
-		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:pk])), "#") && d.lineIndent(ps) == dash {
+		prevKey := start - 1
+		ps := d.lineStart(prevKey)
+		if strings.HasPrefix(strings.TrimSpace(string(d.src[ps:prevKey])), "#") && d.lineIndent(ps) == dash {
 			start = ps
 			continue
 		}
@@ -40,75 +40,75 @@ func (d *Document) początekZKomentarzem(off, dash int) int {
 	return start
 }
 
-func (d *Document) elementyListy(seq *ast.SequenceNode) ([]elementListy, error) {
-	out := make([]elementListy, 0, len(seq.Values))
+func (d *Document) listElements(seq *ast.SequenceNode) ([]listElement, error) {
+	out := make([]listElement, 0, len(seq.Values))
 	for _, v := range seq.Values {
 		off, err := d.offsetOf(v)
 		if err != nil {
 			return nil, err
 		}
 		dash := d.dashIndentOf(off)
-		out = append(out, elementListy{d.początekZKomentarzem(off, dash), d.blockEnd(off, dash), dash})
+		out = append(out, listElement{d.startWithComment(off, dash), d.blockEnd(off, dash), dash})
 	}
 	return out, nil
 }
 
-// listaRozdzielona mówi, czy użytkownik rozdziela elementy pustą linią —
-// patrzymy na drugi i kolejne, bo pierwszy zwykle stoi pod kluczem.
-func (d *Document) listaRozdzielona(el []elementListy) bool {
+// delimitedList says whether the user separates elements with a blank line —
+// we look at the second and later ones, because the first usually stands under the key.
+func (d *Document) delimitedList(el []listElement) bool {
 	for _, e := range el[min(1, len(el)):] {
-		if d.poprzedzaPustaLinia(e.początek) {
+		if d.precededByBlankLine(e.begin) {
 			return true
 		}
 	}
 	return false
 }
 
-func (d *Document) pustaLiniaOd(off int) (koniec int, ok bool) {
+func (d *Document) blankLineFrom(off int) (end int, ok bool) {
 	if off >= len(d.src) {
 		return off, false
 	}
-	le := d.lineEnd(off)
-	return le + 1, strings.TrimSpace(string(d.src[off:le])) == ""
+	lineEnd := d.lineEnd(off)
+	return lineEnd + 1, strings.TrimSpace(string(d.src[off:lineEnd])) == ""
 }
 
-// wytnijElement wycina element i zwraca jego linie zdjęte z wcięcia.
+// cutElement cuts the element out and returns its lines with the indent removed.
 //
-// Puste linie: środkowy element zabiera ze sobą tę po sobie. Ostatni zostawia
-// pustą linię za sobą (to ona oddziela listę od następnej grupy) i zabiera
-// własną poprzedzającą, żeby nie powstał podwójny odstęp.
-func (d *Document) wytnijElement(seq *ast.SequenceNode, i int) ([]string, error) {
-	el, err := d.elementyListy(seq)
+// Blank lines: a middle element takes the one after it with it. The last one leaves
+// a blank line behind (it is what separates the list from the next group) and takes
+// its own preceding one, so no double gap appears.
+func (d *Document) cutElement(seq *ast.SequenceNode, i int) ([]string, error) {
+	el, err := d.listElements(seq)
 	if err != nil {
 		return nil, err
 	}
 	e := el[i]
-	linie := []string{}
-	for _, l := range strings.Split(strings.TrimRight(string(d.src[e.początek:e.koniec]), "\n"), "\n") {
+	lines := []string{}
+	for _, l := range strings.Split(strings.TrimRight(string(d.src[e.begin:e.end]), "\n"), "\n") {
 		if len(l) >= e.dash && strings.TrimSpace(l[:e.dash]) == "" {
 			l = l[e.dash:]
 		} else {
 			l = strings.TrimLeft(l, " ")
 		}
-		linie = append(linie, l)
+		lines = append(lines, l)
 	}
 
-	start, end := e.początek, e.koniec
+	start, end := e.begin, e.end
 	if i < len(el)-1 {
 		for {
-			next, pusta := d.pustaLiniaOd(end)
-			if !pusta {
+			next, blank := d.blankLineFrom(end)
+			if !blank {
 				break
 			}
 			end = next
 		}
 	} else {
-		_, zaPusta := d.pustaLiniaOd(end)
-		if zaPusta || end >= len(d.src) {
+		_, afterBlank := d.blankLineFrom(end)
+		if afterBlank || end >= len(d.src) {
 			for start > 0 {
-				pk := start - 1
-				ps := d.lineStart(pk)
-				if strings.TrimSpace(string(d.src[ps:pk])) != "" {
+				prevKey := start - 1
+				ps := d.lineStart(prevKey)
+				if strings.TrimSpace(string(d.src[ps:prevKey])) != "" {
 					break
 				}
 				start = ps
@@ -118,45 +118,45 @@ func (d *Document) wytnijElement(seq *ast.SequenceNode, i int) ([]string, error)
 	if err := d.replaceRange(start, end, nil); err != nil {
 		return nil, err
 	}
-	return linie, nil
+	return lines, nil
 }
 
-// wstawElement wstawia linie jako element o danym indeksie (len = na koniec).
-func (d *Document) wstawElement(seq *ast.SequenceNode, indeks int, linie []string, rozdziel bool) error {
-	el, err := d.elementyListy(seq)
+// insertElement inserts lines as the element at the given index (len = at the end).
+func (d *Document) insertElement(seq *ast.SequenceNode, index int, lines []string, split bool) error {
+	el, err := d.listElements(seq)
 	if err != nil {
 		return err
 	}
 	dash := el[0].dash
 	var b strings.Builder
-	for _, l := range linie {
+	for _, l := range lines {
 		if strings.TrimSpace(l) == "" {
 			b.WriteString("\n")
 			continue
 		}
 		b.WriteString(strings.Repeat(" ", dash) + l + "\n")
 	}
-	blok := b.String()
+	block := b.String()
 
-	if indeks < len(el) {
-		if rozdziel {
-			blok += "\n"
+	if index < len(el) {
+		if split {
+			block += "\n"
 		}
-		at := el[indeks].początek
-		return d.replaceRange(at, at, []byte(blok))
+		atIdx := el[index].begin
+		return d.replaceRange(atIdx, atIdx, []byte(block))
 	}
-	at := el[len(el)-1].koniec
-	if rozdziel {
-		blok = "\n" + blok
+	atIdx := el[len(el)-1].end
+	if split {
+		block = "\n" + block
 	}
-	if at > 0 && d.src[at-1] != '\n' {
-		blok = "\n" + blok // plik bez końcowego \n
+	if atIdx > 0 && d.src[atIdx-1] != '\n' {
+		block = "\n" + block // file without a trailing \n
 	}
-	return d.replaceRange(at, at, []byte(blok))
+	return d.replaceRange(atIdx, atIdx, []byte(block))
 }
 
-func (d *Document) sekwencja(ścieżka ...any) (*ast.SequenceNode, bool) {
-	n, err := d.node(ścieżka...)
+func (d *Document) sequence(path ...any) (*ast.SequenceNode, bool) {
+	n, err := d.node(path...)
 	if err != nil {
 		return nil, false
 	}
@@ -164,94 +164,94 @@ func (d *Document) sekwencja(ścieżka ...any) (*ast.SequenceNode, bool) {
 	return seq, ok
 }
 
-var errIndeks = errors.New("position out of range")
+var errIndex = errors.New("position out of range")
 
-// MoveServiceTo przenosi usługę do grupy doGrupy na pozycję indeks. Indeks to
-// miejsce usługi w liście docelowej PO przesunięciu (0 = pierwsza, len = ostatnia),
-// więc ten sam indeks działa dla zmiany kolejności w grupie i dla przeniesienia.
-// Ruch w miejsce, w którym usługa już stoi, nie zmienia ani bajta.
-func (d *Document) MoveServiceTo(zGrupy, usługa, doGrupy string, indeks int) error {
-	gi, si, err := d.findService(zGrupy, usługa)
+// MoveServiceTo moves the service to group toGroup at position index. The index is
+// the service's place in the target list AFTER the move (0 = first, len = last),
+// so the same index works for reordering within a group and for moving between groups.
+// A move to the place where the service already stands does not change a single byte.
+func (d *Document) MoveServiceTo(fromGroup, service, toGroup string, index int) error {
+	gi, si, err := d.findService(fromGroup, service)
 	if err != nil {
 		return err
 	}
-	ti, err := d.findGroup(doGrupy)
+	titleIdx, err := d.findGroup(toGroup)
 	if err != nil {
 		return err
 	}
-	same := gi == ti
+	same := gi == titleIdx
 	if !same {
-		if _, _, err := d.findService(doGrupy, usługa); err == nil {
-			return fmt.Errorf("%w: service %q in group %q", ErrDuplikat, usługa, doGrupy)
+		if _, _, err := d.findService(toGroup, service); err == nil {
+			return fmt.Errorf("%w: service %q in group %q", ErrDuplicate, service, toGroup)
 		}
 	}
-	z, _ := d.sekwencja("groups", gi, "services")
-	cel, maCel := d.sekwencja("groups", ti, "services")
-	dłCel := 0
-	if maCel {
-		dłCel = len(cel.Values)
+	z, _ := d.sequence("groups", gi, "services")
+	target, hasTarget := d.sequence("groups", titleIdx, "services")
+	targetLen := 0
+	if hasTarget {
+		targetLen = len(target.Values)
 	}
 	if same {
-		dłCel-- // usługa wyjdzie z listy, zanim wstawimy ją z powrotem
+		targetLen-- // the service leaves the list before we insert it back
 	}
-	if indeks < 0 || indeks > dłCel {
-		return fmt.Errorf("%w: %d (0..%d)", errIndeks, indeks, dłCel)
+	if index < 0 || index > targetLen {
+		return fmt.Errorf("%w: %d (0..%d)", errIndex, index, targetLen)
 	}
-	if same && indeks == si {
+	if same && index == si {
 		return nil
 	}
 
-	rozdziel := false
-	if maCel && len(cel.Values) > 0 {
-		el, err := d.elementyListy(cel)
+	split := false
+	if hasTarget && len(target.Values) > 0 {
+		el, err := d.listElements(target)
 		if err != nil {
 			return err
 		}
-		rozdziel = d.listaRozdzielona(el)
+		split = d.delimitedList(el)
 	}
 
-	linie, err := d.wytnijElement(z, si)
+	lines, err := d.cutElement(z, si)
 	if err != nil {
 		return err
 	}
 	if len(z.Values) == 1 {
-		if err := d.ustawPustąListę(zGrupy); err != nil {
+		if err := d.setEmptyList(fromGroup); err != nil {
 			return err
 		}
 	}
-	cel, maCel = d.sekwencja("groups", ti, "services")
-	if !maCel || len(cel.Values) == 0 {
-		return d.wstawBlokDoPustej(ti, linie)
+	target, hasTarget = d.sequence("groups", titleIdx, "services")
+	if !hasTarget || len(target.Values) == 0 {
+		return d.insertBlockIntoEmpty(titleIdx, lines)
 	}
-	return d.wstawElement(cel, indeks, linie, rozdziel)
+	return d.insertElement(target, index, lines, split)
 }
 
-// MoveGroup przenosi grupę na pozycję indeks (po przesunięciu), razem z
-// usługami i komentarzem nad nią.
-func (d *Document) MoveGroup(nazwa string, indeks int) error {
-	gi, err := d.findGroup(nazwa)
+// MoveGroup moves the group to position index (after the move), together with
+// its services and the comment above it.
+func (d *Document) MoveGroup(name string, index int) error {
+	gi, err := d.findGroup(name)
 	if err != nil {
 		return err
 	}
-	seq, ok := d.sekwencja("groups")
+	seq, ok := d.sequence("groups")
 	if !ok {
-		return fmt.Errorf("%w: groups nie jest listą", ErrPathNotFound)
+		return fmt.Errorf("%w: groups is not a list", ErrPathNotFound)
 	}
-	if indeks < 0 || indeks > len(seq.Values)-1 {
-		return fmt.Errorf("%w: %d (0..%d)", errIndeks, indeks, len(seq.Values)-1)
+	if index < 0 || index > len(seq.Values)-1 {
+		return fmt.Errorf("%w: %d (0..%d)", errIndex, index, len(seq.Values)-1)
 	}
-	if indeks == gi {
+	if index == gi {
 		return nil
 	}
-	el, err := d.elementyListy(seq)
+	el, err := d.listElements(seq)
 	if err != nil {
 		return err
 	}
-	rozdziel := d.listaRozdzielona(el)
-	linie, err := d.wytnijElement(seq, gi)
+	split := d.delimitedList(el)
+	lines, err := d.cutElement(seq, gi)
 	if err != nil {
 		return err
 	}
-	seq, _ = d.sekwencja("groups")
-	return d.wstawElement(seq, indeks, linie, rozdziel)
+	seq, _ = d.sequence("groups")
+	return d.insertElement(seq, index, lines, split)
 }

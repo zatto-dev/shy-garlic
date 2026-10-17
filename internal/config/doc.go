@@ -14,41 +14,41 @@ var (
 	ErrPathNotFound    = errors.New("path not found in config")
 	ErrServiceNotFound = errors.New("service not found")
 	ErrGroupNotFound   = errors.New("group not found")
-	// ErrDuplikat — nazwa już zajęta w tej samej liście (usługa w grupie, grupa).
-	// Dwie usługi o tej samej nazwie scaliłyby historię sprawdzeń pod jednym kluczem.
-	ErrDuplikat = errors.New("name already exists")
+	// ErrDuplicate — the name is already taken in the same list (service in a group, group).
+	// Two services with the same name would merge check history under one key.
+	ErrDuplicate = errors.New("name already exists")
 )
 
-// Document to konfiguracja widziana jako TEKST, nie jako struktura danych.
+// Document is the configuration seen as TEXT, not as a data structure.
 //
-// AST służy wyłącznie do nawigacji — do wskazania, gdzie w oryginalnych bajtach
-// leży dana wartość. Zapis nigdy nie printuje AST-a, tylko podmienia zakres
-// bajtów w src. Dzięki temu wszystko, czego użytkownik nie zmienił — komentarze,
-// puste linie, anchory, merge-keye, wyrównanie — zostaje fizycznie nietknięte.
+// The AST serves solely for navigation — to point out where in the original bytes
+// a given value lies. Saving never prints the AST, it replaces a range of
+// bytes in src. Thanks to that everything the user did not change — comments,
+// blank lines, anchors, merge keys, alignment — stays physically untouched.
 //
-// Sprawdzone empirycznie 2026-08-14: print AST-a (nawet w goccy, który radzi
-// sobie najlepiej) zbija wyrównanie spacji przed komentarzem końca linii, czyli
-// rusza linie, których nikt nie edytował. Stąd splice zamiast printu.
+// Verified empirically 2026-08-14: printing the AST (even in goccy, which copes
+// best) collapses the alignment of spaces before an end-of-line comment, i.e.
+// it touches lines nobody edited. Hence splice instead of print.
 type Document struct {
 	src   []byte
 	file  *ast.File
-	lines []int // offset początku każdej linii (0-based indeks linii)
+	lines []int // offset of each line's start (0-based line index)
 
-	// wypełniane przez Open — potrzebne do bezpiecznego zapisu
+	// filled in by Open — needed for a safe write
 	path string
 	hash [32]byte
 	mode os.FileMode
 
-	// crlf: plik miał WYŁĄCZNIE końce linii CRLF. src trzyma wtedy sam LF
-	// (cała nawigacja po offsetach i wstawki liczą na jeden bajt końca linii),
-	// a Bytes() przywraca CRLF. Plik z mieszanymi końcami zostaje nietknięty.
+	// crlf: the file had ONLY CRLF line endings. src then holds plain LF
+	// (all offset navigation and insertions count on a single line-end byte),
+	// and Bytes() restores CRLF. A file with mixed endings stays untouched.
 	crlf bool
 }
 
-// normalizujKońce zamienia CRLF na LF, ale tylko gdy KAŻDY \n w pliku jest
-// poprzedzony \r — dzięki temu nietknięty round-trip jest bajt w bajt
-// identyczny, a plik z mieszanymi końcami nie jest po cichu przerabiany.
-func normalizujKońce(src []byte) ([]byte, bool) {
+// normalizeLineEndings turns CRLF into LF, but only when EVERY \n in the file is
+// preceded by \r — thanks to that an untouched round-trip is byte for byte
+// identical, and a file with mixed endings is not silently rewritten.
+func normalizeLineEndings(src []byte) ([]byte, bool) {
 	crlf := bytes.Count(src, []byte("\r\n"))
 	if crlf == 0 || crlf != bytes.Count(src, []byte("\n")) {
 		return src, false
@@ -60,7 +60,7 @@ func Parse(src []byte) (*Document, error) {
 	if hasLoneCR(src) {
 		return nil, errLoneCR
 	}
-	src, crlf := normalizujKońce(src)
+	src, crlf := normalizeLineEndings(src)
 	d := &Document{src: src, crlf: crlf}
 	if err := d.reparse(); err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func Parse(src []byte) (*Document, error) {
 	return d, nil
 }
 
-// reparse odświeża AST i indeks linii po zmianie src.
+// reparse refreshes the AST and the line index after src changes.
 func (d *Document) reparse() error {
 	f, err := safeParseBytes(d.src, parser.ParseComments)
 	if err != nil {
@@ -88,8 +88,8 @@ func (d *Document) reparse() error {
 	return nil
 }
 
-// Bytes zwraca aktualną treść pliku. To są prawdziwe bajty, nie re-print AST-a;
-// przy pliku CRLF końce linii wracają do CRLF.
+// Bytes returns the current file content. These are the real bytes, not a re-print of the AST;
+// for a CRLF file the line endings go back to CRLF.
 func (d *Document) Bytes() []byte {
 	if d.crlf {
 		return bytes.ReplaceAll(d.src, []byte("\n"), []byte("\r\n"))
@@ -97,12 +97,12 @@ func (d *Document) Bytes() []byte {
 	return d.src
 }
 
-// root zwraca korzeń pierwszego dokumentu.
+// root returns the root of the first document.
 func (d *Document) root() ast.Node { return d.file.Docs[0].Body }
 
-// scalar zwraca surową wartość tokenu.
-// ! Nie używać n.String(): przy ParseComments dokleja komentarz z końca linii
-// (`"Sonarr" # cudzysłowy celowo`) i psuje każde porównanie.
+// scalar returns the raw value of the token.
+// ! Do not use n.String(): with ParseComments it appends the end-of-line comment
+// (`"Sonarr" # quotes on purpose`) and breaks every comparison.
 func scalar(n ast.Node) string {
 	if n == nil {
 		return ""
@@ -113,8 +113,8 @@ func scalar(n ast.Node) string {
 	return ""
 }
 
-// unwrap zdejmuje opakowania, które nie niosą danych: `klucz: &anchor {...}`
-// daje AnchorNode, a nie mapping. Nawigacja ma tego nie widzieć.
+// unwrap strips wrappers that carry no data: `key: &anchor {...}`
+// gives an AnchorNode, not a mapping. Navigation should not see that.
 func unwrap(n ast.Node) ast.Node {
 	for {
 		switch v := n.(type) {
@@ -138,7 +138,7 @@ func asMapping(n ast.Node) *ast.MappingNode {
 	return nil
 }
 
-// child schodzi o jeden krok: po kluczu (string) albo po indeksie (int).
+// child descends one step: by key (string) or by index (int).
 func child(n ast.Node, step any) ast.Node {
 	switch s := step.(type) {
 	case string:
@@ -161,39 +161,39 @@ func child(n ast.Node, step any) ast.Node {
 	return nil
 }
 
-// node zwraca węzeł spod ścieżki, np. node("groups", 0, "services", 1, "url").
+// node returns the node under the path, e.g. node("groups", 0, "services", 1, "url").
 func (d *Document) node(path ...any) (ast.Node, error) {
 	cur := d.root()
 	for i, step := range path {
 		next := child(cur, step)
 		if next == nil {
-			return nil, fmt.Errorf("%w: %v (krok %d)", ErrPathNotFound, path[:i+1], i)
+			return nil, fmt.Errorf("%w: %v (step %d)", ErrPathNotFound, path[:i+1], i)
 		}
 		cur = next
 	}
 	return cur, nil
 }
 
-// offsetOf przelicza pozycję tokenu (linia/kolumna, obie 1-based) na offset bajtowy.
+// offsetOf converts a token position (line/column, both 1-based) to a byte offset.
 func (d *Document) offsetOf(n ast.Node) (int, error) {
 	tok := n.GetToken()
 	if tok == nil || tok.Position == nil {
-		return 0, fmt.Errorf("%w: węzeł bez pozycji", ErrPathNotFound)
+		return 0, fmt.Errorf("%w: node without a position", ErrPathNotFound)
 	}
-	li := tok.Position.Line - 1
-	if li < 0 || li >= len(d.lines) {
-		return 0, fmt.Errorf("%w: linia %d poza plikiem", ErrPathNotFound, tok.Position.Line)
+	lineIdx := tok.Position.Line - 1
+	if lineIdx < 0 || lineIdx >= len(d.lines) {
+		return 0, fmt.Errorf("%w: line %d outside the file", ErrPathNotFound, tok.Position.Line)
 	}
-	off := d.lines[li] + tok.Position.Column - 1
+	off := d.lines[lineIdx] + tok.Position.Column - 1
 	if off < 0 || off > len(d.src) {
-		return 0, fmt.Errorf("%w: offset %d poza plikiem", ErrPathNotFound, off)
+		return 0, fmt.Errorf("%w: offset %d outside the file", ErrPathNotFound, off)
 	}
 	return off, nil
 }
 
-// valueRange zwraca zakres bajtów [start,end) zajmowany przez wartość spod ścieżki.
-// Zakres obejmuje cudzysłowy, jeśli wartość jest cytowana, i nie obejmuje
-// komentarza z końca linii ani spacji przed nim.
+// valueRange returns the byte range [start,end) occupied by the value under the path.
+// The range includes quotes if the value is quoted, and does not include
+// the end-of-line comment or the spaces before it.
 func (d *Document) valueRange(path ...any) (int, int, error) {
 	n, err := d.node(path...)
 	if err != nil {
@@ -206,7 +206,7 @@ func (d *Document) valueRange(path ...any) (int, int, error) {
 	return start, d.scanValueEnd(start), nil
 }
 
-// scanValueEnd wyznacza koniec wartości zaczynającej się na start.
+// scanValueEnd determines the end of a value starting at start.
 func (d *Document) scanValueEnd(start int) int {
 	src := d.src
 	if start >= len(src) {
@@ -247,7 +247,7 @@ func (d *Document) scanValueEnd(start int) int {
 		}
 	}
 
-	// skalar bez cudzysłowów: do końca linii, minus komentarz i spacje z prawej
+	// scalar without quotes: to the end of the line, minus the comment and spaces on the right
 	end := len(src)
 	for i := start; i < len(src); i++ {
 		if src[i] == '\n' {
@@ -267,18 +267,18 @@ func (d *Document) scanValueEnd(start int) int {
 	return end
 }
 
-// offsetKlucza zwraca offset bajtowy KLUCZA (nie wartości) w mapie n.
-// Potrzebny wszędzie tam, gdzie wstawiamy albo usuwamy całą linię, a nie
-// podmieniamy wartość — czyli tam, gdzie valueRange nie wystarcza.
-func (d *Document) offsetKlucza(n ast.Node, klucz string) (int, error) {
+// keyOffset returns the byte offset of the KEY (not the value) in map n.
+// Needed wherever we insert or remove a whole line rather than
+// replace a value — i.e. where valueRange is not enough.
+func (d *Document) keyOffset(n ast.Node, key string) (int, error) {
 	m := asMapping(n)
 	if m == nil {
-		return 0, fmt.Errorf("%w: węzeł nie jest mapą (klucz %q)", ErrPathNotFound, klucz)
+		return 0, fmt.Errorf("%w: node is not a map (key %q)", ErrPathNotFound, key)
 	}
 	for _, kv := range m.Values {
-		if scalar(kv.Key) == klucz {
+		if scalar(kv.Key) == key {
 			return d.offsetOf(kv.Key)
 		}
 	}
-	return 0, fmt.Errorf("%w: brak klucza %q", ErrPathNotFound, klucz)
+	return 0, fmt.Errorf("%w: no key %q", ErrPathNotFound, key)
 }

@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// plik testowy: komentarze nad wpisami, pola nieznane panelowi, puste linie
-// między usługami, pusta grupa i stopka w kolumnie 0.
-const ruchSrc = `title: T
+// test file: comments above entries, fields unknown to the panel, blank lines
+// between services, an empty group and a footer in column 0.
+const moveSrc = `title: T
 
 groups:
   # Media — pierwsza
@@ -41,11 +41,11 @@ groups:
 # stopka
 `
 
-func układ(t *testing.T, src []byte) string {
+func layoutOf(t *testing.T, src []byte) string {
 	t.Helper()
 	cfg, err := Load(src)
 	if err != nil {
-		t.Fatalf("wynik się nie parsuje: %v\n%s", err, src)
+		t.Fatalf("result does not parse: %v\n%s", err, src)
 	}
 	var parts []string
 	for _, g := range cfg.Groups {
@@ -60,103 +60,103 @@ func układ(t *testing.T, src []byte) string {
 
 func TestMoveServiceTo(t *testing.T) {
 	cases := []struct {
-		nazwa                string
-		z, usł, do           string
-		idx                  int
-		chcę                 string
-		komentarzPrzyUsłudze string // fragment, który musi stać zaraz nad wpisem po ruchu
+		name             string
+		z, svc, to       string
+		idx              int
+		want             string
+		commentOnService string // fragment that must stand right above the entry after the move
 	}{
-		{"w grupie: w dół do środka", "Media", "A", "Media", 1, "Media:B,A,C | Sieć:D,E | Pusta:", ""},
-		{"w grupie: na koniec", "Media", "A", "Media", 2, "Media:B,C,A | Sieć:D,E | Pusta:", ""},
-		{"w grupie: ostatnia na początek", "Media", "C", "Media", 0, "Media:C,A,B | Sieć:D,E | Pusta:", ""},
-		{"w grupie: w górę o jeden", "Media", "C", "Media", 1, "Media:A,C,B | Sieć:D,E | Pusta:", ""},
-		{"w grupie bez pustych linii: w górę", "Sieć", "E", "Sieć", 0, "Media:A,B,C | Sieć:E,D | Pusta:", ""},
-		{"między grupami: na początek", "Media", "B", "Sieć", 0, "Media:A,C | Sieć:B,D,E | Pusta:", ""},
-		{"między grupami: środek", "Media", "A", "Sieć", 1, "Media:B,C | Sieć:D,A,E | Pusta:", "# komentarz A"},
-		{"między grupami: koniec", "Sieć", "D", "Media", 3, "Media:A,B,C,D | Sieć:E | Pusta:", ""},
-		{"do pustej grupy", "Media", "C", "Pusta", 0, "Media:A,B | Sieć:D,E | Pusta:C", ""},
-		{"ostatnia usługa z grupy do innej", "Sieć", "D", "Pusta", 0, "Media:A,B,C | Sieć:E | Pusta:D", ""},
+		{"in group: down to the middle", "Media", "A", "Media", 1, "Media:B,A,C | Sieć:D,E | Pusta:", ""},
+		{"in group: to the end", "Media", "A", "Media", 2, "Media:B,C,A | Sieć:D,E | Pusta:", ""},
+		{"in group: last to the start", "Media", "C", "Media", 0, "Media:C,A,B | Sieć:D,E | Pusta:", ""},
+		{"in group: up by one", "Media", "C", "Media", 1, "Media:A,C,B | Sieć:D,E | Pusta:", ""},
+		{"in group without blank lines: up", "Sieć", "E", "Sieć", 0, "Media:A,B,C | Sieć:E,D | Pusta:", ""},
+		{"between groups: to the start", "Media", "B", "Sieć", 0, "Media:A,C | Sieć:B,D,E | Pusta:", ""},
+		{"between groups: middle", "Media", "A", "Sieć", 1, "Media:B,C | Sieć:D,A,E | Pusta:", "# komentarz A"},
+		{"between groups: end", "Sieć", "D", "Media", 3, "Media:A,B,C,D | Sieć:E | Pusta:", ""},
+		{"to an empty group", "Media", "C", "Pusta", 0, "Media:A,B | Sieć:D,E | Pusta:C", ""},
+		{"last service of a group to another", "Sieć", "D", "Pusta", 0, "Media:A,B,C | Sieć:E | Pusta:D", ""},
 	}
 	for _, c := range cases {
-		t.Run(c.nazwa, func(t *testing.T) {
-			d, err := Parse([]byte(ruchSrc))
+		t.Run(c.name, func(t *testing.T) {
+			d, err := Parse([]byte(moveSrc))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := d.MoveServiceTo(c.z, c.usł, c.do, c.idx); err != nil {
+			if err := d.MoveServiceTo(c.z, c.svc, c.to, c.idx); err != nil {
 				t.Fatal(err)
 			}
 			out := d.Bytes()
-			if got := układ(t, out); got != c.chcę {
-				t.Fatalf("układ = %s\nchcę    = %s\n%s", got, c.chcę, out)
+			if got := layoutOf(t, out); got != c.want {
+				t.Fatalf("layout = %s\nwant   = %s\n%s", got, c.want, out)
 			}
 			s := string(out)
-			// nic nie ginie: komentarze, nieznane pole, stopka, komentarze grup
+			// nothing is lost: comments, unknown field, footer, group comments
 			for _, f := range []string{"# komentarz A", "# koniec linii B", `extra: "nieznane pole"`, "# stopka", "# Media — pierwsza", "# Pusta", "title: T"} {
 				if strings.Count(s, f) != 1 {
-					t.Errorf("fragment %q występuje %d razy\n%s", f, strings.Count(s, f), s)
+					t.Errorf("fragment %q occurs %d times\n%s", f, strings.Count(s, f), s)
 				}
 			}
-			if c.komentarzPrzyUsłudze != "" {
-				if !strings.Contains(s, "      "+c.komentarzPrzyUsłudze+"\n      - name: "+c.usł+"\n") {
-					t.Errorf("komentarz nie stoi nad wpisem:\n%s", s)
+			if c.commentOnService != "" {
+				if !strings.Contains(s, "      "+c.commentOnService+"\n      - name: "+c.svc+"\n") {
+					t.Errorf("comment does not stand above the entry:\n%s", s)
 				}
 			}
-			// żadnych podwójnych pustych linii
+			// no double blank lines
 			if strings.Contains(s, "\n\n\n") {
-				t.Errorf("podwójna pusta linia:\n%s", s)
+				t.Errorf("double blank line:\n%s", s)
 			}
-			// po ruchu w drugą stronę wracamy do oryginału (poza grupą, której styl się zmienił)
-			if c.z == c.do {
-				orygInd := indeksUsługi(t, []byte(ruchSrc), c.z, c.usł)
-				if err := d.MoveServiceTo(c.z, c.usł, c.do, orygInd); err != nil {
+			// moving back we return to the original (except the group whose style changed)
+			if c.z == c.to {
+				origIndent := serviceIndex(t, []byte(moveSrc), c.z, c.svc)
+				if err := d.MoveServiceTo(c.z, c.svc, c.to, origIndent); err != nil {
 					t.Fatal(err)
 				}
-				if string(d.Bytes()) != ruchSrc {
-					t.Errorf("ruch tam i z powrotem zmienił plik:\n%s", d.Bytes())
+				if string(d.Bytes()) != moveSrc {
+					t.Errorf("round trip move changed the file:\n%s", d.Bytes())
 				}
 			}
 		})
 	}
 }
 
-func indeksUsługi(t *testing.T, src []byte, grupa, usł string) int {
+func serviceIndex(t *testing.T, src []byte, group, svc string) int {
 	t.Helper()
 	cfg, _ := Load(src)
 	for _, g := range cfg.Groups {
-		if g.Name != grupa {
+		if g.Name != group {
 			continue
 		}
 		for i, s := range g.Services {
-			if s.Name == usł {
+			if s.Name == svc {
 				return i
 			}
 		}
 	}
-	t.Fatalf("brak %s/%s", grupa, usł)
+	t.Fatalf("missing %s/%s", group, svc)
 	return -1
 }
 
-func TestMoveServiceToWcięcieIStylPustychLinii(t *testing.T) {
-	d, _ := Parse([]byte(ruchSrc))
+func TestMoveServiceToIndentAndBlankLineStyle(t *testing.T) {
+	d, _ := Parse([]byte(moveSrc))
 	if err := d.MoveServiceTo("Sieć", "D", "Media", 1); err != nil {
 		t.Fatal(err)
 	}
 	want := "      - name: A\n        url: http://a\n        extra: \"nieznane pole\"\n\n      - name: D\n        url: http://d\n\n      - name: B"
 	if !strings.Contains(string(d.Bytes()), want) {
-		t.Errorf("styl rozdzielania pustą linią nie przeszedł:\n%s", d.Bytes())
+		t.Errorf("blank-line separation style did not carry over:\n%s", d.Bytes())
 	}
-	// do grupy bez pustych linii — wpis ma ich nie dostać
-	d, _ = Parse([]byte(ruchSrc))
+	// into a group without blank lines — the entry must not get any
+	d, _ = Parse([]byte(moveSrc))
 	if err := d.MoveServiceTo("Media", "B", "Sieć", 1); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(d.Bytes()), "        url: http://d\n      - name: B   # koniec linii B\n        url: http://b\n      - name: E") {
-		t.Errorf("wpis dostał pustą linię w grupie, która ich nie ma:\n%s", d.Bytes())
+		t.Errorf("entry got a blank line in a group that has none:\n%s", d.Bytes())
 	}
 }
 
-func TestMoveServiceToWcięcieInnejGrupy(t *testing.T) {
+func TestMoveServiceToOtherGroupIndent(t *testing.T) {
 	src := "groups:\n  - name: G1\n    services:\n      - name: A\n        url: a\n  - name: G2\n    services:\n    - name: B\n      url: b\n"
 	d, _ := Parse([]byte(src))
 	if err := d.MoveServiceTo("G1", "A", "G2", 0); err != nil {
@@ -164,15 +164,15 @@ func TestMoveServiceToWcięcieInnejGrupy(t *testing.T) {
 	}
 	want := "  - name: G2\n    services:\n    - name: A\n      url: a\n    - name: B\n"
 	if !strings.Contains(string(d.Bytes()), want) {
-		t.Errorf("wcięcie nie przeliczone pod cel:\n%s", d.Bytes())
+		t.Errorf("indent not recomputed for the target:\n%s", d.Bytes())
 	}
-	if got := układ(t, d.Bytes()); got != "G1: | G2:A,B" {
-		t.Errorf("układ = %s", got)
+	if got := layoutOf(t, d.Bytes()); got != "G1: | G2:A,B" {
+		t.Errorf("layout = %s", got)
 	}
 }
 
-func TestMoveServiceToNoOpBajtIdentyczne(t *testing.T) {
-	d, _ := Parse([]byte(ruchSrc))
+func TestMoveServiceToNoOpByteIdentical(t *testing.T) {
+	d, _ := Parse([]byte(moveSrc))
 	for _, c := range []struct {
 		z, u string
 		i    int
@@ -180,118 +180,118 @@ func TestMoveServiceToNoOpBajtIdentyczne(t *testing.T) {
 		if err := d.MoveServiceTo(c.z, c.u, c.z, c.i); err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(d.Bytes(), []byte(ruchSrc)) {
-			t.Fatalf("no-op %v zmienił bajty", c)
+		if !bytes.Equal(d.Bytes(), []byte(moveSrc)) {
+			t.Fatalf("no-op %v changed bytes", c)
 		}
 	}
 }
 
-func TestMoveServiceToBłędy(t *testing.T) {
+func TestMoveServiceToErrors(t *testing.T) {
 	cases := []struct {
-		nazwa    string
-		z, u, do string
+		name     string
+		z, u, to string
 		idx      int
-		chcęBłąd error // nil = dowolny
+		wantErr  error // nil = any
 	}{
-		{"indeks za duży (w grupie)", "Media", "A", "Media", 3, errIndeks},
-		{"indeks za duży (do innej)", "Media", "A", "Sieć", 3, errIndeks},
-		{"indeks ujemny", "Media", "A", "Sieć", -1, errIndeks},
-		{"pusta grupa, indeks 1", "Media", "A", "Pusta", 1, errIndeks},
-		{"brak usługi", "Media", "Zzz", "Sieć", 0, ErrServiceNotFound},
-		{"brak grupy źródłowej", "Nope", "A", "Sieć", 0, ErrServiceNotFound},
+		{"index too large (in group)", "Media", "A", "Media", 3, errIndex},
+		{"index too large (to another)", "Media", "A", "Sieć", 3, errIndex},
+		{"negative index", "Media", "A", "Sieć", -1, errIndex},
+		{"pusta grupa, indeks 1", "Media", "A", "Pusta", 1, errIndex},
+		{"no service", "Media", "Zzz", "Sieć", 0, ErrServiceNotFound},
+		{"no source group", "Nope", "A", "Sieć", 0, ErrServiceNotFound},
 		{"brak grupy docelowej", "Media", "A", "Nope", 0, ErrGroupNotFound},
 	}
 	for _, c := range cases {
-		t.Run(c.nazwa, func(t *testing.T) {
-			d, _ := Parse([]byte(ruchSrc))
-			err := d.MoveServiceTo(c.z, c.u, c.do, c.idx)
+		t.Run(c.name, func(t *testing.T) {
+			d, _ := Parse([]byte(moveSrc))
+			err := d.MoveServiceTo(c.z, c.u, c.to, c.idx)
 			if err == nil {
-				t.Fatal("chcę błąd")
+				t.Fatal("want an error")
 			}
-			if c.chcęBłąd != nil && !errors.Is(err, c.chcęBłąd) && !errors.Is(err, ErrGroupNotFound) {
+			if c.wantErr != nil && !errors.Is(err, c.wantErr) && !errors.Is(err, ErrGroupNotFound) {
 				t.Errorf("err = %v", err)
 			}
-			if string(d.Bytes()) != ruchSrc {
-				t.Error("błąd, a plik się zmienił")
+			if string(d.Bytes()) != moveSrc {
+				t.Error("error, yet the file changed")
 			}
 		})
 	}
-	// duplikat nazwy w grupie docelowej
-	src := strings.Replace(ruchSrc, "name: D", "name: A", 1)
+	// duplicate name in the target group
+	src := strings.Replace(moveSrc, "name: D", "name: A", 1)
 	d, _ := Parse([]byte(src))
 	if err := d.MoveServiceTo("Media", "A", "Sieć", 0); err == nil {
-		t.Error("duplikat powinien dać błąd")
+		t.Error("duplicate should give an error")
 	}
 }
 
-func TestMoveServiceDelegujeNaKoniec(t *testing.T) {
-	d, _ := Parse([]byte(ruchSrc))
+func TestMoveServiceDelegatesToEnd(t *testing.T) {
+	d, _ := Parse([]byte(moveSrc))
 	if err := d.MoveService("Media", "A", "Sieć"); err != nil {
 		t.Fatal(err)
 	}
-	if got := układ(t, d.Bytes()); got != "Media:B,C | Sieć:D,E,A | Pusta:" {
-		t.Errorf("układ = %s", got)
+	if got := layoutOf(t, d.Bytes()); got != "Media:B,C | Sieć:D,E,A | Pusta:" {
+		t.Errorf("layout = %s", got)
 	}
 }
 
 func TestMoveGroup(t *testing.T) {
 	cases := []struct {
-		nazwa, grupa string
-		idx          int
-		chcę         string
+		name, group string
+		idx         int
+		want        string
 	}{
-		{"pierwsza na koniec", "Media", 2, "Sieć:D,E | Pusta: | Media:A,B,C"},
-		{"pierwsza o jeden w dół", "Media", 1, "Sieć:D,E | Media:A,B,C | Pusta:"},
-		{"ostatnia na początek", "Pusta", 0, "Pusta: | Media:A,B,C | Sieć:D,E"},
-		{"środkowa na początek", "Sieć", 0, "Sieć:D,E | Media:A,B,C | Pusta:"},
-		{"środkowa na koniec", "Sieć", 2, "Media:A,B,C | Pusta: | Sieć:D,E"},
+		{"first to the end", "Media", 2, "Sieć:D,E | Pusta: | Media:A,B,C"},
+		{"first down by one", "Media", 1, "Sieć:D,E | Media:A,B,C | Pusta:"},
+		{"last to the start", "Pusta", 0, "Pusta: | Media:A,B,C | Sieć:D,E"},
+		{"middle to the start", "Sieć", 0, "Sieć:D,E | Media:A,B,C | Pusta:"},
+		{"middle to the end", "Sieć", 2, "Media:A,B,C | Pusta: | Sieć:D,E"},
 	}
 	for _, c := range cases {
-		t.Run(c.nazwa, func(t *testing.T) {
-			d, _ := Parse([]byte(ruchSrc))
-			if err := d.MoveGroup(c.grupa, c.idx); err != nil {
+		t.Run(c.name, func(t *testing.T) {
+			d, _ := Parse([]byte(moveSrc))
+			if err := d.MoveGroup(c.group, c.idx); err != nil {
 				t.Fatal(err)
 			}
 			out := string(d.Bytes())
-			if got := układ(t, d.Bytes()); got != c.chcę {
-				t.Fatalf("układ = %s\nchcę    = %s\n%s", got, c.chcę, out)
+			if got := layoutOf(t, d.Bytes()); got != c.want {
+				t.Fatalf("layout = %s\nwant   = %s\n%s", got, c.want, out)
 			}
 			for _, f := range []string{"# komentarz A", "# koniec linii B", `extra: "nieznane pole"`, "# stopka", "# Media — pierwsza", "# Pusta", "title: T"} {
 				if strings.Count(out, f) != 1 {
-					t.Errorf("fragment %q występuje %d razy\n%s", f, strings.Count(out, f), out)
+					t.Errorf("fragment %q occurs %d times\n%s", f, strings.Count(out, f), out)
 				}
 			}
-			// komentarz grupy jedzie z grupą
+			// group comment travels with the group
 			if i := strings.Index(out, "# Media — pierwsza"); !strings.HasPrefix(out[i:], "# Media — pierwsza\n  - name: Media\n") {
-				t.Errorf("komentarz oderwany od grupy Media:\n%s", out)
+				t.Errorf("comment detached from group Media:\n%s", out)
 			}
 			if i := strings.Index(out, "# Pusta"); !strings.HasPrefix(out[i:], "# Pusta\n  - name: Pusta\n") {
-				t.Errorf("komentarz oderwany od grupy Pusta:\n%s", out)
+				t.Errorf("comment detached from group Pusta:\n%s", out)
 			}
 			if strings.Contains(out, "\n\n\n") || !strings.HasSuffix(out, "\n# stopka\n") {
-				t.Errorf("odstępy albo stopka:\n%s", out)
+				t.Errorf("spacing or footer:\n%s", out)
 			}
-			// z powrotem na miejsce = oryginał
-			orig := slices.Index([]string{"Media", "Sieć", "Pusta"}, c.grupa)
-			if err := d.MoveGroup(c.grupa, orig); err != nil {
+			// back in place = the original
+			orig := slices.Index([]string{"Media", "Sieć", "Pusta"}, c.group)
+			if err := d.MoveGroup(c.group, orig); err != nil {
 				t.Fatal(err)
 			}
-			if string(d.Bytes()) != ruchSrc {
-				t.Errorf("tam i z powrotem zmieniło plik:\n%s", d.Bytes())
+			if string(d.Bytes()) != moveSrc {
+				t.Errorf("round trip changed the file:\n%s", d.Bytes())
 			}
 		})
 	}
 }
 
-func TestMoveGroupNoOpIBłędy(t *testing.T) {
-	d, _ := Parse([]byte(ruchSrc))
-	if err := d.MoveGroup("Sieć", 1); err != nil || string(d.Bytes()) != ruchSrc {
-		t.Fatalf("no-op: err=%v, bajty zmienione=%v", err, string(d.Bytes()) != ruchSrc)
+func TestMoveGroupNoOpAndErrors(t *testing.T) {
+	d, _ := Parse([]byte(moveSrc))
+	if err := d.MoveGroup("Sieć", 1); err != nil || string(d.Bytes()) != moveSrc {
+		t.Fatalf("no-op: err=%v, bytes changed=%v", err, string(d.Bytes()) != moveSrc)
 	}
-	if err := d.MoveGroup("Sieć", 3); !errors.Is(err, errIndeks) {
+	if err := d.MoveGroup("Sieć", 3); !errors.Is(err, errIndex) {
 		t.Errorf("err = %v", err)
 	}
-	if err := d.MoveGroup("Sieć", -1); !errors.Is(err, errIndeks) {
+	if err := d.MoveGroup("Sieć", -1); !errors.Is(err, errIndex) {
 		t.Errorf("err = %v", err)
 	}
 	if err := d.MoveGroup("Nope", 0); !errors.Is(err, ErrGroupNotFound) {
@@ -299,7 +299,7 @@ func TestMoveGroupNoOpIBłędy(t *testing.T) {
 	}
 }
 
-func TestMoveGroupBezPustychLinii(t *testing.T) {
+func TestMoveGroupWithoutBlankLines(t *testing.T) {
 	src := "groups:\n  - name: A\n    services:\n      - name: a\n        url: x\n  - name: B\n    services:\n      - name: b\n        url: y\n"
 	d, _ := Parse([]byte(src))
 	if err := d.MoveGroup("A", 1); err != nil {
@@ -311,9 +311,9 @@ func TestMoveGroupBezPustychLinii(t *testing.T) {
 	}
 }
 
-func TestMoveServiceToBezKońcowegoNowejLinii(t *testing.T) {
-	src := strings.TrimRight(ruchSrc, "\n# stopka") // kończy się na `services: []`
-	src = strings.TrimSuffix(strings.TrimSuffix(ruchSrc, "\n# stopka\n"), "\n")
+func TestMoveServiceToWithoutTrailingNewline(t *testing.T) {
+	src := strings.TrimRight(moveSrc, "\n# stopka") // ends with `services: []`
+	src = strings.TrimSuffix(strings.TrimSuffix(moveSrc, "\n# stopka\n"), "\n")
 	d, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)
@@ -321,45 +321,45 @@ func TestMoveServiceToBezKońcowegoNowejLinii(t *testing.T) {
 	if err := d.MoveServiceTo("Media", "A", "Pusta", 0); err != nil {
 		t.Fatal(err)
 	}
-	if got := układ(t, d.Bytes()); got != "Media:B,C | Sieć:D,E | Pusta:A" {
-		t.Errorf("układ = %s\n%s", got, d.Bytes())
+	if got := layoutOf(t, d.Bytes()); got != "Media:B,C | Sieć:D,E | Pusta:A" {
+		t.Errorf("layout = %s\n%s", got, d.Bytes())
 	}
 }
 
-func TestUstawTytuł(t *testing.T) {
-	d, _ := Parse(wczytajBasic(t))
-	if err := d.UstawTytuł("  Nowy tytuł "); err != nil {
+func TestSetTitle(t *testing.T) {
+	d, _ := Parse(loadBasic(t))
+	if err := d.SetTitle("  Nowy tytuł "); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(d.Bytes()), "title: Nowy tytuł      # komentarz na końcu linii\n") {
-		t.Errorf("komentarz albo styl zginął:\n%s", d.Bytes())
+		t.Errorf("comment or style lost:\n%s", d.Bytes())
 	}
 	if cfg, _ := Load(d.Bytes()); cfg.Title != "Nowy tytuł" {
 		t.Errorf("title = %q", cfg.Title)
 	}
-	assertOryginalneLinieNietknięte(t, strings.Replace(string(wczytajBasic(t)), "Homelab Demo", "Nowy tytuł", 1), string(d.Bytes()))
+	assertOriginalLinesUntouched(t, strings.Replace(string(loadBasic(t)), "Homelab Demo", "Nowy tytuł", 1), string(d.Bytes()))
 }
 
-func TestUstawTytułCytowanie(t *testing.T) {
+func TestSetTitleQuoting(t *testing.T) {
 	for _, v := range []string{"yes", "no", "123", "null", "a: b", "# x", "*gwiazda", "&kotwica", "!tag", "- lista", "x #y", "it's", `say "hi"`, "back\\slash", "Zażółć gęślą 🧄", "~"} {
-		d, _ := Parse(wczytajBasic(t))
-		if err := d.UstawTytuł(v); err != nil {
+		d, _ := Parse(loadBasic(t))
+		if err := d.SetTitle(v); err != nil {
 			t.Fatalf("%q: %v", v, err)
 		}
 		cfg, err := Load(d.Bytes())
 		if err != nil {
-			t.Fatalf("%q: plik się nie parsuje: %v\n%s", v, err, d.Bytes())
+			t.Fatalf("%q: file does not parse: %v\n%s", v, err, d.Bytes())
 		}
 		if cfg.Title != v {
-			t.Errorf("zapisano %q, wczytano %q", v, cfg.Title)
+			t.Errorf("wrote %q, loaded %q", v, cfg.Title)
 		}
 	}
 }
 
-func TestUstawTytułGdyKluczaNie(t *testing.T) {
+func TestSetTitleWhenKeyMissing(t *testing.T) {
 	src := "# nagłówek\n\n# o grupach\ngroups:\n  - name: G\n    services: []\n"
 	d, _ := Parse([]byte(src))
-	if err := d.UstawTytuł("Panel: dom"); err != nil {
+	if err := d.SetTitle("Panel: dom"); err != nil {
 		t.Fatal(err)
 	}
 	want := "# nagłówek\n\ntitle: \"Panel: dom\"\n\n# o grupach\ngroups:\n  - name: G\n    services: []\n"
@@ -371,34 +371,34 @@ func TestUstawTytułGdyKluczaNie(t *testing.T) {
 	}
 }
 
-func TestUstawTytułWalidacja(t *testing.T) {
+func TestSetTitleValidation(t *testing.T) {
 	cases := []struct {
 		v   string
 		err error
 	}{
-		{"", ErrTytułPusty}, {"   ", ErrTytułPusty},
-		{strings.Repeat("a", 81), ErrTytułDługi},
-		{"a\nb", ErrTytułZnaki}, {"a\x00b", ErrTytułZnaki}, {"a\tb", ErrTytułZnaki}, {"a b", ErrTytułZnaki},
+		{"", ErrTitleEmpty}, {"   ", ErrTitleEmpty},
+		{strings.Repeat("a", 81), ErrTitleTooLong},
+		{"a\nb", ErrTitleChars}, {"a\x00b", ErrTitleChars}, {"a\tb", ErrTitleChars}, {"a b", ErrTitleChars},
 	}
 	for _, c := range cases {
-		d, _ := Parse(wczytajBasic(t))
-		if err := d.UstawTytuł(c.v); !errors.Is(err, c.err) {
-			t.Errorf("%q: err = %v, chcę %v", c.v, err, c.err)
+		d, _ := Parse(loadBasic(t))
+		if err := d.SetTitle(c.v); !errors.Is(err, c.err) {
+			t.Errorf("%q: err = %v, want %v", c.v, err, c.err)
 		}
-		if !bytes.Equal(d.Bytes(), wczytajBasic(t)) {
-			t.Errorf("%q: plik się zmienił mimo błędu", c.v)
+		if !bytes.Equal(d.Bytes(), loadBasic(t)) {
+			t.Errorf("%q: file changed despite the error", c.v)
 		}
 	}
-	// 80 znaków wielobajtowych mieści się (limit w znakach)
-	d, _ := Parse(wczytajBasic(t))
-	if err := d.UstawTytuł(strings.Repeat("ż", 80)); err != nil {
-		t.Errorf("80 znaków: %v", err)
+	// 80 multi-byte characters fit (the limit is in characters)
+	d, _ := Parse(loadBasic(t))
+	if err := d.SetTitle(strings.Repeat("ż", 80)); err != nil {
+		t.Errorf("80 characters: %v", err)
 	}
 }
 
-// ogon poprzedniego wpisu (zakomentowana usługa wcięta głębiej niż myślnik
-// następnego elementu) nie może wędrować razem z następnym elementem.
-const ruchOgonSrc = `groups:
+// the tail of the previous entry (a commented-out service indented deeper than the dash
+// of the next element) must not travel with the next element.
+const moveTailSrc = `groups:
   - name: G
     services:
       - name: B
@@ -415,8 +415,8 @@ const ruchOgonSrc = `groups:
         url: http://y
 `
 
-func TestMoveGroupOgonPoprzedniejGrupyZostaje(t *testing.T) {
-	d, err := Parse([]byte(ruchOgonSrc))
+func TestMoveGroupPreviousGroupTailStays(t *testing.T) {
+	d, err := Parse([]byte(moveTailSrc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,17 +426,17 @@ func TestMoveGroupOgonPoprzedniejGrupyZostaje(t *testing.T) {
 	got := string(d.Bytes())
 	iH := strings.Index(got, "  # komentarz H\n  - name: H")
 	iG := strings.Index(got, "  - name: G")
-	iOgon := strings.Index(got, "      # - name: Wyłączona")
+	iTail := strings.Index(got, "      # - name: Wyłączona")
 	if iH < 0 || iH > iG {
-		t.Fatalf("komentarz H nie stoi nad H, przed G:\n%s", got)
+		t.Fatalf("comment H does not stand above H, before G:\n%s", got)
 	}
-	if iOgon < iG {
-		t.Fatalf("ogon grupy G uciekł nad H:\n%s", got)
+	if iTail < iG {
+		t.Fatalf("tail of group G escaped above H:\n%s", got)
 	}
 }
 
-func TestMoveServiceOgonPoprzedniejUsługiZostaje(t *testing.T) {
-	d, err := Parse([]byte(ruchOgonSrc))
+func TestMoveServicePreviousServiceTailStays(t *testing.T) {
+	d, err := Parse([]byte(moveTailSrc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,17 +446,17 @@ func TestMoveServiceOgonPoprzedniejUsługiZostaje(t *testing.T) {
 	got := string(d.Bytes())
 	iY := strings.Index(got, "- name: Y")
 	iX := strings.Index(got, "- name: X")
-	iOgon := strings.Index(got, "# - ogon X")
+	iTail := strings.Index(got, "# - ogon X")
 	if iY > iX {
-		t.Fatalf("Y nie jest pierwsze:\n%s", got)
+		t.Fatalf("Y is not first:\n%s", got)
 	}
-	if iOgon < iX {
-		t.Fatalf("ogon X poszedł razem z Y:\n%s", got)
+	if iTail < iX {
+		t.Fatalf("tail of X went along with Y:\n%s", got)
 	}
 }
 
-func TestRemoveServiceNieZabieraOgonaPoprzedniej(t *testing.T) {
-	d, err := Parse([]byte(ruchOgonSrc))
+func TestRemoveServiceDoesNotTakePreviousTail(t *testing.T) {
+	d, err := Parse([]byte(moveTailSrc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,6 +464,6 @@ func TestRemoveServiceNieZabieraOgonaPoprzedniej(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(d.Bytes()), "# - ogon X") {
-		t.Fatalf("ogon X zniknął razem z Y:\n%s", d.Bytes())
+		t.Fatalf("tail of X vanished along with Y:\n%s", d.Bytes())
 	}
 }

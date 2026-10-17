@@ -21,70 +21,71 @@ import (
 	"time"
 )
 
-// Ikony nigdy nie są pobierane przez przeglądarkę użytkownika.
+// Icons are never fetched by the user's browser.
 //
-// ! Cała konkurencja wstawia w HTML <img src="https://cdn.jsdelivr.net/...">.
-// To znaczy, że przeglądarka odpytuje obcy CDN o *nazwy usług, które masz w
-// domu* — jsDelivr (i Cloudflare przed nim) widzi, że ktoś z Twojego IP ciągnie
-// vaultwarden.svg i proxmox.svg. Do tego panel bez internetu traci ikony.
+// ! The whole competition inserts <img src="https://cdn.jsdelivr.net/..."> into
+// the HTML. That means the browser asks a foreign CDN about the *names of the
+// services you have at home* — jsDelivr (and Cloudflare in front of it) sees that
+// someone from your IP is pulling vaultwarden.svg and proxmox.svg. On top of that
+// a panel without internet loses its icons.
 //
-// Tutaj jest inaczej: przeglądarka pyta wyłącznie nasz serwer (/icon/<nazwa>),
-// a serwer albo ma ikonę w cache na dysku, albo dociąga ją raz z CDN i
-// zapisuje. Po pierwszym użyciu działa offline, a CDN nigdy nie widzi
-// przeglądarki użytkownika — widzi jeden serwer bez kontekstu.
+// Here it is different: the browser asks only our server (/icon/<name>), and the
+// server either has the icon in the on-disk cache, or pulls it once from the CDN
+// and saves it. After first use it works offline, and the CDN never sees the
+// user's browser — it sees one server with no context.
 //
-// Tryb `zip` (opcjonalny plik icons.zip) daje komplet od razu, bez ani jednego
-// zapytania na zewnątrz — dla sieci odciętych od internetu.
+// `zip` mode (an optional icons.zip file) gives the full set right away, without a
+// single outbound request — for networks cut off from the internet.
 
 const (
-	cdnIkony  = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main"
-	// ! tree.json w repo bywa nieaktualny — audyt 2026-08-14 pokazał 2799 pozycji
-	// w tree.json przy 3363 plikach SVG w katalogu. Dlatego pytamy najpierw API
-	// gita o prawdziwe drzewo, a tree.json został jako zapas.
-	drzewoGitURL   = "https://api.github.com/repos/homarr-labs/dashboard-icons/git/trees/main?recursive=1"
-	metadaneURL    = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/metadata.json"
-	drzewoURL      = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/tree.json"
-	ważnośćIndeksu = 7 * 24 * time.Hour
+	cdnIcons = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main"
+	// ! tree.json in the repo is sometimes stale — an audit on 2026-08-14 showed 2799 entries
+	// in tree.json against 3363 SVG files in the directory. That is why we ask the git
+	// API for the real tree first, and tree.json stays as a fallback.
+	gitTreeURL    = "https://api.github.com/repos/homarr-labs/dashboard-icons/git/trees/main?recursive=1"
+	metadataURL   = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/metadata.json"
+	treeURL       = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/tree.json"
+	indexValidity = 7 * 24 * time.Hour
 )
 
-// wariantTonu to dwie osobne grafiki tej samej ikony — z ciemnym i z jasnym
-// tuszem — jakie Dashboard Icons trzyma dla części pozycji właśnie po to, żeby
-// dało się dobrać właściwą do tła. Ciemny tusz ginie na ciemnym motywie i
-// odwrotnie, więc nazwa pliku ma znaczenie:
-//   - Ciemny — plik z ciemnym tuszem, czytelny na JASNYM tle (to jest
+// toneVariant is two separate artworks of the same icon — with dark and with light
+// ink — which Dashboard Icons keeps for some entries precisely so that the right one
+// can be picked for the background. Dark ink disappears on the dark theme and
+// vice versa, so the file name matters:
+//   - Dark  — file with dark ink, readable on a LIGHT background (that is
 //     metadata.json → colors.dark)
-//   - Jasny  — plik z jasnym tuszem, czytelny na CIEMNYM tle (metadata.json →
+//   - Light — file with light ink, readable on a DARK background (metadata.json →
 //     colors.light)
-type wariantTonu struct {
-	Ciemny string
-	Jasny  string
+type toneVariant struct {
+	Dark  string
+	Light string
 }
 
-type Katalog struct {
+type Catalog struct {
 	mu       sync.RWMutex
-	nazwy    []string          // posortowane, bez rozszerzeń
-	rozsz    map[string]string // nazwa → "svg" | "png"
+	names    []string          // sorted, without extensions
+	ext      map[string]string // name → "svg" | "png"
 	cacheDir string
-	tryb     string // "zip" albo "cdn"
+	mode     string // "zip" or "cdn"
 
-	aliasy   map[string][]string    // nazwa → inne nazwy, po których też można ją znaleźć
-	warianty map[string]wariantTonu // nazwa → osobne pliki na ciemny/jasny motyw panelu (gdy są)
+	aliases  map[string][]string    // name → other names by which it can also be found
+	variants map[string]toneVariant // name → separate files for the dark/light panel theme (when present)
 	zipIdx   map[string]*zip.File
 	client   *http.Client
 }
 
-func NowyKatalog(zipŚcieżka, cacheDir string) *Katalog {
-	k := &Katalog{
-		rozsz:    map[string]string{},
+func NewCatalog(zipPath, cacheDir string) *Catalog {
+	k := &Catalog{
+		ext:      map[string]string{},
 		cacheDir: cacheDir,
-		tryb:     "cdn",
+		mode:     "cdn",
 		client:   &http.Client{Timeout: 20 * time.Second},
 	}
-	if zipŚcieżka != "" {
-		if err := k.wczytajZip(zipŚcieżka); err != nil {
-			slog.Warn("nie wczytałem icons.zip, przechodzę na CDN", "plik", zipŚcieżka, "err", err)
+	if zipPath != "" {
+		if err := k.loadZip(zipPath); err != nil {
+			slog.Warn("could not load icons.zip, falling back to CDN", "file", zipPath, "err", err)
 		} else {
-			k.tryb = "zip"
+			k.mode = "zip"
 		}
 	}
 	if k.cacheDir != "" {
@@ -93,162 +94,162 @@ func NowyKatalog(zipŚcieżka, cacheDir string) *Katalog {
 	return k
 }
 
-func (k *Katalog) Tryb() string {
+func (k *Catalog) Mode() string {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.tryb
+	return k.mode
 }
 
-func (k *Katalog) Liczba() int {
+func (k *Catalog) Count() int {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return len(k.nazwy)
+	return len(k.names)
 }
 
-// Warianty zwraca nazwy plików z ciemnym i jasnym tuszem dla danej ikony, gdy
-// Dashboard Icons trzyma taką parę. Pusty string w obu polach = ta ikona nie
-// ma osobnych wariantów, wołający ma użyć zwykłej nazwy bazowej.
-func (k *Katalog) Warianty(nazwa string) (ciemny, jasny string) {
+// Variants returns the file names with dark and light ink for a given icon, when
+// Dashboard Icons keeps such a pair. An empty string in both fields = this icon
+// has no separate variants, the caller should use the plain base name.
+func (k *Catalog) Variants(name string) (dark, light string) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	w, ok := k.warianty[nazwa]
-	if !ok || w.Ciemny == "" || w.Jasny == "" {
+	w, ok := k.variants[name]
+	if !ok || w.Dark == "" || w.Light == "" {
 		return "", ""
 	}
-	return w.Ciemny, w.Jasny
+	return w.Dark, w.Light
 }
 
-// ── tryb lokalny (zip) ───────────────────────────────────────────────────────
+// ── local mode (zip) ─────────────────────────────────────────────────────────
 
-func (k *Katalog) wczytajZip(ścieżka string) error {
-	r, err := zip.OpenReader(ścieżka)
+func (k *Catalog) loadZip(path string) error {
+	r, err := zip.OpenReader(path)
 	if err != nil {
 		return err
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.zipIdx = make(map[string]*zip.File, len(r.File))
-	k.nazwy = nil
+	k.names = nil
 	for _, f := range r.File {
 		if !strings.HasSuffix(f.Name, ".svg") {
 			continue
 		}
 		k.zipIdx[f.Name] = f
-		nazwa := strings.TrimSuffix(f.Name, ".svg")
-		k.nazwy = append(k.nazwy, nazwa)
-		k.rozsz[nazwa] = "svg"
+		name := strings.TrimSuffix(f.Name, ".svg")
+		k.names = append(k.names, name)
+		k.ext[name] = "svg"
 	}
-	sort.Strings(k.nazwy)
-	slog.Info("katalog ikon z pliku", "plik", ścieżka, "ikon", len(k.nazwy))
+	sort.Strings(k.names)
+	slog.Info("icon catalog from file", "file", path, "icons", len(k.names))
 	return nil
 }
 
-// ── tryb CDN ─────────────────────────────────────────────────────────────────
+// ── CDN mode ─────────────────────────────────────────────────────────────────
 
-type drzewo struct {
+type tree struct {
 	SVG []string `json:"svg"`
 	PNG []string `json:"png"`
 }
 
-// Odśwież ładuje spis ikon: z dysku, jeśli świeży, inaczej z sieci.
-// Brak internetu nie jest błędem krytycznym — panel działa dalej, a wybierak
-// pokazuje to, co już leży w cache.
-func (k *Katalog) Odśwież(ctx context.Context) {
-	if k.Tryb() == "zip" {
+// Refresh loads the icon index: from disk if fresh, otherwise from the network.
+// No internet is not a critical error — the panel keeps working, and the picker
+// shows what already lies in the cache.
+func (k *Catalog) Refresh(ctx context.Context) {
+	if k.Mode() == "zip" {
 		return
 	}
-	k.odświeżSpisNazw(ctx)
+	k.refreshNameIndex(ctx)
 
-	// Warianty jasny/ciemny (do przełącznika motywu) mieszkają wyłącznie w
-	// metadata.json — nie mają własnego pliku cache i próbujemy je pobrać
-	// ZAWSZE, niezależnie od tego, czy spis nazw wyżej przyszedł z dysku czy
-	// z sieci (najczęstsza gałąź — TTL spisu to tydzień — inaczej warianty
-	// nigdy by się nie ustawiały po zwykłym restarcie procesu z ciepłym
-	// cache). raw.githubusercontent.com nie ma limitu jak api.github.com
-	// (git-tree), więc to tani, dodatkowy request przy każdym starcie.
-	if _, err := k.zMetadanych(ctx); err != nil {
-		slog.Debug("warianty jasny/ciemny niedostępne", "err", err)
+	// The light/dark variants (for the theme switch) live only in
+	// metadata.json — they have no cache file of their own and we try to fetch them
+	// ALWAYS, regardless of whether the name index above came from disk or from
+	// the network (the most common branch — the index TTL is a week — otherwise the variants
+	// would never get set after an ordinary restart of the process with a warm
+	// cache). raw.githubusercontent.com has no limit like api.github.com
+	// (git-tree), so it is a cheap, extra request on every start.
+	if _, err := k.fromMetadata(ctx); err != nil {
+		slog.Debug("light/dark variants unavailable", "err", err)
 	}
 }
 
-func (k *Katalog) odświeżSpisNazw(ctx context.Context) {
-	plik := filepath.Join(k.cacheDir, "spis.json")
-	if fi, err := os.Stat(plik); err == nil && time.Since(fi.ModTime()) < ważnośćIndeksu {
-		if dane, err := os.ReadFile(plik); err == nil && k.ustawZeSpisu(dane) == nil {
-			slog.Info("katalog ikon z cache", "ikon", k.Liczba())
+func (k *Catalog) refreshNameIndex(ctx context.Context) {
+	file := filepath.Join(k.cacheDir, "spis.json")
+	if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) < indexValidity {
+		if data, err := os.ReadFile(file); err == nil && k.setFromIndex(data) == nil {
+			slog.Info("icon catalog from cache", "icons", k.Count())
 			return
 		}
 	}
 
-	if nazwy, źródło, err := k.pobierzSpis(ctx); err == nil && len(nazwy) > 0 {
-		k.ustawNazwy(nazwy)
-		if b, err := json.Marshal(nazwy); err == nil {
-			_ = os.WriteFile(plik, b, 0o644)
+	if names, source, err := k.fetchIndex(ctx); err == nil && len(names) > 0 {
+		k.setNames(names)
+		if b, err := json.Marshal(names); err == nil {
+			_ = os.WriteFile(file, b, 0o644)
 		}
-		slog.Info("katalog ikon pobrany", "ikon", k.Liczba(), "źródło", źródło)
+		slog.Info("icon catalog fetched", "icons", k.Count(), "source", source)
 		return
 	}
 
-	slog.Warn("spis ikon niedostępny, zostaję przy tym, co na dysku")
-	k.awaryjnieZDysku(plik)
+	slog.Warn("icon index unavailable, keeping what is on disk")
+	k.fallbackFromDisk(file)
 }
 
-// pobierzSpis idzie od najdokładniejszego źródła do najsłabszego.
-// Drzewo gita zna prawdę o katalogu, ale ma limit 60 zapytań na godzinę bez
-// tokenu. metadata.json jest świeży i niesie aliasy. tree.json bywa nieaktualny,
-// ale zawsze odpowiada.
-func (k *Katalog) pobierzSpis(ctx context.Context) (map[string]string, string, error) {
-	if nazwy, err := k.zDrzewaGita(ctx); err == nil && len(nazwy) > 0 {
-		return nazwy, "git-tree", nil
+// fetchIndex goes from the most precise source to the weakest.
+// The git tree knows the truth about the directory, but has a limit of 60 requests
+// per hour without a token. metadata.json is fresh and carries aliases. tree.json
+// is sometimes stale, but always responds.
+func (k *Catalog) fetchIndex(ctx context.Context) (map[string]string, string, error) {
+	if names, err := k.fromGitTree(ctx); err == nil && len(names) > 0 {
+		return names, "git-tree", nil
 	}
-	if nazwy, err := k.zMetadanych(ctx); err == nil && len(nazwy) > 0 {
-		return nazwy, "metadata.json", nil
+	if names, err := k.fromMetadata(ctx); err == nil && len(names) > 0 {
+		return names, "metadata.json", nil
 	}
-	nazwy, err := k.zTreeJSON(ctx)
-	return nazwy, "tree.json", err
+	names, err := k.fromTreeJSON(ctx)
+	return names, "tree.json", err
 }
 
-// zMetadanych czyta metadata.json — daje też aliasy, po których szuka wybierak.
-func (k *Katalog) zMetadanych(ctx context.Context) (map[string]string, error) {
-	dane, err := k.pobierzJSON(ctx, metadaneURL, 16<<20)
+// fromMetadata reads metadata.json — it also gives the aliases the picker searches by.
+func (k *Catalog) fromMetadata(ctx context.Context) (map[string]string, error) {
+	data, err := k.fetchJSON(ctx, metadataURL, 16<<20)
 	if err != nil {
 		return nil, err
 	}
 	var m map[string]struct {
 		Base    string            `json:"base"`
 		Aliases []string          `json:"aliases"`
-		Colors  map[string]string `json:"colors"` // "dark"/"light" → nazwa pliku z tym tuszem
+		Colors  map[string]string `json:"colors"` // "dark"/"light" → file name with that ink
 	}
-	if err := json.Unmarshal(dane, &m); err != nil {
+	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
 	if len(m) == 0 {
-		return nil, fmt.Errorf("puste metadane")
+		return nil, fmt.Errorf("empty metadata")
 	}
 	out := make(map[string]string, len(m))
-	al := make(map[string][]string, len(m)/4)
-	wa := make(map[string]wariantTonu, len(m)/6)
-	for nazwa, w := range m {
+	aliases := make(map[string][]string, len(m)/4)
+	variantMap := make(map[string]toneVariant, len(m)/6)
+	for name, w := range m {
 		ext := w.Base
 		if ext != "png" {
 			ext = "svg"
 		}
-		out[nazwa] = ext
+		out[name] = ext
 		if len(w.Aliases) > 0 {
-			al[nazwa] = w.Aliases
+			aliases[name] = w.Aliases
 		}
-		if ciemny, jasny := w.Colors["dark"], w.Colors["light"]; ciemny != "" && jasny != "" {
-			wa[nazwa] = wariantTonu{Ciemny: ciemny, Jasny: jasny}
+		if dark, light := w.Colors["dark"], w.Colors["light"]; dark != "" && light != "" {
+			variantMap[name] = toneVariant{Dark: dark, Light: light}
 		}
 	}
 	k.mu.Lock()
-	k.aliasy = al
-	k.warianty = wa
+	k.aliases = aliases
+	k.variants = variantMap
 	k.mu.Unlock()
 	return out, nil
 }
 
-func (k *Katalog) pobierzJSON(ctx context.Context, url string, limit int64) ([]byte, error) {
+func (k *Catalog) fetchJSON(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -266,8 +267,8 @@ func (k *Katalog) pobierzJSON(ctx context.Context, url string, limit int64) ([]b
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
-func (k *Katalog) zDrzewaGita(ctx context.Context) (map[string]string, error) {
-	dane, err := k.pobierzJSON(ctx, drzewoGitURL, 16<<20)
+func (k *Catalog) fromGitTree(ctx context.Context) (map[string]string, error) {
+	data, err := k.fetchJSON(ctx, gitTreeURL, 16<<20)
 	if err != nil {
 		return nil, err
 	}
@@ -277,11 +278,11 @@ func (k *Katalog) zDrzewaGita(ctx context.Context) (map[string]string, error) {
 		} `json:"tree"`
 		Truncated bool `json:"truncated"`
 	}
-	if err := json.Unmarshal(dane, &d); err != nil {
+	if err := json.Unmarshal(data, &d); err != nil {
 		return nil, err
 	}
 	if d.Truncated || len(d.Tree) == 0 {
-		return nil, fmt.Errorf("drzewo gita niekompletne")
+		return nil, fmt.Errorf("git tree incomplete")
 	}
 	out := map[string]string{}
 	for _, t := range d.Tree {
@@ -290,7 +291,7 @@ func (k *Katalog) zDrzewaGita(ctx context.Context) (map[string]string, error) {
 			out[strings.TrimSuffix(strings.TrimPrefix(t.Path, "svg/"), ".svg")] = "svg"
 		case strings.HasPrefix(t.Path, "png/") && strings.HasSuffix(t.Path, ".png"):
 			n := strings.TrimSuffix(strings.TrimPrefix(t.Path, "png/"), ".png")
-			if _, jest := out[n]; !jest {
+			if _, is := out[n]; !is {
 				out[n] = "png"
 			}
 		}
@@ -298,13 +299,13 @@ func (k *Katalog) zDrzewaGita(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-func (k *Katalog) zTreeJSON(ctx context.Context) (map[string]string, error) {
-	dane, err := k.pobierzJSON(ctx, drzewoURL, 8<<20)
+func (k *Catalog) fromTreeJSON(ctx context.Context) (map[string]string, error) {
+	data, err := k.fetchJSON(ctx, treeURL, 8<<20)
 	if err != nil {
 		return nil, err
 	}
-	var d drzewo
-	if err := json.Unmarshal(dane, &d); err != nil {
+	var d tree
+	if err := json.Unmarshal(data, &d); err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
@@ -313,103 +314,103 @@ func (k *Katalog) zTreeJSON(ctx context.Context) (map[string]string, error) {
 	}
 	for _, f := range d.PNG {
 		n := strings.TrimSuffix(f, ".png")
-		if _, jest := out[n]; !jest {
+		if _, is := out[n]; !is {
 			out[n] = "png"
 		}
 	}
 	return out, nil
 }
 
-func (k *Katalog) ustawNazwy(rozsz map[string]string) {
+func (k *Catalog) setNames(ext map[string]string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.rozsz = rozsz
-	k.nazwy = make([]string, 0, len(rozsz))
-	for n := range rozsz {
-		k.nazwy = append(k.nazwy, n)
+	k.ext = ext
+	k.names = make([]string, 0, len(ext))
+	for n := range ext {
+		k.names = append(k.names, n)
 	}
-	sort.Strings(k.nazwy)
+	sort.Strings(k.names)
 }
 
-func (k *Katalog) ustawZeSpisu(dane []byte) error {
+func (k *Catalog) setFromIndex(data []byte) error {
 	var m map[string]string
-	if err := json.Unmarshal(dane, &m); err != nil || len(m) == 0 {
-		return fmt.Errorf("zły spis ikon")
+	if err := json.Unmarshal(data, &m); err != nil || len(m) == 0 {
+		return fmt.Errorf("bad icon index")
 	}
-	k.ustawNazwy(m)
+	k.setNames(m)
 	return nil
 }
 
-func (k *Katalog) awaryjnieZDysku(plik string) {
-	if dane, err := os.ReadFile(plik); err == nil && k.ustawZeSpisu(dane) == nil {
+func (k *Catalog) fallbackFromDisk(file string) {
+	if data, err := os.ReadFile(file); err == nil && k.setFromIndex(data) == nil {
 		return
 	}
-	k.zIndeksujCache()
+	k.indexCache()
 }
 
-func (k *Katalog) ustawZDrzewa(dane []byte) error {
-	var d drzewo
-	if err := json.Unmarshal(dane, &d); err != nil {
+func (k *Catalog) setFromTree(data []byte) error {
+	var d tree
+	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
 	if len(d.SVG) == 0 {
-		return fmt.Errorf("pusty spis ikon")
+		return fmt.Errorf("empty icon index")
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.nazwy = make([]string, 0, len(d.SVG))
-	k.rozsz = make(map[string]string, len(d.SVG))
+	k.names = make([]string, 0, len(d.SVG))
+	k.ext = make(map[string]string, len(d.SVG))
 	for _, f := range d.SVG {
 		n := strings.TrimSuffix(f, ".svg")
-		k.rozsz[n] = "svg"
-		k.nazwy = append(k.nazwy, n)
+		k.ext[n] = "svg"
+		k.names = append(k.names, n)
 	}
-	// część ikon istnieje wyłącznie jako PNG — niech też będą do wyboru
+	// some icons exist only as PNG — let them be selectable too
 	for _, f := range d.PNG {
 		n := strings.TrimSuffix(f, ".png")
-		if _, jest := k.rozsz[n]; jest {
+		if _, is := k.ext[n]; is {
 			continue
 		}
-		k.rozsz[n] = "png"
-		k.nazwy = append(k.nazwy, n)
+		k.ext[n] = "png"
+		k.names = append(k.names, n)
 	}
-	sort.Strings(k.nazwy)
+	sort.Strings(k.names)
 	return nil
 }
 
-// zIndeksujCache buduje spis z plików, które już mamy — panel odcięty od sieci
-// nadal pokazuje to, co kiedyś pobrał.
-func (k *Katalog) zIndeksujCache() {
-	wpisy, err := os.ReadDir(k.cacheDir)
+// indexCache builds the index from the files we already have — a panel cut off from
+// the network still shows what it once downloaded.
+func (k *Catalog) indexCache() {
+	entries, err := os.ReadDir(k.cacheDir)
 	if err != nil {
 		return
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.nazwy = nil
-	for _, e := range wpisy {
+	k.names = nil
+	for _, e := range entries {
 		n := e.Name()
 		switch {
 		case strings.HasSuffix(n, ".svg"):
 			b := strings.TrimSuffix(n, ".svg")
-			k.rozsz[b] = "svg"
-			k.nazwy = append(k.nazwy, b)
+			k.ext[b] = "svg"
+			k.names = append(k.names, b)
 		case strings.HasSuffix(n, ".png"):
 			b := strings.TrimSuffix(n, ".png")
-			if _, jest := k.rozsz[b]; !jest {
-				k.rozsz[b] = "png"
-				k.nazwy = append(k.nazwy, b)
+			if _, is := k.ext[b]; !is {
+				k.ext[b] = "png"
+				k.names = append(k.names, b)
 			}
 		}
 	}
-	sort.Strings(k.nazwy)
+	sort.Strings(k.names)
 }
 
-// ── odczyt pojedynczej ikony ─────────────────────────────────────────────────
+// ── reading a single icon ────────────────────────────────────────────────────
 
-func (k *Katalog) Ma(nazwa string) bool {
+func (k *Catalog) Has(name string) bool {
 	k.mu.RLock()
-	_, ok := k.rozsz[nazwa]
+	_, ok := k.ext[name]
 	k.mu.RUnlock()
 	if ok {
 		return true
@@ -418,63 +419,63 @@ func (k *Katalog) Ma(nazwa string) bool {
 		return false
 	}
 	for _, ext := range []string{"svg", "png"} {
-		if _, err := os.Stat(filepath.Join(k.cacheDir, nazwa+"."+ext)); err == nil {
+		if _, err := os.Stat(filepath.Join(k.cacheDir, name+"."+ext)); err == nil {
 			return true
 		}
 	}
 	return false
 }
 
-// Czytaj zwraca zawartość ikony i jej typ MIME.
-// Kolejność: zip → cache na dysku → CDN (i zapis do cache).
-func (k *Katalog) Czytaj(ctx context.Context, nazwa string) ([]byte, string, error) {
-	if strings.ContainsAny(nazwa, `/\`) || strings.Contains(nazwa, "..") {
-		return nil, "", fmt.Errorf("zła nazwa ikony")
+// Read returns the icon content and its MIME type.
+// Order: zip → on-disk cache → CDN (and a write to the cache).
+func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error) {
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return nil, "", fmt.Errorf("bad icon name")
 	}
 
 	k.mu.RLock()
-	ext, znany := k.rozsz[nazwa]
+	ext, known := k.ext[name]
 	zipIdx := k.zipIdx
 	k.mu.RUnlock()
-	if !znany {
+	if !known {
 		ext = "svg"
 	}
 
 	if zipIdx != nil {
-		if f, ok := zipIdx[nazwa+".svg"]; ok {
+		if f, ok := zipIdx[name+".svg"]; ok {
 			rc, err := f.Open()
 			if err == nil {
 				defer rc.Close()
-				dane, err := io.ReadAll(io.LimitReader(rc, 1<<20))
-				return dane, "image/svg+xml", err
+				data, err := io.ReadAll(io.LimitReader(rc, 1<<20))
+				return data, "image/svg+xml", err
 			}
 		}
 	}
 
 	if k.cacheDir != "" {
 		for _, e := range []string{ext, "svg", "png"} {
-			// ! plik istnieje, ale ma 0 bajtów = poprzednie pobranie zostawiło
-			// zatruty cache (patrz komentarz w pobierz). Taki plik pomijamy i
-			// próbujemy pobrać na nowo, zamiast serwować pustkę w kółko.
-			if dane, err := os.ReadFile(filepath.Join(k.cacheDir, nazwa+"."+e)); err == nil && len(dane) > 0 {
-				return dane, typIkony(e), nil
+			// ! the file exists but has 0 bytes = the previous download left a poisoned
+			// cache (see the comment in fetch). We skip such a file and try to download
+			// again, instead of serving emptiness over and over.
+			if data, err := os.ReadFile(filepath.Join(k.cacheDir, name+"."+e)); err == nil && len(data) > 0 {
+				return data, iconKind(e), nil
 			}
 		}
 	}
 
-	return k.pobierz(ctx, nazwa, ext)
+	return k.fetch(ctx, name, ext)
 }
 
-// typIkony mapuje rozszerzenie pliku ikony na MIME.
-func typIkony(ext string) string {
+// iconKind maps an icon file extension to a MIME type.
+func iconKind(ext string) string {
 	if ext == "png" {
 		return "image/png"
 	}
 	return "image/svg+xml"
 }
 
-func (k *Katalog) pobierz(ctx context.Context, nazwa, ext string) ([]byte, string, error) {
-	url := fmt.Sprintf("%s/%s/%s.%s", cdnIkony, ext, nazwa, ext)
+func (k *Catalog) fetch(ctx context.Context, name, ext string) ([]byte, string, error) {
+	url := fmt.Sprintf("%s/%s/%s.%s", cdnIcons, ext, name, ext)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
@@ -489,101 +490,101 @@ func (k *Katalog) pobierz(ctx context.Context, nazwa, ext string) ([]byte, strin
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("CDN: %s", resp.Status)
 	}
-	dane, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return nil, "", err
 	}
-	// ! jsDelivr bywa "ciepłe" — status 200, ale zero bajtów ciała, póki sam
-	// jeszcze nie ściągnął pliku z GitHuba. Bez tej straży taki pusty wsad
-	// lądował w cache na dysku NA STAŁE (pliki ikon nie mają TTL jak
-	// spis.json), więc jedna nieudana chwila CDN-a zatruwała ikonę na zawsze —
-	// to był realny powód "zepsutych" kafli w wyszukiwarce ikon.
-	if len(dane) == 0 {
-		return nil, "", fmt.Errorf("CDN: puste ciało odpowiedzi dla %s.%s", nazwa, ext)
+	// ! jsDelivr is sometimes "warm" — status 200, but zero body bytes, until it has
+	// itself fetched the file from GitHub. Without this guard such an empty payload
+	// landed in the on-disk cache FOR GOOD (icon files have no TTL like
+	// spis.json), so one failed moment of the CDN poisoned the icon forever —
+	// that was the real reason for "broken" tiles in the icon search.
+	if len(data) == 0 {
+		return nil, "", fmt.Errorf("CDN: empty response body for %s.%s", name, ext)
 	}
 	if k.cacheDir != "" {
-		tmp := filepath.Join(k.cacheDir, "."+nazwa+"."+ext+".tmp")
-		if os.WriteFile(tmp, dane, 0o644) == nil {
-			_ = os.Rename(tmp, filepath.Join(k.cacheDir, nazwa+"."+ext))
+		tmp := filepath.Join(k.cacheDir, "."+name+"."+ext+".tmp")
+		if os.WriteFile(tmp, data, 0o644) == nil {
+			_ = os.Rename(tmp, filepath.Join(k.cacheDir, name+"."+ext))
 		}
 	}
-	return dane, typIkony(ext), nil
+	return data, iconKind(ext), nil
 }
 
-// Szukaj zwraca nazwy pasujące do zapytania: najpierw te zaczynające się od
-// frazy, potem zawierające ją w środku.
-func (k *Katalog) Szukaj(q string, limit int) []string {
+// Search returns the names matching the query: first those starting with the
+// phrase, then those containing it in the middle.
+func (k *Catalog) Search(q string, limit int) []string {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
-		if len(k.nazwy) < limit {
-			limit = len(k.nazwy)
+		if len(k.names) < limit {
+			limit = len(k.names)
 		}
-		return append([]string(nil), k.nazwy[:limit]...)
+		return append([]string(nil), k.names[:limit]...)
 	}
-	var prefiks, środek []string
-	for _, n := range k.nazwy {
+	var prefix, middle []string
+	for _, n := range k.names {
 		l := strings.ToLower(n)
 		switch {
 		case strings.HasPrefix(l, q):
-			prefiks = append(prefiks, n)
+			prefix = append(prefix, n)
 		case strings.Contains(l, q):
-			środek = append(środek, n)
+			middle = append(middle, n)
 		default:
-			// alias: „8311 community" ma znaleźć ikonę „8311"
-			for _, a := range k.aliasy[n] {
+			// alias: "8311 community" should find the icon "8311"
+			for _, a := range k.aliases[n] {
 				if strings.Contains(strings.ToLower(a), q) {
-					środek = append(środek, n)
+					middle = append(middle, n)
 					break
 				}
 			}
 		}
-		if len(prefiks) >= limit {
+		if len(prefix) >= limit {
 			break
 		}
 	}
-	out := append(prefiks, środek...)
+	out := append(prefix, middle...)
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out
 }
 
-// ── warstwa HTTP ─────────────────────────────────────────────────────────────
+// ── HTTP layer ───────────────────────────────────────────────────────────────
 
-// iconRef mówi szablonowi, jak wyrenderować ikonę usługi.
+// iconRef tells the template how to render a service icon.
 //
-// Gdy ikona ma osobne warianty na ciemny/jasny motyw, Src zostaje pusty, a
-// szablon renderuje OBA obrazy naraz (WariantCiemny/WariantJasny) — który się
-// pokaże, decyduje czysty CSS na atrybucie data-ton na <html>. Motyw jest
-// wyborem PRZEGLĄDARKI (bywa przestawiany bez przeładowania strony, patrz
-// appearance.tone w konfiguracji), więc serwer przy renderze strony nie wie,
-// który pokazać — musi dać oba i oddać decyzję CSS-owi, zero dodatkowego JS-a
-// czy zapytań przy zmianie motywu.
+// When an icon has separate variants for the dark/light theme, Src stays empty and
+// the template renders BOTH images at once (WariantCiemny/WariantJasny) — which one
+// shows is decided by pure CSS on the data-tone attribute on <html>. The theme is a
+// choice of the BROWSER (it can be switched without reloading the page, see
+// appearance.tone in the config), so the server does not know which to show when
+// rendering the page — it must give both and leave the decision to CSS, with zero
+// extra JS or requests when the theme changes.
 type iconRef struct {
-	Src           string // ścieżka na naszym serwerze, pusta gdy brak albo gdy są warianty
-	Litera        string // fallback: kafelek z literą
-	WariantCiemny string // ścieżka do wariantu na CIEMNY motyw (jasny tusz), puste = brak
-	WariantJasny  string // ścieżka do wariantu na JASNY motyw (ciemny tusz), puste = brak
+	Src          string // path on our server, empty when missing or when there are variants
+	Letter       string // fallback: a tile with a letter
+	VariantDark  string // path to the variant for the DARK theme (light ink), empty = none
+	VariantLight string // path to the variant for the LIGHT theme (dark ink), empty = none
 }
 
-func (s *Server) rozwiążIkonę(icon, nazwa string) iconRef {
-	litera := pierwszaLitera(nazwa)
+func (s *Server) resolveIcon(icon, name string) iconRef {
+	letter := firstLetter(name)
 	switch {
 	case icon == "":
-		return iconRef{Litera: litera}
+		return iconRef{Letter: letter}
 	case strings.HasPrefix(icon, "http://"), strings.HasPrefix(icon, "https://"):
-		return iconRef{Src: "/icon/proxy?u=" + urlEscape(icon), Litera: litera}
+		return iconRef{Src: "/icon/proxy?u=" + urlEscape(icon), Letter: letter}
 	default:
 		n := strings.TrimSuffix(strings.TrimSuffix(icon, ".svg"), ".png")
-		if ciemny, jasny := s.ikony.Warianty(n); ciemny != "" && jasny != "" {
-			return iconRef{WariantCiemny: "/icon/" + ciemny, WariantJasny: "/icon/" + jasny, Litera: litera}
+		if dark, light := s.icons.Variants(n); dark != "" && light != "" {
+			return iconRef{VariantDark: "/icon/" + dark, VariantLight: "/icon/" + light, Letter: letter}
 		}
-		// nawet gdy spis się nie wczytał, spróbuj — najgorzej wyjdzie 404
-		// i karta pokaże literę
-		return iconRef{Src: "/icon/" + n, Litera: litera}
+		// even when the index did not load, try — the worst case is a 404
+		// and the card shows a letter
+		return iconRef{Src: "/icon/" + n, Letter: letter}
 	}
 }
 
@@ -593,71 +594,72 @@ func urlEscape(s string) string {
 }
 
 func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
-	nazwa := r.PathValue("name")
-	if nazwa == "proxy" {
+	name := r.PathValue("name")
+	if name == "proxy" {
 		s.handleIconProxy(w, r)
 		return
 	}
-	nazwa = strings.TrimSuffix(strings.TrimSuffix(nazwa, ".svg"), ".png")
+	name = strings.TrimSuffix(strings.TrimSuffix(name, ".svg"), ".png")
 
-	dane, typ, err := s.ikony.Czytaj(r.Context(), nazwa)
+	data, kind, err := s.icons.Read(r.Context(), name)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", typ)
-	// ikona bywa SVG, czyli dokumentem z naszego originu — a script-src ma
-	// 'unsafe-inline'. Piaskownica zamyka to bez odbierania ikonom działania.
+	w.Header().Set("Content-Type", kind)
+	// an icon can be SVG, i.e. a document from our origin — and script-src has
+	// 'unsafe-inline'. The sandbox closes this without taking away the icons' ability to work.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	// ikona pod daną nazwą jest niezmienna, więc tydzień w cache jest w
-	// porządku — w przeciwieństwie do /bg/, gdzie plik bywa podmieniany
+	// an icon under a given name is immutable, so a week in the cache is
+	// fine — unlike /bg/, where the file is sometimes replaced
 	w.Header().Set("Cache-Control", "public, max-age=604800")
-	_, _ = w.Write(dane)
+	_, _ = w.Write(data)
 }
 
-// typyIkon — jedyne, co wolno przepisać z obcego serwera.
-var typyIkon = map[string]bool{
+// iconKinds — the only thing allowed to be passed on from a foreign server.
+var iconKinds = map[string]bool{
 	"image/svg+xml": true, "image/png": true, "image/jpeg": true,
 	"image/webp": true, "image/gif": true, "image/x-icon": true,
 	"image/vnd.microsoft.icon": true,
 }
 
-// klientIkonZewnętrznych pobiera ikony spoza panelu.
+// externalIconClient fetches icons from outside the panel.
 //
-// ! Blokada adresów prywatnych siedzi w Dialer.Control, czyli DZIAŁA NA
-// ADRESIE, KTÓRY NAPRAWDĘ ZOSTAŁ WYBRANY — sprawdzanie hosta przed żądaniem
-// omija się DNS-em zwracającym raz publiczny, raz lokalny adres. Bez tego
-// `icon: http://192.168.0.1/…` w YAML-u robi z panelu skaner sieci domowej.
-func klientIkonZewnętrznych() *http.Client {
-	dialer := &net.Dialer{Timeout: 5 * time.Second, Control: blokujAdresyLokalne}
+// ! The block on private addresses sits in Dialer.Control, i.e. it WORKS ON THE
+// ADDRESS THAT WAS ACTUALLY CHOSEN — checking the host before the request is
+// bypassed with DNS that returns a public address once and a local one the next time.
+// Without this, `icon: http://192.168.0.1/…` in the YAML turns the panel into a
+// home network scanner.
+func externalIconClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second, Control: blockLocalAddresses}
 	return &http.Client{
 		Timeout:   15 * time.Second,
 		Transport: &http.Transport{DialContext: dialer.DialContext},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
-				return errors.New("za dużo przekierowań")
+				return errors.New("too many redirects")
 			}
 			return nil
 		},
 	}
 }
 
-func blokujAdresyLokalne(_, adres string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(adres)
+func blockLocalAddresses(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return err
 	}
 	ip, err := netip.ParseAddr(host)
 	if err != nil {
-		return fmt.Errorf("nierozpoznany adres %q", host)
+		return fmt.Errorf("unrecognized address %q", host)
 	}
-	if !adresPubliczny(ip) {
-		return fmt.Errorf("adres lokalny %s jest zablokowany", ip)
+	if !publicAddress(ip) {
+		return fmt.Errorf("local address %s is blocked", ip)
 	}
 	return nil
 }
 
-func adresPubliczny(ip netip.Addr) bool {
+func publicAddress(ip netip.Addr) bool {
 	ip = ip.Unmap()
 	switch {
 	case ip.IsLoopback(), ip.IsPrivate(), ip.IsUnspecified(),
@@ -674,8 +676,8 @@ func adresPubliczny(ip netip.Addr) bool {
 	return true
 }
 
-// handleIconProxy obsługuje ikony podane jako pełny adres — pobiera je serwer,
-// nie przeglądarka.
+// handleIconProxy handles icons given as a full address — the server fetches
+// them, not the browser.
 func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 	src := r.URL.Query().Get("u")
 	if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
@@ -689,11 +691,11 @@ func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("User-Agent", "ShyGarlic/"+Version)
-	klient := s.klientProxy
-	if klient == nil {
-		klient = klientIkonZewnętrznych()
+	client := s.proxyClient
+	if client == nil {
+		client = externalIconClient()
 	}
-	resp, err := klient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "fetch failed", http.StatusBadGateway)
 		return
@@ -703,21 +705,21 @@ func (s *Server) handleIconProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream "+resp.Status, http.StatusBadGateway)
 		return
 	}
-	// ! Content-Type od upstreamu był tu dotąd przepisywany DOSŁOWNIE, więc
-	// `icon: https://zły/x` oddawał text/html z NASZEGO originu — czyli XSS
-	// przy script-src 'unsafe-inline'. Teraz przechodzi tylko allowlista.
-	typ, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || !typyIkon[typ] {
-		http.Error(w, "upstream nie oddał obrazu", http.StatusBadGateway)
+	// ! The Content-Type from the upstream used to be copied here VERBATIM, so
+	// `icon: https://bad/x` returned text/html from OUR origin — i.e. XSS
+	// with script-src 'unsafe-inline'. Now only the allowlist passes.
+	kind, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !iconKinds[kind] {
+		http.Error(w, "upstream did not return an image", http.StatusBadGateway)
 		return
 	}
-	dane, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		http.Error(w, "read failed", http.StatusBadGateway)
 		return
 	}
-	w.Header().Set("Content-Type", typ)
+	w.Header().Set("Content-Type", kind)
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "public, max-age=604800")
-	_, _ = w.Write(dane)
+	_, _ = w.Write(data)
 }

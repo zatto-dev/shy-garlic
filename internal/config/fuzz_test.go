@@ -36,8 +36,8 @@ func addFuzzSeeds(f *testing.F) {
 		f.Add(b)
 		f.Add(bytes.ReplaceAll(b, []byte("\n"), []byte("\r\n")))
 	}
-	f.Add([]byte(źródłoSprawdzania))
-	f.Add([]byte(źródłoOpisów))
+	f.Add([]byte(checkSource))
+	f.Add([]byte(descriptionSource))
 	f.Add([]byte("groups:\n  - name: G\n    services:\n      - name: A\n        url: http://a"))
 	f.Add([]byte("groups: []\n"))
 }
@@ -122,15 +122,15 @@ func editOnce(t *testing.T, src []byte, op int, raw string) {
 		err = d.SetServiceField(g.Name, s.Name, "url", "http://"+strings.ReplaceAll(v, " ", "-"))
 		check = func(u Service) bool { return u.URL == "http://"+strings.ReplaceAll(v, " ", "-") }
 	case 1:
-		err = d.UstawOpisUsługi(g.Name, s.Name, v)
-		want, _ := NormalizujOpis(v)
+		err = d.SetServiceDescription(g.Name, s.Name, v)
+		want, _ := NormalizeDescription(v)
 		check = func(u Service) bool { return u.Description == want }
 	case 2:
-		err = d.UstawTagiUsługi(g.Name, s.Name, []string{v[:min(len(v), 32)]})
+		err = d.SetServiceTags(g.Name, s.Name, []string{v[:min(len(v), 32)]})
 		check = nil // normalisation may trim; loading is the invariant
 	case 3:
 		on := len(v)%2 == 0
-		err = d.UstawSprawdzanie(g.Name, s.Name, ZmianaSprawdzania{Insecure: &on,
+		err = d.SetCheck(g.Name, s.Name, CheckChange{Insecure: &on,
 			Interval: ptr(Duration(time.Duration(len(v)+1) * time.Second)), Expect: &[]int{200, 401}})
 		check = func(u Service) bool {
 			return u.Check.Insecure == on && u.Check.Interval == Duration(time.Duration(len(v)+1)*time.Second) &&

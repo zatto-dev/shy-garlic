@@ -35,8 +35,8 @@ jobs:
         with:
           go-version: '1.25'
           check-latest: true
-      # Ten sam sposób budowania co w wydaniu — żeby błąd kompilacji dla
-      # innej architektury nie wyszedł dopiero przy tagowaniu.
+      # The same way of building as in the release — so that a compile error for
+      # another architecture does not surface only when tagging.
       - run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/shyg
 
   chart:

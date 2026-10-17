@@ -9,11 +9,11 @@ import (
 	"syscall"
 )
 
-// ErrChangedOnDisk — ktoś (człowiek, Ansible, git pull) zmienił plik między
-// naszym odczytem a zapisem. Nadpisanie skasowałoby cudzą pracę, więc odmawiamy.
+// ErrChangedOnDisk — someone (a human, Ansible, git pull) changed the file between
+// our read and write. Overwriting would erase someone else's work, so we refuse.
 var ErrChangedOnDisk = errors.New("config changed on disk since it was read")
 
-// Open wczytuje plik do edycji i zapamiętuje jego odcisk oraz uprawnienia.
+// Open loads the file for editing and remembers its fingerprint and permissions.
 func Open(path string) (*Document, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -33,18 +33,18 @@ func Open(path string) (*Document, error) {
 	return d, nil
 }
 
-// zamieńPlik to os.Rename — zmienna tylko po to, żeby test mógł zasymulować
-// EBUSY / EXDEV, których na zwykłym dysku testowym nie da się wywołać.
-var zamieńPlik = os.Rename
+// replaceFile is os.Rename — a variable only so a test can simulate
+// EBUSY / EXDEV, which cannot be triggered on an ordinary test disk.
+var replaceFile = os.Rename
 
-// utwórzTymczasowy to os.CreateTemp, z tego samego powodu (EACCES na katalogu).
-var utwórzTymczasowy = os.CreateTemp
+// createTemp is os.CreateTemp, for the same reason (EACCES on the directory).
+var createTemp = os.CreateTemp
 
-// OpenSurowy wczytuje plik BEZ parsowania YAML-a. Służy wyłącznie do naprawy:
-// Open odmawia zepsutego pliku, a edytor surowego YAML (ReplaceAll) musi umieć
-// go zastąpić poprawną treścią. Każda operacja strukturalna (AddService itd.)
-// na takim dokumencie jest niedozwolona do pierwszego udanego ReplaceAll.
-func OpenSurowy(path string) (*Document, error) {
+// OpenRaw loads the file WITHOUT parsing YAML. It serves only for repair:
+// Open refuses a broken file, and the raw YAML editor (ReplaceAll) must be able to
+// replace it with correct content. Every structural operation (AddService etc.)
+// on such a document is disallowed until the first successful ReplaceAll.
+func OpenRaw(path string) (*Document, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -53,103 +53,103 @@ func OpenSurowy(path string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	src, crlf := normalizujKońce(raw)
+	src, crlf := normalizeLineEndings(raw)
 	d := &Document{src: src, crlf: crlf, path: path, hash: sha256.Sum256(raw), mode: fi.Mode().Perm()}
-	_ = d.reparse() // poprawny plik dostaje AST; zepsuty zostaje bez
+	_ = d.reparse() // a valid file gets an AST; a broken one stays without
 	return d, nil
 }
 
-// Save zapisuje zmiany atomowo: nowy plik powstaje obok, jest zsynchronizowany
-// na dysk i dopiero wtedy podmieniany. Przerwany zapis zostawia stary plik cały.
+// Save writes the changes atomically: the new file is created alongside, synced
+// to disk and only then swapped in. An interrupted write leaves the old file intact.
 //
-// Gdy atomowa podmiana jest niemożliwa — config zamontowany jako pojedynczy
-// plik (rename → EBUSY), katalog bez prawa zapisu (EACCES), inny system plików
-// (EXDEV) — zapisujemy w miejscu: obcięcie, zapis, fsync. To nie jest atomowe,
-// więc strażnik ErrChangedOnDisk jest sprawdzany jeszcze raz tuż przed.
+// When an atomic swap is impossible — config mounted as a single
+// file (rename → EBUSY), directory without write permission (EACCES), another file system
+// (EXDEV) — we write in place: truncate, write, fsync. That is not atomic,
+// so the ErrChangedOnDisk guard is checked once more right before.
 //
-// Symlink do configu jest rozwiązywany: piszemy do celu, a link zostaje linkiem.
+// A symlink to the config is resolved: we write to the target, and the link stays a link.
 func (d *Document) Save() error {
 	if d.path == "" {
 		return errors.New("document has no path (use Open)")
 	}
-	cel := d.path
+	target := d.path
 	if r, err := filepath.EvalSymlinks(d.path); err == nil {
-		cel = r
+		target = r
 	}
 
-	if err := d.sprawdźOdcisk(cel); err != nil {
+	if err := d.verifyFingerprint(target); err != nil {
 		return err
 	}
 
-	treść := d.Bytes()
-	err := zapiszAtomowo(cel, treść, d.mode)
-	if err != nil && wartoZapisaćWMiejscu(err) {
-		// ! ponowna kontrola: między pierwszą a drugą próbą ktoś mógł dotknąć pliku
-		if err := d.sprawdźOdcisk(cel); err != nil {
+	content := d.Bytes()
+	err := writeAtomically(target, content, d.mode)
+	if err != nil && shouldWriteInPlace(err) {
+		// ! second check: between the first and second attempt someone may have touched the file
+		if err := d.verifyFingerprint(target); err != nil {
 			return err
 		}
-		err = zapiszWMiejscu(cel, treść)
+		err = writeInPlace(target, content)
 	}
 	if err != nil {
 		return err
 	}
-	d.hash = sha256.Sum256(treść)
+	d.hash = sha256.Sum256(content)
 	return nil
 }
 
-func (d *Document) sprawdźOdcisk(ścieżka string) error {
-	obecne, err := os.ReadFile(ścieżka)
+func (d *Document) verifyFingerprint(path string) error {
+	current, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	if sha256.Sum256(obecne) != d.hash {
+	if sha256.Sum256(current) != d.hash {
 		return ErrChangedOnDisk
 	}
 	return nil
 }
 
-// wartoZapisaćWMiejscu — tylko błędy, które mówią „tu się nie da podmienić
-// pliku". ENOSPC, EIO czy EROFS nie są powodem do fallbacku: zapis w miejscu
-// też by się nie udał, a mógłby zostawić plik obcięty do połowy.
-func wartoZapisaćWMiejscu(err error) bool {
+// shouldWriteInPlace — only errors that say "the file cannot be replaced
+// here". ENOSPC, EIO or EROFS are not a reason for the fallback: writing in place
+// would fail too, and could leave the file truncated halfway.
+func shouldWriteInPlace(err error) bool {
 	return errors.Is(err, syscall.EBUSY) || errors.Is(err, syscall.EXDEV) ||
 		errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM)
 }
 
-func zapiszAtomowo(cel string, treść []byte, tryb os.FileMode) error {
-	dir := filepath.Dir(cel)
-	tmp, err := utwórzTymczasowy(dir, ".shygarlic-*.yaml")
+func writeAtomically(target string, content []byte, mode os.FileMode) error {
+	dir := filepath.Dir(target)
+	tmp, err := createTemp(dir, ".shygarlic-*.yaml")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	sprzątaj := func() {
+	cleanup := func() {
 		tmp.Close()
 		os.Remove(tmpName)
 	}
 
-	if _, err := tmp.Write(treść); err != nil {
-		sprzątaj()
+	if _, err := tmp.Write(content); err != nil {
+		cleanup()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		sprzątaj()
+		cleanup()
 		return err
 	}
-	if err := tmp.Chmod(tryb); err != nil {
-		sprzątaj()
+	if err := tmp.Chmod(mode); err != nil {
+		cleanup()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := zamieńPlik(tmpName, cel); err != nil {
+	if err := replaceFile(tmpName, target); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
 
-	// fsync katalogu — bez tego rename może nie przetrwać nagłego resetu
+	// fsync of the directory — without it the rename may not survive a sudden reset
 	if fd, err := os.Open(dir); err == nil {
 		_ = fd.Sync()
 		_ = fd.Close()
@@ -157,51 +157,51 @@ func zapiszAtomowo(cel string, treść []byte, tryb os.FileMode) error {
 	return nil
 }
 
-// piszDoPliku to f.Write — zmienna tylko po to, żeby test mógł zasymulować
-// ENOSPC / EIO w połowie zapisu.
-var piszDoPliku = func(f *os.File, treść []byte) (int, error) { return f.Write(treść) }
+// writeToFile is f.Write — a variable only so a test can simulate
+// ENOSPC / EIO in the middle of a write.
+var writeToFile = func(f *os.File, content []byte) (int, error) { return f.Write(content) }
 
-// synchronizujPlik to f.Sync, z tego samego powodu.
-var synchronizujPlik = func(f *os.File) error { return f.Sync() }
+// syncFile is f.Sync, for the same reason.
+var syncFile = func(f *os.File) error { return f.Sync() }
 
-// zapiszWMiejscu: obcięcie, zapis, fsync. Błąd po obcięciu zostawiłby plik
-// użytkownika okrojony, więc oryginał czytamy z góry i przy porażce próbujemy
-// go odtworzyć.
-func zapiszWMiejscu(cel string, treść []byte) error {
-	oryginał, err := os.ReadFile(cel)
+// writeInPlace: truncate, write, fsync. An error after truncation would leave the
+// user's file cut short, so we read the original up front and on failure try to
+// restore it.
+func writeInPlace(target string, content []byte) error {
+	original, err := os.ReadFile(target)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(cel, os.O_WRONLY|os.O_TRUNC, 0)
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_TRUNC, 0)
 	if err != nil {
 		return err
 	}
-	if _, err := piszDoPliku(f, treść); err != nil {
-		return przywróćPlik(f, oryginał, err)
+	if _, err := writeToFile(f, content); err != nil {
+		return restoreFile(f, original, err)
 	}
-	if err := synchronizujPlik(f); err != nil {
-		return przywróćPlik(f, oryginał, err)
+	if err := syncFile(f); err != nil {
+		return restoreFile(f, original, err)
 	}
 	return f.Close()
 }
 
-// przywróćPlik odtwarza oryginał po nieudanym zapisie w miejscu i zamyka plik.
-// Zwraca błąd zapisu, uzupełniony informacją, czy plik wrócił do stanu sprzed
-// zmiany. Zapis odtwarzający idzie bezpośrednio (nie przez piszDoPliku).
-func przywróćPlik(f *os.File, oryginał []byte, przyczyna error) error {
+// restoreFile restores the original after a failed in-place write and closes the file.
+// It returns the write error, supplemented with whether the file returned to its state
+// before the change. The restoring write goes directly (not through writeToFile).
+func restoreFile(f *os.File, original []byte, cause error) error {
 	defer f.Close()
 	if err := f.Truncate(0); err == nil {
-		if _, err := f.WriteAt(oryginał, 0); err == nil {
+		if _, err := f.WriteAt(original, 0); err == nil {
 			if err := f.Sync(); err == nil {
-				return fmt.Errorf("write in place failed (%w); the original file was restored", przyczyna)
+				return fmt.Errorf("write in place failed (%w); the original file was restored", cause)
 			}
 		}
 	}
 	return fmt.Errorf("write in place failed (%w) and the file could not be restored; "+
-		"the last good version is in the panel history", przyczyna)
+		"the last good version is in the panel history", cause)
 }
 
-// Path zwraca ścieżkę pliku, jeśli dokument pochodzi z Open.
+// Path returns the file path, if the document comes from Open.
 func (d *Document) Path() string { return d.path }
 
 func (d *Document) String() string { return fmt.Sprintf("Document(%s, %d B)", d.path, len(d.src)) }

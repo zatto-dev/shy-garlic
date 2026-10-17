@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// Dashboard do Grafany leży w repo jako zwykły plik; ten test pilnuje, że jest
-// poprawnym JSON-em, że źródło danych to zmienna (nikt nie ma „naszego" uid-a)
-// i że każde zapytanie używa metryk, które panel naprawdę wystawia.
-func TestDashboardGrafanyJestPoprawnyIUżywaZmiennejŹródła(t *testing.T) {
-	surowy, err := os.ReadFile(filepath.Join(korzeńRepo(t), "deploy", "grafana", "shy-garlic.json"))
+// The Grafana dashboard lives in the repo as a plain file; this test makes sure it is
+// valid JSON, that the data source is a variable (nobody has "our" uid)
+// and that every query uses metrics the panel really exposes.
+func TestGrafanaDashboardIsValidAndUsesSourceVariable(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "grafana", "shy-garlic.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,56 +35,56 @@ func TestDashboardGrafanyJestPoprawnyIUżywaZmiennejŹródła(t *testing.T) {
 			} `json:"targets"`
 		} `json:"panels"`
 	}
-	if err := json.Unmarshal(surowy, &d); err != nil {
-		t.Fatalf("dashboard nie jest poprawnym JSON-em: %v", err)
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatalf("the dashboard is not valid JSON: %v", err)
 	}
-	// wejścia importu: źródło danych + nazwa joba Prometheusa (stała)
-	wejścia := map[string]string{}
+	// import inputs: data source + Prometheus job name (constant)
+	inputs := map[string]string{}
 	for _, in := range d.Inputs {
-		wejścia[in.Name] = in.Type
+		inputs[in.Name] = in.Type
 	}
-	if len(d.Inputs) != 2 || wejścia["DS_PROMETHEUS"] != "datasource" || wejścia["VAR_JOB"] != "constant" {
+	if len(d.Inputs) != 2 || inputs["DS_PROMETHEUS"] != "datasource" || inputs["VAR_JOB"] != "constant" {
 		t.Errorf("__inputs: %+v", d.Inputs)
 	}
-	typy := map[string]bool{}
+	kinds := map[string]bool{}
 	for _, p := range d.Panels {
-		typy[p.Type] = true
+		kinds[p.Type] = true
 		if len(p.Targets) == 0 {
-			continue // panel tekstowy — nie pyta żadnego źródła
+			continue // text panel — does not query any source
 		}
 		if p.Datasource.UID != "${DS_PROMETHEUS}" {
-			t.Errorf("panel %q: datasource uid %q, chcę ${DS_PROMETHEUS}", p.Title, p.Datasource.UID)
+			t.Errorf("panel %q: datasource uid %q, want ${DS_PROMETHEUS}", p.Title, p.Datasource.UID)
 		}
 		for _, tg := range p.Targets {
 			if tg.Datasource.UID != "${DS_PROMETHEUS}" {
 				t.Errorf("panel %q: target z datasource %q", p.Title, tg.Datasource.UID)
 			}
 			if !strings.Contains(tg.Expr, "shyg_service_") && !strings.Contains(tg.Expr, "shyg_build_info") {
-				t.Errorf("panel %q: zapytanie %q nie używa metryk shyg_*", p.Title, tg.Expr)
+				t.Errorf("panel %q: query %q does not use shyg_* metrics", p.Title, tg.Expr)
 			}
 		}
 	}
-	for _, chcę := range []string{"stat", "table", "timeseries", "state-timeline"} {
-		if !typy[chcę] {
-			t.Errorf("brak panelu typu %s", chcę)
+	for _, want := range []string{"stat", "table", "timeseries", "state-timeline"} {
+		if !kinds[want] {
+			t.Errorf("no panel of type %s", want)
 		}
 	}
-	if strings.Contains(string(surowy), `"uid": "`) {
-		for _, linia := range strings.Split(string(surowy), "\n") {
-			if strings.Contains(linia, `"uid": "`) && !strings.Contains(linia, "${DS_PROMETHEUS}") && !strings.Contains(linia, `"shy-garlic"`) {
-				t.Errorf("wpisany na sztywno uid: %s", strings.TrimSpace(linia))
+	if strings.Contains(string(raw), `"uid": "`) {
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, `"uid": "`) && !strings.Contains(line, "${DS_PROMETHEUS}") && !strings.Contains(line, `"shy-garlic"`) {
+				t.Errorf("wpisany na sztywno uid: %s", strings.TrimSpace(line))
 			}
 		}
 	}
 
-	// każda metryka z dashboardu istnieje w kodzie /metrics
-	kod, err := os.ReadFile(filepath.Join(korzeńRepo(t), "internal", "server", "metryki.go"))
+	// every metric from the dashboard exists in the /metrics code
+	code, err := os.ReadFile(filepath.Join(repoRoot(t), "internal", "server", "metrics.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range []string{"shyg_service_up", "shyg_service_degraded", "shyg_service_response_seconds", "shyg_service_availability_ratio", "shyg_service_last_check_timestamp_seconds", "shyg_build_info"} {
-		if !strings.Contains(string(kod), `"`+m+`"`) {
-			t.Errorf("metryka %s nie jest wystawiana", m)
+		if !strings.Contains(string(code), `"`+m+`"`) {
+			t.Errorf("metric %s is not exposed", m)
 		}
 	}
 }

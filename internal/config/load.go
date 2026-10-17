@@ -4,32 +4,31 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
 )
 
-// Load czyta konfigurację semantycznie: rozwija merge-keye (`<<: *defaults`),
-// uzupełnia brakujące parametry sprawdzania i waliduje minimum.
+// Load reads the configuration semantically: expands merge keys (`<<: *defaults`),
+// fills in missing check parameters and validates the minimum.
 //
-// Load NIE nadaje się do edycji pliku — do tego jest Parse/Document.
+// Load is NOT suitable for editing the file — that is what Parse/Document are for.
 func Load(src []byte) (*Config, error) {
 	var cfg Config
 	if err := safeUnmarshal(src, &cfg); err != nil {
-		b := rozbierzSurowy(err)
-		if b.Linia == 0 {
-			b.Linia = lokalizuj(src, b.Komunikat)
+		b := parseRawError(err)
+		if b.Line == 0 {
+			b.Line = locateLine(src, b.Message)
 		}
-		return nil, &BłądWczytania{BłądPliku: b, err: fmt.Errorf("parse config: %w", err)}
+		return nil, &LoadError{FileError: b, err: fmt.Errorf("parse config: %w", err)}
 	}
-	blurPodany, dimPodany := podaneSuwaki(src)
-	applyWygląd(&cfg.Appearance, blurPodany, dimPodany)
+	blurGiven, dimGiven := givenSliders(src)
+	applyAppearance(&cfg.Appearance, blurGiven, dimGiven)
 	if cfg.Notify.Threshold < 1 {
-		cfg.Notify.Threshold = DomyślnyPróg
+		cfg.Notify.Threshold = DefaultThreshold
 	}
 	for gi := range cfg.Groups {
 		for si := range cfg.Groups[gi].Services {
 			applyDefaults(&cfg.Groups[gi].Services[si].Check)
-			applyRozmiar(&cfg.Groups[gi].Services[si])
-			applyOpis(&cfg.Groups[gi].Services[si])
+			applySize(&cfg.Groups[gi].Services[si])
+			applyDescription(&cfg.Groups[gi].Services[si])
 		}
 	}
 	return &cfg, nil
@@ -45,100 +44,100 @@ func applyDefaults(c *Check) {
 	if len(c.Expect) == 0 {
 		c.Expect = append([]int(nil), DefaultExpect...)
 	}
-	// `path: health` to oczywista literówka za `path: /health` — poprawiamy
-	// zamiast kończyć „down" z niezrozumiałym powodem
+	// `path: health` is an obvious typo for `path: /health` — we fix it
+	// instead of ending up "down" with an incomprehensible reason
 	if c.Path != "" && !strings.HasPrefix(c.Path, "/") && !strings.Contains(c.Path, "://") {
-		slog.Warn("check.path bez wiodącego /, dopisuję", "path", c.Path)
+		slog.Warn("check.path without leading /, prepending it", "path", c.Path)
 		c.Path = "/" + c.Path
 	}
 }
 
-// applyOpis czyści opis i tagi ręcznie wpisane w plik: opis jest jedną linią
-// (blokowy skalar `|` zostaje sklejony spacjami), tagi bez pustych i duplikatów.
-// Nie zwraca błędu — to ma być czytelne, nie zakazane; surowsza walidacja jest
-// po stronie API (NormalizujOpis, NormalizujTagi).
-func applyOpis(s *Service) {
+// applyDescription cleans the description and tags written by hand in the file: the description is one line
+// (a block scalar `|` is joined with spaces), tags without empty ones and duplicates.
+// It returns no error — this is meant to be readable, not forbidden; stricter validation is
+// on the API side (NormalizeDescription, NormalizeTags).
+func applyDescription(s *Service) {
 	s.Description = strings.Join(strings.Fields(s.Description), " ")
-	s.Tags = czyśćTagi(s.Tags)
+	s.Tags = cleanTags(s.Tags)
 }
 
-func applyRozmiar(s *Service) {
-	if !Dozwolone(s.Size, Rozmiary) {
-		s.Size = DomyślnyRozmiar
+func applySize(s *Service) {
+	if !Allowed(s.Size, Sizes) {
+		s.Size = DefaultSize
 	}
 }
 
-// applyWygląd uzupełnia domyślne i PROSTUJE wartości spoza allowlisty.
+// applyAppearance fills in defaults and CLAMPS values outside the allowlist.
 //
-// ! Świadomie nie zwraca błędu: bzdura wpisana ręcznie w plik ma dać domyślny
-// wygląd i wpis w logu, a nie martwy panel. Ta sama wartość przysłana z UI
-// kończy się 400 — tam użytkownik ma się dowiedzieć, że się pomylił.
-func applyWygląd(a *Appearance, blurPodany, dimPodany bool) {
+// ! Deliberately returns no error: nonsense written by hand into the file should yield the default
+// appearance and a log entry, not a dead panel. The same value sent from the UI
+// ends with a 400 — there the user is meant to learn they made a mistake.
+func applyAppearance(a *Appearance, blurGiven, dimGiven bool) {
 	b := &a.Background
 
-	if !Dozwolone(b.Preset, PresetyTła) {
+	if !Allowed(b.Preset, BackgroundPresets) {
 		if b.Preset != "" {
-			slog.Warn("nieznany preset tła w configu", "preset", b.Preset, "biorę", DomyślnyPreset)
+			slog.Warn("unknown background preset in config", "preset", b.Preset, "using", DefaultPreset)
 		}
-		b.Preset = DomyślnyPreset
+		b.Preset = DefaultPreset
 	}
-	if !blurPodany {
-		b.Blur = DomyślnyBlur
+	if !blurGiven {
+		b.Blur = DefaultBlur
 	} else if b.Blur < 0 || b.Blur > MaxBlur {
-		slog.Warn("rozmycie tła poza zakresem", "blur", b.Blur, "biorę", DomyślnyBlur)
-		b.Blur = DomyślnyBlur
+		slog.Warn("background blur out of range", "blur", b.Blur, "using", DefaultBlur)
+		b.Blur = DefaultBlur
 	}
-	if !dimPodany {
-		b.Dim = DomyślnyDim
+	if !dimGiven {
+		b.Dim = DefaultDim
 	} else if b.Dim < 0 || b.Dim > MaxDim {
-		slog.Warn("przyciemnienie tła poza zakresem", "dim", b.Dim, "biorę", DomyślnyDim)
-		b.Dim = DomyślnyDim
+		slog.Warn("background dim out of range", "dim", b.Dim, "using", DefaultDim)
+		b.Dim = DefaultDim
 	}
 	if b.Preset != PresetPhoto {
 		b.Image = ""
-	} else if !NazwaTła.MatchString(b.Image) {
+	} else if !BackgroundName.MatchString(b.Image) {
 		if b.Image != "" {
-			slog.Warn("zła nazwa pliku tapety w configu", "image", b.Image)
+			slog.Warn("bad wallpaper file name in config", "image", b.Image)
 		}
-		// preset `photo` bez użytecznego pliku to nie jest tło — wracamy do presetu
+		// preset `photo` without a usable file is not a background — fall back to the preset
 		b.Image = ""
-		b.Preset = DomyślnyPreset
+		b.Preset = DefaultPreset
 	}
-	// ! Ton dopiero TU, bo preset mógł się wyżej zmienić — `photo` bez
-	// użytecznego pliku wraca do presetu i musi wziąć jego ton.
+	// ! The tone only HERE, because the preset may have changed above — `photo` without
+	// a usable file goes back to the preset and must take its tone.
 	//
-	// Ton jest wyborem WYŁĄCZNIE przy własnej tapecie: tylko tam jasności tła
-	// nie da się poznać z góry. Każdy preset ma ją ustaloną, więc narzuca ton —
-	// inaczej dałoby się zapisać biały tekst na kremowym tle.
+	// The tone is a choice ONLY with a custom wallpaper: only there the background
+	// brightness cannot be known in advance. Every preset has it fixed, so it imposes the tone —
+	// otherwise white text could be saved on a cream background.
 	if b.Preset != PresetPhoto {
-		if b.Tone != "" && b.Tone != TonDla(b.Preset) {
-			slog.Warn("ton tła nie pasuje do presetu, biorę ton presetu",
-				"preset", b.Preset, "tone", b.Tone, "biorę", TonDla(b.Preset))
+		if b.Tone != "" && b.Tone != ToneFor(b.Preset) {
+			slog.Warn("background tone does not match the preset, using the preset's tone",
+				"preset", b.Preset, "tone", b.Tone, "using", ToneFor(b.Preset))
 		}
-		b.Tone = TonDla(b.Preset)
-	} else if !Dozwolone(b.Tone, TonyTła) {
+		b.Tone = ToneFor(b.Preset)
+	} else if !Allowed(b.Tone, BackgroundTones) {
 		if b.Tone != "" {
-			slog.Warn("nieznany ton tła w configu", "tone", b.Tone, "biorę", DomyślnyTon)
+			slog.Warn("unknown background tone in config", "tone", b.Tone, "using", DefaultTone)
 		}
-		b.Tone = DomyślnyTon
+		b.Tone = DefaultTone
 	}
-	if !Dozwolone(a.View, Widoki) {
+	if !Allowed(a.View, Views) {
 		if a.View != "" {
-			slog.Warn("nieznany widok w configu", "view", a.View, "biorę", DomyślnyWidok)
+			slog.Warn("unknown view in config", "view", a.View, "using", DefaultView)
 		}
-		a.View = DomyślnyWidok
+		a.View = DefaultView
 	}
 }
 
-// podaneSuwaki mówi, które z suwaków tła w ogóle stoją w pliku. Bez tego nie da
-// się odróżnić „nie podano" (→ wartość domyślna) od świadomego zera, a zero
-// jest przy obu poprawnym wyborem: ostra tapeta bez rozmycia i tapeta bez
-// przyciemnienia.
+// givenSliders says which of the background sliders are present in the file at all. Without it
+// "not given" (→ default value) cannot be told from a deliberate zero, and zero
+// is a valid choice for both: a sharp wallpaper without blur and a wallpaper without
+// dimming.
 //
-// ! Idzie przez parser, nie przez szukanie tekstu. Wzorzec po bajtach trafiłby
-// w `# dim: 0` w komentarzu i w każdą usługę, która ma takie słowo w nazwie.
-func podaneSuwaki(src []byte) (blur, dim bool) {
-	var pomocniczy struct {
+// ! It goes through the parser, not through text search. A byte pattern would hit
+// `# dim: 0` in a comment and every service that has such a word in its name.
+func givenSliders(src []byte) (blur, dim bool) {
+	var helper struct {
 		Appearance struct {
 			Background struct {
 				Blur *int `yaml:"blur"`
@@ -146,9 +145,9 @@ func podaneSuwaki(src []byte) (blur, dim bool) {
 			} `yaml:"background"`
 		} `yaml:"appearance"`
 	}
-	if err := safeUnmarshal(src, &pomocniczy); err != nil {
+	if err := safeUnmarshal(src, &helper); err != nil {
 		return false, false
 	}
-	b := pomocniczy.Appearance.Background
+	b := helper.Appearance.Background
 	return b.Blur != nil, b.Dim != nil
 }

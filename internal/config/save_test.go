@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestSaveJestAtomowyIZachowujeUprawnienia(t *testing.T) {
+func TestSaveIsAtomicAndPreservesPermissions(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shygarlic.yaml")
-	src := wczytajBasic(t)
+	src := loadBasic(t)
 	if err := os.WriteFile(p, src, 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -28,39 +28,39 @@ func TestSaveJestAtomowyIZachowujeUprawnienia(t *testing.T) {
 
 	fi, _ := os.Stat(p)
 	if fi.Mode().Perm() != 0o640 {
-		t.Errorf("uprawnienia = %v, chcę 0640", fi.Mode().Perm())
+		t.Errorf("permissions = %v, want 0640", fi.Mode().Perm())
 	}
-	ents, _ := os.ReadDir(dir)
-	if len(ents) != 1 {
-		t.Errorf("został plik tymczasowy: %v", ents)
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("temp file left behind: %v", entries)
 	}
-	zapisane, _ := os.ReadFile(p)
-	if string(zapisane) != string(d.Bytes()) {
-		t.Error("na dysku jest co innego niż w dokumencie")
+	saved, _ := os.ReadFile(p)
+	if string(saved) != string(d.Bytes()) {
+		t.Error("what is on disk differs from the document")
 	}
 }
 
-func TestSaveOdmawiaGdyPlikZmienionyPodSpodem(t *testing.T) {
+func TestSaveRefusesWhenFileChangedUnderneath(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "shygarlic.yaml")
-	src := wczytajBasic(t)
+	src := loadBasic(t)
 	os.WriteFile(p, src, 0o644)
 
 	d, err := Open(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ktoś edytuje plik ręcznie w międzyczasie
+	// someone edits the file by hand in the meantime
 	os.WriteFile(p, append(src, []byte("\n# ręczna edycja\n")...), 0o644)
 
 	_ = d.SetServiceField("Media", "Sonarr", "url", "http://x:1")
 	if err := d.Save(); !errors.Is(err, ErrChangedOnDisk) {
-		t.Fatalf("Save = %v, chcę ErrChangedOnDisk", err)
+		t.Fatalf("Save = %v, want ErrChangedOnDisk", err)
 	}
-	// i nic nie nadpisał
-	teraz, _ := os.ReadFile(p)
-	if !contains(string(teraz), "# ręczna edycja") {
-		t.Error("cudza zmiana została nadpisana")
+	// and it overwrote nothing
+	now, _ := os.ReadFile(p)
+	if !contains(string(now), "# ręczna edycja") {
+		t.Error("someone else's change was overwritten")
 	}
 }
 

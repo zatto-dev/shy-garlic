@@ -1,16 +1,16 @@
-// Package health sprawdza, czy usługi żyją.
+// Package health checks whether services are alive.
 //
-// Cała reszta rynku robi to źle i to jest jeden z powodów istnienia Shy Garlic
-// (research 2026-08-14):
-//   - Homepage uznaje za awarię dopiero kod > 403, więc 401 i 403 świecą zielono;
-//   - Homarr dopiero >= 500;
-//   - Glance akceptuje wyłącznie 200, więc przekierowanie 301 jest "czerwone",
-//     a check odpala się dopiero przy żądaniu HTTP — bez otwartej karty nic nie chodzi;
-//   - Homer sprawdza usługi z przeglądarki, więc CORS i mixed-content wygląda jak awaria.
+// The rest of the market does this badly, and that is one of the reasons Shy Garlic
+// exists (research 2026-08-14):
+//   - Homepage treats only a code > 403 as a failure, so 401 and 403 glow green;
+//   - Homarr only >= 500;
+//   - Glance accepts only 200, so a 301 redirect is "red", and the check fires
+//     only on an HTTP request — with no open tab nothing runs;
+//   - Homer checks services from the browser, so CORS and mixed-content look like an outage.
 //
-// Tutaj: scheduler chodzi po stronie serwera niezależnie od przeglądarki,
-// lista akceptowanych kodów jest jawna, a "serwer odpowiedział czymś innym"
-// to osobny stan niż "nie da się połączyć".
+// Here: the scheduler runs server-side, independently of the browser,
+// the list of accepted codes is explicit, and "the server answered with something
+// else" is a separate state from "cannot connect".
 package health
 
 import (
@@ -32,13 +32,13 @@ import (
 type State string
 
 const (
-	StateUp       State = "up"       // odpowiedział jednym z oczekiwanych kodów
-	StateDegraded State = "degraded" // serwer żyje, ale kod jest inny niż oczekiwany
-	StateDown     State = "down"     // nie da się połączyć / timeout / DNS
-	StateUnknown  State = "unknown"  // jeszcze nie sprawdzone
+	StateUp       State = "up"       // answered with one of the expected codes
+	StateDegraded State = "degraded" // the server is alive, but the code differs from the expected one
+	StateDown     State = "down"     // cannot connect / timeout / DNS
+	StateUnknown  State = "unknown"  // not checked yet
 )
 
-// HistoryLen — ile ostatnich wyników trzymamy na wykres.
+// HistoryLen — how many of the latest results we keep for the chart.
 const HistoryLen = 60
 
 type Result struct {
@@ -50,30 +50,30 @@ type Result struct {
 	At      time.Time     `json:"at"`
 }
 
-// Target to jedna sprawdzana usługa.
+// Target is a single service being checked.
 type Target struct {
 	Key      string
 	URL      string
 	Interval time.Duration
 	Timeout  time.Duration
 	Expect   []int
-	Insecure bool // homelab bywa na samopodpisanym certyfikacie
+	Insecure bool // a homelab is often on a self-signed certificate
 
-	// Kontrola treści (SHYG-48) — dotyczy tylko http(s).
-	Path        string // ścieżka (+ query) zamiast ścieżki z URL; zawsze na tym samym hoście
-	Contains    string // tekst, który MUSI być w ciele odpowiedzi
-	NotContains string // tekst, którego NIE może być w ciele
+	// Content check (SHYG-48) — applies to http(s) only.
+	Path        string // path (+ query) instead of the path from URL; always on the same host
+	Contains    string // text that MUST be in the response body
+	NotContains string // text that must NOT be in the body
 }
 
-// PrefiksTreści — początek Result.Err, gdy serwer odpowiedział poprawnym
-// kodem, ale treść nie przeszła kontroli. UI po nim rozpoznaje ten rodzaj
-// „degraded" (kod HTTP jest wtedy dobry, więc „HTTP 200" byłoby mylące).
-const PrefiksTreści = "content: "
+// ContentPrefix — the beginning of Result.Err when the server answered with an
+// acceptable code but the content failed the check. The UI uses it to recognize
+// this kind of "degraded" (the HTTP code is good then, so "HTTP 200" would be misleading).
+const ContentPrefix = "content: "
 
-// maksCiała — ile bajtów odpowiedzi czytamy przy kontroli treści. Strona
-// większa niż 1 MiB i tak nie jest endpointem zdrowia, a bez limitu jeden
-// kafel mógłby ściągać gigabajty co 30 s.
-const maksCiała = 1 << 20
+// maxBody — how many bytes of the response we read during the content check. A page
+// larger than 1 MiB is not a health endpoint anyway, and without a limit a single
+// tile could pull gigabytes every 30 s.
+const maxBody = 1 << 20
 
 type Monitor struct {
 	mu      sync.RWMutex
@@ -85,10 +85,10 @@ type Monitor struct {
 	client   *http.Client
 	insecure *http.Client
 
-	// ctl serializuje SetTargets i Close. cancel i wg to stan cyklu życia pętli,
-	// a SetTargets woła się równolegle (watch() i zapis z panelu). Bez tego dwa
-	// wywołania nadpisywały cancel — jedna grupa pętli zostawała bez możliwości
-	// zatrzymania — i robiły wg.Add równolegle z wg.Wait.
+	// ctl serializes SetTargets and Close. cancel and wg are the loops' lifecycle
+	// state, and SetTargets is called concurrently (watch() and a save from the panel).
+	// Without it two calls overwrote cancel — one group of loops was left with no way
+	// to be stopped — and did wg.Add concurrently with wg.Wait.
 	ctl    sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -113,9 +113,9 @@ func New() *Monitor {
 	}
 }
 
-// SetTargets podmienia listę celów i restartuje pętle sprawdzania.
-// Wyniki dla celów, które przetrwały podmianę, zostają — po edycji configu
-// panel nie ma migać na "unknown".
+// SetTargets replaces the target list and restarts the check loops.
+// Results for targets that survived the replacement stay — after a config edit
+// the panel must not flicker to "unknown".
 func (m *Monitor) SetTargets(ctx context.Context, targets []Target) {
 	m.ctl.Lock()
 	defer m.ctl.Unlock()
@@ -123,15 +123,15 @@ func (m *Monitor) SetTargets(ctx context.Context, targets []Target) {
 
 	m.mu.Lock()
 	m.targets = targets
-	żywe := map[string]bool{}
+	alive := map[string]bool{}
 	for _, t := range targets {
-		żywe[t.Key] = true
+		alive[t.Key] = true
 		if _, ok := m.last[t.Key]; !ok {
 			m.last[t.Key] = Result{State: StateUnknown}
 		}
 	}
 	for k := range m.last {
-		if !żywe[k] {
+		if !alive[k] {
 			delete(m.last, k)
 			delete(m.hist, k)
 		}
@@ -146,29 +146,29 @@ func (m *Monitor) SetTargets(ctx context.Context, targets []Target) {
 	}
 }
 
-// PrzenieśKlucze przepina ostatni wynik i wykres ze starych kluczy na nowe
-// (stary → nowy). Wołane przy zmianie nazwy usługi albo przeniesieniu do innej
-// grupy, PRZED SetTargets — dzięki temu SetTargets widzi nowy klucz jako
-// „znany" i nie kasuje stanu, a karta nie mruga na „unknown".
-func (m *Monitor) PrzenieśKlucze(pary map[string]string) {
+// MoveKeys re-points the last result and chart from old keys to new ones
+// (old → new). Called when a service is renamed or moved to another group,
+// BEFORE SetTargets — so SetTargets sees the new key as "known" and does not
+// delete the state, and the card does not flicker to "unknown".
+func (m *Monitor) MoveKeys(pairs map[string]string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for stary, nowy := range pary {
-		if stary == nowy {
+	for oldKey, newKey := range pairs {
+		if oldKey == newKey {
 			continue
 		}
-		if r, ok := m.last[stary]; ok {
-			m.last[nowy] = r
-			delete(m.last, stary)
+		if r, ok := m.last[oldKey]; ok {
+			m.last[newKey] = r
+			delete(m.last, oldKey)
 		}
-		if h, ok := m.hist[stary]; ok {
-			m.hist[nowy] = h
-			delete(m.hist, stary)
+		if h, ok := m.hist[oldKey]; ok {
+			m.hist[newKey] = h
+			delete(m.hist, oldKey)
 		}
 	}
 }
 
-// stop zakłada, że wołający trzyma m.ctl.
+// stop assumes the caller holds m.ctl.
 func (m *Monitor) stop() {
 	if m.cancel != nil {
 		m.cancel()
@@ -186,7 +186,7 @@ func (m *Monitor) Close() {
 func (m *Monitor) loop(ctx context.Context, t Target) {
 	defer m.wg.Done()
 
-	// rozrzut startów, żeby 30 usług nie ruszyło w tej samej milisekundzie
+	// spread out the starts so 30 services do not fire in the same millisecond
 	jitter := time.Duration(rand.Int63n(int64(500 * time.Millisecond)))
 	select {
 	case <-ctx.Done():
@@ -230,29 +230,29 @@ func (m *Monitor) record(key string, r Result) {
 	for _, c := range subs {
 		select {
 		case c <- struct{}{}:
-		default: // odbiorca nie nadąża — kolejny tick i tak przyniesie pełny stan
+		default: // the receiver cannot keep up — the next tick will bring the full state anyway
 		}
 	}
 }
 
-// SprawdźTeraz odpala sprawdzenie poza kolejnością — dla przycisku „sprawdź
-// teraz" w UI. Wynik trafia do historii tak samo jak sprawdzenia z harmonogramu.
-func (m *Monitor) SprawdźTeraz(ctx context.Context, klucz string) (Result, error) {
+// CheckNow fires a check out of order — for the "check now" button in the UI.
+// The result goes to history the same way as scheduled checks.
+func (m *Monitor) CheckNow(ctx context.Context, key string) (Result, error) {
 	m.mu.RLock()
-	var cel Target
-	var znaleziony bool
+	var target Target
+	var found bool
 	for _, t := range m.targets {
-		if t.Key == klucz {
-			cel, znaleziony = t, true
+		if t.Key == key {
+			target, found = t, true
 			break
 		}
 	}
 	m.mu.RUnlock()
-	if !znaleziony {
+	if !found {
 		return Result{}, errors.New("no such service")
 	}
-	r := Check(ctx, m.clientFor(cel), cel)
-	m.record(klucz, r)
+	r := Check(ctx, m.clientFor(target), target)
+	m.record(key, r)
 	return r, nil
 }
 
@@ -272,7 +272,7 @@ func (m *Monitor) History(key string) []Result {
 	return slices.Clone(m.hist[key])
 }
 
-// Subscribe zwraca kanał budzony przy każdej zmianie wyniku oraz funkcję odpięcia.
+// Subscribe returns a channel woken on every result change, and an unsubscribe function.
 func (m *Monitor) Subscribe() (<-chan struct{}, func()) {
 	c := make(chan struct{}, 1)
 	m.mu.Lock()
@@ -285,8 +285,8 @@ func (m *Monitor) Subscribe() (<-chan struct{}, func()) {
 	}
 }
 
-// Check wykonuje pojedyncze sprawdzenie. Wydzielone i bezstanowe, żeby dało się
-// je testować bez schedulera.
+// Check performs a single check. Extracted and stateless so it can be
+// tested without the scheduler.
 func Check(ctx context.Context, client *http.Client, t Target) Result {
 	start := time.Now()
 	res := Result{At: start}
@@ -317,10 +317,10 @@ func Check(ctx context.Context, client *http.Client, t Target) Result {
 	return res
 }
 
-// adresSprawdzania składa adres, który naprawdę odpytujemy: URL usługi, a gdy
-// jest Path — z jego ścieżką i query podmienionymi. Schemat, host, port i dane
-// logowania zostają z URL, więc Path nie wyprowadzi sprawdzania na inny serwer.
-func (t Target) adresSprawdzania() (string, error) {
+// checkURL builds the address we actually query: the service URL, and when
+// Path is set — with its path and query replaced. Scheme, host, port and login
+// data stay from URL, so Path cannot lead the check to a different server.
+func (t Target) checkURL() (string, error) {
 	if t.Path == "" {
 		return t.URL, nil
 	}
@@ -340,12 +340,12 @@ func (t Target) adresSprawdzania() (string, error) {
 }
 
 func checkHTTP(ctx context.Context, client *http.Client, t Target, res Result) Result {
-	adres, err := t.adresSprawdzania()
+	address, err := t.checkURL()
 	if err != nil {
 		res.State, res.Err = StateDown, err.Error()
 		return res
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, adres, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		res.State, res.Err = StateDown, err.Error()
 		return res
@@ -355,7 +355,7 @@ func checkHTTP(ctx context.Context, client *http.Client, t Target, res Result) R
 	resp, err := client.Do(req)
 	if err != nil {
 		res.State = StateDown
-		res.Err = krótkiBłąd(err)
+		res.Err = shortError(err)
 		return res
 	}
 	defer resp.Body.Close()
@@ -370,51 +370,51 @@ func checkHTTP(ctx context.Context, client *http.Client, t Target, res Result) R
 			res.State = StateUp
 			return res
 		}
-		return sprawdźTreść(resp.Body, t, res)
+		return checkContent(resp.Body, t, res)
 	}
-	// ! Serwer odpowiedział, tylko nie tym, czego oczekujemy. To NIE jest to samo
-	// co "nie da się połączyć" — użytkownik ma widzieć różnicę.
+	// ! The server answered, just not with what we expect. This is NOT the same as
+	// "cannot connect" — the user should see the difference.
 	res.State = StateDegraded
 	res.Err = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	return res
 }
 
-// sprawdźTreść czyta początek ciała (do maksCiała) i porównuje z regułami.
+// checkContent reads the beginning of the body (up to maxBody) and compares it with the rules.
 //
-// ! Niezgodność to degraded, nie down: serwer żyje i odpowiada akceptowanym
-// kodem — tylko treść jest nie ta (strona domyślna nginxa zamiast aplikacji,
-// komunikat o konserwacji). Tak samo traktujemy zły kod HTTP.
-// Nieudane CZYTANIE ciała (timeout, urwane połączenie) to już down.
-func sprawdźTreść(r io.Reader, t Target, res Result) Result {
-	b, err := io.ReadAll(io.LimitReader(r, maksCiała+1))
+// ! A mismatch is degraded, not down: the server is alive and answers with an
+// accepted code — only the content is wrong (nginx's default page instead of the
+// app, a maintenance message). A bad HTTP code is treated the same way.
+// A failed READ of the body (timeout, dropped connection) is down, though.
+func checkContent(r io.Reader, t Target, res Result) Result {
+	b, err := io.ReadAll(io.LimitReader(r, maxBody+1))
 	if err != nil {
-		res.State, res.Err = StateDown, krótkiBłąd(err)
+		res.State, res.Err = StateDown, shortError(err)
 		return res
 	}
-	obcięte := len(b) > maksCiała
-	if obcięte {
-		b = b[:maksCiała]
+	wasTruncated := len(b) > maxBody
+	if wasTruncated {
+		b = b[:maxBody]
 	}
-	ciało := string(b)
+	body := string(b)
 
 	switch {
-	case t.Contains != "" && !strings.Contains(ciało, t.Contains):
+	case t.Contains != "" && !strings.Contains(body, t.Contains):
 		res.State = StateDegraded
-		res.Err = PrefiksTreści + `missing "` + skrócony(t.Contains) + `"`
-		if obcięte {
+		res.Err = ContentPrefix + `missing "` + shorten(t.Contains) + `"`
+		if wasTruncated {
 			res.Err += " (first 1 MiB checked)"
 		}
-	case t.NotContains != "" && strings.Contains(ciało, t.NotContains):
+	case t.NotContains != "" && strings.Contains(body, t.NotContains):
 		res.State = StateDegraded
-		res.Err = PrefiksTreści + `found "` + skrócony(t.NotContains) + `"`
+		res.Err = ContentPrefix + `found "` + shorten(t.NotContains) + `"`
 	default:
 		res.State = StateUp
 	}
 	return res
 }
 
-// skrócony przycina szukany tekst do rozmiaru, który mieści się w kafelku.
-func skrócony(s string) string {
+// shorten trims the searched text to a size that fits in a tile.
+func shorten(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return ' '
@@ -431,7 +431,7 @@ func checkTCP(ctx context.Context, host string, res Result) Result {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
-		res.State, res.Err = StateDown, krótkiBłąd(err)
+		res.State, res.Err = StateDown, shortError(err)
 		return res
 	}
 	_ = conn.Close()
@@ -439,8 +439,8 @@ func checkTCP(ctx context.Context, host string, res Result) Result {
 	return res
 }
 
-// krótkiBłąd zamienia gadatliwe błędy net/http na coś, co mieści się w kafelku.
-func krótkiBłąd(err error) string {
+// shortError turns chatty net/http errors into something that fits in a tile.
+func shortError(err error) string {
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return "timeout"

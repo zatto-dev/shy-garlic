@@ -1,9 +1,9 @@
-// Package server serwuje panel: HTML, status w JSON i strumień zmian przez SSE.
+// Package server serves the panel: HTML, status as JSON and a stream of changes over SSE.
 //
-// Wszystko dzieje się po stronie serwera: sprawdzanie usług, pobieranie ikon,
-// odczyt configu. Przeglądarka nie wykonuje ani jednego żądania na zewnątrz —
-// dzięki temu panel działa bez internetu, a lista usług użytkownika nigdzie
-// nie wycieka. Konkurencja hotlinkuje ikony do jsDelivr prosto z przeglądarki.
+// Everything happens on the server side: checking services, fetching icons,
+// reading the config. The browser does not make a single outbound request —
+// thanks to that the panel works without internet, and the user's list of services
+// leaks nowhere. The competition hotlinks icons to jsDelivr straight from the browser.
 package server
 
 import (
@@ -33,402 +33,401 @@ import (
 var files embed.FS
 
 type Server struct {
-	path string
-	mon  *health.Monitor
-	tmpl *template.Template
-	st     *store.Store
-	lim    *limiter
-	ikony  *Katalog
-	tła    *KatalogTeł
-	powiad *notify.Powiadamiacz
-	docker *dockerdisc.Klient
+	path        string
+	monitor     *health.Monitor
+	tmpl        *template.Template
+	st          *store.Store
+	lim         *limiter
+	icons       *Catalog
+	backgrounds *BackgroundStore
+	notifier    *notify.Notifier
+	docker      *dockerdisc.Client
 
-	// webhookZeŚrodowiska i instancja są ustawiane raz, w New, i nigdy potem —
-	// dlatego bez mutexu.
-	webhookZeŚrodowiska bool
-	// formatZeŚrodowiska — format wiadomości z flagi albo zmiennej; ma tę samą
-	// pierwszeństwo co adres, ale jest niezależny od niego.
-	formatZeŚrodowiska bool
-	// prógZFlagi — --fail-threshold podany jawnie. Wtedy plik go nie rusza,
-	// tak samo jak przy webhooku: to, co przyszło z zewnątrz przy starcie,
-	// jest własnością deployu.
-	prógZFlagi bool
-	instancja  []OpisOpcji
-	// Tokeny API i /metrics (SHYG-49).
-	limTokenów  *limiter     // błędne tokeny — osobno od limitu logowania
-	logiTokenów *tłumikLogów // jedna linia logu na adres na minutę
-	// metrykiCIDR — sieci, z których /metrics odpowiada bez tokenu; ustawiane
-	// raz w New, potem tylko do odczytu.
-	metrykiCIDR []netip.Prefix
+	// webhookFromEnv and instance are set once, in New, and never afterwards —
+	// hence no mutex.
+	webhookFromEnv bool
+	// formatFromEnv — message format from a flag or variable; it has the same
+	// precedence as the address, but is independent of it.
+	formatFromEnv bool
+	// thresholdFromFlag — --fail-threshold given explicitly. Then the file does not touch it,
+	// the same as with the webhook: what came from outside at start
+	// belongs to the deploy.
+	thresholdFromFlag bool
+	instance          []OptionInfo
+	// API tokens and /metrics (SHYG-49).
+	tokenLimiter *limiter // bad tokens — separate from the login limit
+	tokenLogGate *logGate // one log line per address per minute
+	// metricsCIDR — networks from which /metrics responds without a token; set
+	// once in New, read-only afterwards.
+	metricsCIDR []netip.Prefix
 
-	muUżycie      sync.Mutex
-	użycieTokenów map[int64]time.Time // kiedy ostatnio zapisaliśmy last_used_at
+	usageMu    sync.Mutex
+	tokenUsage map[int64]time.Time // when we last wrote last_used_at
 
-	muDostępności   sync.Mutex
-	dostępnościMapa map[string]store.DostępnośćUsługi
-	dostępnościDo   time.Time
-	dostępnościTTL  time.Duration
+	availabilityMu    sync.Mutex
+	availabilityMap   map[string]store.ServiceAvailability
+	availabilityUntil time.Time
+	availabilityTTL   time.Duration
 
-	// klientProxy pobiera ikony podane pełnym adresem; osobne pole, bo test
-	// musi umieć podstawić klienta bez blokady adresów prywatnych
-	klientProxy *http.Client
+	// proxyClient fetches icons given as a full address; a separate field, because a test
+	// must be able to substitute a client without the private address block
+	proxyClient *http.Client
 	ctx         context.Context
 
-	// edycja serializuje zapisy do pliku — dwa równoległe kliknięcia w UI
-	// nie mogą nadpisać się nawzajem
-	edycja sync.Mutex
+	// edit serializes writes to the file — two concurrent clicks in the UI
+	// must not overwrite each other
+	edit sync.Mutex
 
-	// reloadMu serializuje reload(): wołają go Start, zapis z panelu (pod
-	// edycja) i watch(). Kolejność blokad zawsze edycja → reloadMu.
+	// reloadMu serializes reload(): it is called by Start, a save from the panel (under
+	// edit) and watch(). Lock order is always edit → reloadMu.
 	reloadMu sync.Mutex
 
-	// ostatnie — znacznik ostatniego wyniku zapisanego do bazy, per klucz.
-	// Na polu serwera (nie lokalnie w zapisujHistorię), bo zmiana klucza musi
-	// go przepiąć, inaczej ten sam wynik trafiłby do historii drugi raz.
-	muOst    sync.Mutex
-	ostatnie map[string]time.Time
+	// last — marker of the last result written to the DB, per key.
+	// On the server field (not local in saveHistory), because a key change must
+	// rewire it, otherwise the same result would reach the history a second time.
+	lastMu sync.Mutex
+	last   map[string]time.Time
 
 	mu    sync.RWMutex
 	cfg   *config.Config
-	stamp string // rozmiar+mtime pliku, do wykrycia edycji z zewnątrz
+	stamp string // size+mtime of the file, to detect an external edit
 
-	// Stan pliku: błąd (nie da się wczytać → panel działa na poprzedniej
-	// konfiguracji) i ostrzeżenia (wczytał się, ale coś w nim podejrzane).
-	// Chronione przez mu.
-	błądPliku   *config.BłądPliku
-	ostrzeżenia []config.Ostrzeżenie
-	źródłoCfg   string // "" | "poprzednia" | "historia" | "pusta" — skąd config przy błędzie
-	ostatniBłąd string // do logowania każdego błędu raz, nie co tick watch()
+	// File state: an error (cannot be loaded → the panel runs on the previous
+	// configuration) and warnings (it loaded, but something in it is suspicious).
+	// Protected by mu.
+	fileErr   *config.FileError
+	warnings  []config.Warning
+	cfgSource string // "" | "poprzednia" | "historia" | "pusta" — where the config comes from on error
+	lastErr   string // for logging each error once, not on every watch() tick
 
-	// drugi nadajnik SSE: zmiany wyglądu. Osobny od health.Monitor, bo tamten
-	// strumień jest nietypowany (data: bez event:) i rysuj() by się na tym
-	// przewrócił.
-	muWygląd  sync.Mutex
-	subWygląd map[chan struct{}]struct{}
+	// the second SSE sender: appearance changes. Separate from health.Monitor, because that
+	// stream is untyped (data: without event:) and draw() would trip over it.
+	appearanceMu   sync.Mutex
+	appearanceSubs map[chan struct{}]struct{}
 
-	// tanio liczony licznik kandydatów z Dockera — /api/info woła się przy
-	// każdym otwarciu panelu, a gniazdo nie musi tego oglądać za każdym razem
+	// a cheaply computed counter of Docker candidates — /api/info is called on every
+	// panel open, and the socket does not need to look at that every time
 	muDocker    sync.Mutex
-	dockerIle   int
-	dockerKiedy time.Time
+	dockerCount int
+	dockerAt    time.Time
 }
 
-// Opcje zbiera to, co nie jest ścieżką do configu.
-type Opcje struct {
-	IconsZip      string   // opcjonalny komplet ikon offline
-	CacheDir      string   // cache ikon pobranych z CDN
-	BackgroundDir string   // katalog wgranych tapet (pusty = funkcja wyłączona)
-	Webhook       string   // adres webhooka powiadomień (pusty = wyłączone)
-	PrógAwarii    int      // ile nieudanych sprawdzeń z rzędu zanim powiadomimy
-	DockerSock    string   // gniazdo Dockera do podpowiadania usług (pusty = domyślne)
-	TrustedProxy  []string // CIDR-y proxy, którym wolno mówić X-Forwarded-*
-	MetricsAllow  []string // CIDR-y, z których /metrics odpowiada bez tokenu (domyślnie: żadne)
+// Options gathers what is not the path to the config.
+type Options struct {
+	IconsZip      string   // optional full offline icon set
+	CacheDir      string   // cache of icons fetched from the CDN
+	BackgroundDir string   // directory of uploaded wallpapers (empty = feature disabled)
+	Webhook       string   // notification webhook address (empty = disabled)
+	FailThreshold int      // how many failed checks in a row before we notify
+	DockerSock    string   // Docker socket for suggesting services (empty = default)
+	TrustedProxy  []string // CIDRs of proxies allowed to say X-Forwarded-*
+	MetricsAllow  []string // CIDRs from which /metrics responds without a token (default: none)
 
-	// WebhookZeŚrodowiska — adres przyszedł z flagi albo ze zmiennej, więc
-	// panel go nie nadpisze. Deploy ma wygrywać z klikaniem: inaczej restart
-	// kontenera po cichu cofałby zmianę zrobioną w UI.
-	WebhookZeŚrodowiska bool
-	// WebhookFormat — format wiadomości podany flagą/zmienną; pusty = z bazy.
-	WebhookFormat              string
-	WebhookFormatZeŚrodowiska bool
-	// PrógZFlagi — --fail-threshold podany jawnie w linii poleceń.
-	PrógZFlagi bool
-	// Instancja — opcje startu do pokazania w panelu, wyłącznie do odczytu.
-	Instancja []OpisOpcji
+	// WebhookFromEnv — the address came from a flag or a variable, so the
+	// panel will not overwrite it. The deploy should win over clicking: otherwise a restart of
+	// the container would silently undo a change made in the UI.
+	WebhookFromEnv bool
+	// WebhookFormat — message format given by a flag/variable; empty = from the DB.
+	WebhookFormat        string
+	WebhookFormatFromEnv bool
+	// ThresholdFromFlag — --fail-threshold given explicitly on the command line.
+	ThresholdFromFlag bool
+	// Instance — start-up options to show in the panel, read-only.
+	Instance []OptionInfo
 }
 
-// OpisOpcji — jedna opcja instancji na potrzeby zakładki „Instancja".
+// OptionInfo — one instance option for the needs of the "Instance" tab.
 //
-// ! Tu trafia wyłącznie to, czego ujawnienie jest bezpieczne. Webhook, choć
-// też pochodzi z flagi, tu nie wchodzi — od niego jest /api/notify, które go
-// maskuje.
-type OpisOpcji struct {
-	Klucz   string `json:"klucz"`
-	Wartość string `json:"wartosc"`
-	Źródło  string `json:"zrodlo"` // flaga | srodowisko | domyslna
+// ! Only what is safe to reveal lands here. The webhook, although
+// it also comes from a flag, does not go in here — /api/notify is for it, and it
+// masks it.
+type OptionInfo struct {
+	Key    string `json:"klucz"`
+	Value  string `json:"wartosc"`
+	Source string `json:"zrodlo"` // flag | srodowisko | domyslna
 }
 
-func New(path string, st *store.Store, o Opcje) (*Server, error) {
+func New(path string, st *store.Store, o Options) (*Server, error) {
 	tmpl, err := template.ParseFS(files, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	if err := UstawZaufaneProxy(o.TrustedProxy); err != nil {
+	if err := SetTrustedProxy(o.TrustedProxy); err != nil {
 		return nil, err
 	}
 	s := &Server{
-		path: path, mon: health.New(), tmpl: tmpl, st: st,
-		lim: nowyLimiter(), ikony: NowyKatalog(o.IconsZip, o.CacheDir),
-		tła:    NowyKatalogTeł(o.BackgroundDir),
-		powiad: notify.Nowy(o.Webhook, o.PrógAwarii),
-		docker: dockerdisc.Nowy(o.DockerSock),
+		path: path, monitor: health.New(), tmpl: tmpl, st: st,
+		lim: newLimiter(), icons: NewCatalog(o.IconsZip, o.CacheDir),
+		backgrounds: NewBackgroundStore(o.BackgroundDir),
+		notifier:    notify.New(o.Webhook, o.FailThreshold),
+		docker:      dockerdisc.New(o.DockerSock),
 
-		webhookZeŚrodowiska: o.WebhookZeŚrodowiska,
-		formatZeŚrodowiska:  o.WebhookFormatZeŚrodowiska && o.WebhookFormat != "",
-		prógZFlagi:          o.PrógZFlagi,
-		instancja:           o.Instancja,
+		webhookFromEnv:    o.WebhookFromEnv,
+		formatFromEnv:     o.WebhookFormatFromEnv && o.WebhookFormat != "",
+		thresholdFromFlag: o.ThresholdFromFlag,
+		instance:          o.Instance,
 
-		klientProxy: klientIkonZewnętrznych(),
-		subWygląd:   map[chan struct{}]struct{}{},
-		ostatnie:    map[string]time.Time{},
+		proxyClient:    externalIconClient(),
+		appearanceSubs: map[chan struct{}]struct{}{},
+		last:           map[string]time.Time{},
 
-		limTokenów:     nowyLimiterZProgiem(progBłędnychTokenów),
-		logiTokenów:    &tłumikLogów{okres: time.Minute},
-		użycieTokenów:  map[int64]time.Time{},
-		dostępnościTTL: 30 * time.Second,
+		tokenLimiter:    newLimiterWithThreshold(badTokenThreshold),
+		tokenLogGate:    &logGate{period: time.Minute},
+		tokenUsage:      map[int64]time.Time{},
+		availabilityTTL: 30 * time.Second,
 	}
-	if err := s.ustawMetrykiAllow(o.MetricsAllow); err != nil {
+	if err := s.setMetricsAllow(o.MetricsAllow); err != nil {
 		return nil, err
 	}
 
-	// Adres z bazy podnosimy tylko wtedy, gdy środowisko nic nie narzuciło —
-	// precedencja musi być ta sama tu i w handleNotifyPut, inaczej panel
-	// pokazywałby jedno, a monitor używał drugiego.
-	if !o.WebhookZeŚrodowiska {
-		adres, err := st.Ustawienie(context.Background(), "notify.webhook")
+	// We lift the address from the DB only when the environment imposed nothing —
+	// the precedence must be the same here and in handleNotifyPut, otherwise the panel
+	// would show one thing and the monitor use another.
+	if !o.WebhookFromEnv {
+		address, err := st.Setting(context.Background(), "notify.webhook")
 		if err != nil {
-			return nil, fmt.Errorf("czytam webhook z bazy: %w", err)
+			return nil, fmt.Errorf("reading webhook from DB: %w", err)
 		}
-		if adres != "" {
-			s.powiad.UstawWebhook(adres)
+		if address != "" {
+			s.notifier.SetWebhook(address)
 		}
 	}
 
-	// Format: to samo pierwszeństwo — środowisko, potem baza, potem discord.
-	// Nieznany format z bazy (np. z nowszej wersji) nie może wyłączyć alertów,
-	// więc UstawFormat zamienia go na domyślny.
-	if s.formatZeŚrodowiska {
-		s.powiad.UstawFormat(notify.Format(o.WebhookFormat))
-	} else if f, err := st.Ustawienie(context.Background(), "notify.format"); err != nil {
-		return nil, fmt.Errorf("czytam format webhooka z bazy: %w", err)
+	// Format: the same precedence — environment, then DB, then discord.
+	// An unknown format from the DB (e.g. from a newer version) must not disable alerts,
+	// so SetFormat turns it into the default.
+	if s.formatFromEnv {
+		s.notifier.SetFormat(notify.Format(o.WebhookFormat))
+	} else if f, err := st.Setting(context.Background(), "notify.format"); err != nil {
+		return nil, fmt.Errorf("reading webhook format from DB: %w", err)
 	} else if f != "" {
-		s.powiad.UstawFormat(notify.Format(f))
+		s.notifier.SetFormat(notify.Format(f))
 	}
 	return s, nil
 }
 
-// ── baner stanu pliku ────────────────────────────────────────────────────────
+// ── file state banner ────────────────────────────────────────────────────────
 
-// banerAPI — to, co karta pokazuje nad listą usług: błąd pliku (z numerem
-// linii) i/lub ostrzeżenia. Teksty gotowe, w języku żądania.
-type banerAPI struct {
-	Stan        string   `json:"state"` // ok | error | warnings
-	Tytuł       string   `json:"title"`
-	Błąd        string   `json:"error"`
-	Ostrzeżenia []string `json:"warnings"`
+// bannerAPI — what the card shows above the list of services: a file error (with the
+// line number) and/or warnings. Texts ready, in the language of the request.
+type bannerAPI struct {
+	State    string   `json:"state"` // ok | error | warnings
+	Title    string   `json:"title"`
+	Error    string   `json:"error"`
+	Warnings []string `json:"warnings"`
 }
 
-func (s *Server) banerInstancji(l i18n.Lang) banerAPI {
+func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
 	s.mu.RLock()
-	błąd := s.błądPliku
-	ostrz := append([]config.Ostrzeżenie(nil), s.ostrzeżenia...)
-	skąd := s.źródłoCfg
+	err := s.fileErr
+	warns := append([]config.Warning(nil), s.warnings...)
+	source := s.cfgSource
 	s.mu.RUnlock()
 
-	b := banerAPI{Stan: "ok", Ostrzeżenia: []string{}}
-	if błąd != nil {
-		// ostrzeżenia dotyczą POPRZEDNIEJ wersji pliku (numery linii się
-		// rozjechały) — przy błędzie nie pokazujemy ich obok nowego
-		ostrz = nil
+	b := bannerAPI{State: "ok", Warnings: []string{}}
+	if err != nil {
+		// warnings concern the PREVIOUS version of the file (line numbers have
+		// drifted) — on error we do not show them next to the new one
+		warns = nil
 	}
-	for _, o := range ostrz {
-		b.Ostrzeżenia = append(b.Ostrzeżenia, opisOstrzeżenia(l, o))
+	for _, o := range warns {
+		b.Warnings = append(b.Warnings, warningDescription(l, o))
 	}
-	if len(b.Ostrzeżenia) > 0 {
-		b.Stan = "warnings"
-		b.Tytuł = i18n.T(l, "baner_ostrz_tytul")
+	if len(b.Warnings) > 0 {
+		b.State = "warnings"
+		b.Title = i18n.T(l, "baner_ostrz_tytul")
 	}
-	if błąd != nil {
-		b.Stan = "error"
-		klucz := "baner_blad_poprzednia"
-		switch skąd {
+	if err != nil {
+		b.State = "error"
+		key := "baner_blad_poprzednia"
+		switch source {
 		case "historia":
-			klucz = "baner_blad_historia"
+			key = "baner_blad_historia"
 		case "pusta":
-			klucz = "baner_blad_pusta"
+			key = "baner_blad_pusta"
 		}
-		b.Tytuł = i18n.T(l, klucz)
+		b.Title = i18n.T(l, key)
 		switch {
-		case błąd.Linia > 0 && błąd.Kolumna > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_pozycja"), błąd.Linia, błąd.Kolumna, błąd.Komunikat)
-		case błąd.Linia > 0:
-			b.Błąd = fmt.Sprintf(i18n.T(l, "baner_linia"), błąd.Linia, błąd.Komunikat)
+		case err.Line > 0 && err.Column > 0:
+			b.Error = fmt.Sprintf(i18n.T(l, "baner_pozycja"), err.Line, err.Column, err.Message)
+		case err.Line > 0:
+			b.Error = fmt.Sprintf(i18n.T(l, "baner_linia"), err.Line, err.Message)
 		default:
-			b.Błąd = błąd.Komunikat
+			b.Error = err.Message
 		}
 	}
 	return b
 }
 
-func opisOstrzeżenia(l i18n.Lang, o config.Ostrzeżenie) string {
-	if o.Rodzaj == config.RodzajAdres {
-		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Usługa, o.Grupa, o.Adres)
+func warningDescription(l i18n.Lang, o config.Warning) string {
+	if o.Kind == config.KindAddress {
+		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Service, o.Group, o.Address)
 	}
-	gdzie := o.Ścieżka
-	if gdzie == "" {
-		gdzie = i18n.T(l, "baner_poziom_glowny")
+	where := o.Path
+	if where == "" {
+		where = i18n.T(l, "baner_poziom_glowny")
 	}
-	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Klucz, gdzie)
-	if o.Sugestia != "" {
-		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Sugestia)
+	t := fmt.Sprintf(i18n.T(l, "baner_ostrz_klucz"), o.Key, where)
+	if o.Suggestion != "" {
+		t += " " + fmt.Sprintf(i18n.T(l, "baner_ostrz_sugestia"), o.Suggestion)
 	}
-	if o.Linia > 0 {
-		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Linia) + ": " + t
+	if o.Line > 0 {
+		t = fmt.Sprintf(i18n.T(l, "baner_ostrz_linia"), o.Line) + ": " + t
 	}
 	return t
 }
 
-// ── rozgłaszanie zmiany wyglądu ──────────────────────────────────────────────
+// ── broadcasting an appearance change ────────────────────────────────────────
 
-func (s *Server) subskrybujWygląd() (<-chan struct{}, func()) {
+func (s *Server) subscribeAppearance() (<-chan struct{}, func()) {
 	c := make(chan struct{}, 1)
-	s.muWygląd.Lock()
-	s.subWygląd[c] = struct{}{}
-	s.muWygląd.Unlock()
+	s.appearanceMu.Lock()
+	s.appearanceSubs[c] = struct{}{}
+	s.appearanceMu.Unlock()
 	return c, func() {
-		s.muWygląd.Lock()
-		delete(s.subWygląd, c)
-		s.muWygląd.Unlock()
+		s.appearanceMu.Lock()
+		delete(s.appearanceSubs, c)
+		s.appearanceMu.Unlock()
 	}
 }
 
-// rozgłośWygląd budzi otwarte karty. Wołany z reload(), a NIE z zEdycją —
-// dzięki temu docierają też zmiany pliku zrobione z zewnątrz (git pull,
-// Ansible), które dziś nie budzą żadnego subskrybenta.
-func (s *Server) rozgłośWygląd() {
-	s.muWygląd.Lock()
-	subs := make([]chan struct{}, 0, len(s.subWygląd))
-	for c := range s.subWygląd {
+// broadcastAppearance wakes the open cards. Called from reload(), NOT from withEdit —
+// thanks to that changes made to the file from outside also reach them (git pull,
+// Ansible), which today wake no subscriber.
+func (s *Server) broadcastAppearance() {
+	s.appearanceMu.Lock()
+	subs := make([]chan struct{}, 0, len(s.appearanceSubs))
+	for c := range s.appearanceSubs {
 		subs = append(subs, c)
 	}
-	s.muWygląd.Unlock()
+	s.appearanceMu.Unlock()
 	for _, c := range subs {
 		select {
 		case c <- struct{}{}:
-		default: // odbiorca nie nadąża — i tak wyśle pełny stan
+		default: // the receiver cannot keep up — it will send the full state anyway
 		}
 	}
 }
 
-// configBytes czyta plik konfiguracyjny z dysku.
+// configBytes reads the configuration file from disk.
 func configBytes(path string) ([]byte, error) { return os.ReadFile(path) }
 
-// Start wczytuje config, uruchamia sprawdzanie i pilnuje pliku.
+// Start loads the config, starts checking and watches the file.
 func (s *Server) Start(ctx context.Context) error {
 	s.ctx = ctx
-	if err := s.wczytajPoStarcie(ctx); err != nil {
+	if err := s.loadAfterStart(ctx); err != nil {
 		return err
 	}
 	go s.watch(ctx)
-	go s.zapisujHistorię(ctx)
-	go s.sprzątaj(ctx)
+	go s.saveHistory(ctx)
+	go s.cleanup(ctx)
 	go func() {
-		s.ikony.Odśwież(ctx)
-		slog.Info("ikony", "tryb", s.ikony.Tryb(), "dostępnych", s.ikony.Liczba())
+		s.icons.Refresh(ctx)
+		slog.Info("icons", "mode", s.icons.Mode(), "available", s.icons.Count())
 	}()
 	return nil
 }
 
-// zapisujHistorię przepisuje wyniki sprawdzeń do SQLite. Dzięki temu panel wie,
-// co było godzinę temu — żaden lekki panel na rynku tego nie ma.
-func (s *Server) zapisujHistorię(ctx context.Context) {
-	zmiany, odepnij := s.mon.Subscribe()
-	defer odepnij()
+// saveHistory copies the check results to SQLite. Thanks to that the panel knows
+// what it was an hour ago — no lightweight panel on the market has this.
+func (s *Server) saveHistory(ctx context.Context) {
+	changes, unpin := s.monitor.Subscribe()
+	defer unpin()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-zmiany:
-			for klucz, r := range s.mon.Snapshot() {
-				s.muOst.Lock()
-				nowy := !r.At.IsZero() && r.At.After(s.ostatnie[klucz])
-				if nowy {
-					s.ostatnie[klucz] = r.At
+		case <-changes:
+			for key, r := range s.monitor.Snapshot() {
+				s.lastMu.Lock()
+				new := !r.At.IsZero() && r.At.After(s.last[key])
+				if new {
+					s.last[key] = r.At
 				}
-				s.muOst.Unlock()
-				if !nowy {
+				s.lastMu.Unlock()
+				if !new {
 					continue
 				}
-				err := s.st.ZapiszWynik(ctx, store.Wynik{
-					Klucz: klucz, Stan: string(r.State), Kod: r.Code,
-					MS: r.MS, Błąd: r.Err, Kiedy: r.At,
+				err := s.st.SaveResult(ctx, store.Result{
+					Key: key, State: string(r.State), Code: r.Code,
+					MS: r.MS, Err: r.Err, At: r.At,
 				})
 				if err != nil {
-					slog.Debug("zapis historii", "err", err)
+					slog.Debug("history write", "err", err)
 				}
-				s.powiadom(ctx, klucz, r)
+				s.notify(ctx, key, r)
 			}
 		}
 	}
 }
 
-// migrujKlucze przenosi wszystko, co jest zindeksowane kluczem usługi
-// (grupa/nazwa), po zmianie nazwy albo przeniesieniu do innej grupy: historię
-// w SQLite, stan monitora i stan powiadamiacza. Wołane po udanym zapisie YAML
-// i PRZED reload() — reload wyrzuca stan kluczy, których nie zna.
+// migrateKeys moves everything indexed by the service key
+// (group/name), after a rename or a move to another group: the history
+// in SQLite, the monitor state and the notifier state. Called after a successful YAML save
+// and BEFORE reload() — reload throws away the state of keys it does not know.
 //
-// ! Błąd migracji bazy jest tylko logowany: YAML już zapisany jest źródłem
-// prawdy i nie wolno go cofać dla wykresu. Najgorszy skutek to pusty pasek.
-func (s *Server) migrujKlucze(ctx context.Context, pary map[string]string) {
-	if len(pary) == 0 {
+// ! A DB migration error is only logged: the already-saved YAML is the source of
+// truth and must not be rolled back for a chart. The worst outcome is an empty bar.
+func (s *Server) migrateKeys(ctx context.Context, pairs map[string]string) {
+	if len(pairs) == 0 {
 		return
 	}
-	if err := s.st.PrzenieśKlucze(ctx, pary); err != nil {
-		slog.Error("migracja historii po zmianie klucza", "err", err, "pary", len(pary))
+	if err := s.st.MoveKeys(ctx, pairs); err != nil {
+		slog.Error("history migration after key change", "err", err, "pairs", len(pairs))
 	}
-	s.mon.PrzenieśKlucze(pary)
-	s.powiad.Przenieś(pary)
-	s.muOst.Lock()
-	for stary, nowy := range pary {
-		if stary == nowy {
+	s.monitor.MoveKeys(pairs)
+	s.notifier.Move(pairs)
+	s.lastMu.Lock()
+	for old, new := range pairs {
+		if old == new {
 			continue
 		}
-		if t, ok := s.ostatnie[stary]; ok {
-			s.ostatnie[nowy] = t
-			delete(s.ostatnie, stary)
+		if t, ok := s.last[old]; ok {
+			s.last[new] = t
+			delete(s.last, old)
 		}
 	}
-	s.muOst.Unlock()
+	s.lastMu.Unlock()
 }
 
-// powiadom przekazuje wynik do powiadamiacza razem z opisem usługi.
-func (s *Server) powiadom(ctx context.Context, klucz string, r health.Result) {
-	if !s.powiad.Włączony() {
+// notify passes the result to the notifier together with the service description.
+func (s *Server) notify(ctx context.Context, serviceKey string, r health.Result) {
+	if !s.notifier.Enabled() {
 		return
 	}
-	grupa, nazwa, _ := strings.Cut(klucz, "/")
-	adres := ""
+	group, name, _ := strings.Cut(serviceKey, "/")
+	address := ""
 	s.mu.RLock()
 	if s.cfg != nil {
 		for _, g := range s.cfg.Groups {
 			for _, svc := range g.Services {
-				if key(g.Name, svc.Name) == klucz {
-					adres = svc.URL
+				if key(g.Name, svc.Name) == serviceKey {
+					address = svc.URL
 				}
 			}
 		}
 	}
 	s.mu.RUnlock()
 
-	s.powiad.Obserwuj(ctx, notify.Zdarzenie{
-		Klucz: klucz, Nazwa: nazwa, Grupa: grupa, URL: adres,
-		Stan: string(r.State), Kod: r.Code, Błąd: r.Err, MS: r.MS, Kiedy: r.At,
+	s.notifier.Observe(ctx, notify.Event{
+		Key: serviceKey, Name: name, Group: group, URL: address,
+		State: string(r.State), Code: r.Code, Err: r.Err, MS: r.MS, At: r.At,
 	})
 }
 
-// sprzątaj usuwa wygasłe sesje i historię starszą niż 30 dni.
-func (s *Server) sprzątaj(ctx context.Context) {
+// cleanup removes expired sessions and history older than 30 days.
+func (s *Server) cleanup(ctx context.Context) {
 	t := time.NewTicker(6 * time.Hour)
 	defer t.Stop()
 	for {
-		_ = s.st.SprzątnijSesje(ctx)
-		if n, err := s.st.Przytnij(ctx, 30*24*time.Hour); err == nil && n > 0 {
-			slog.Info("historia przycięta", "usunięto", n)
+		_ = s.st.CleanupSessions(ctx)
+		if n, err := s.st.Prune(ctx, 30*24*time.Hour); err == nil && n > 0 {
+			slog.Info("history pruned", "removed", n)
 		}
-		// jedyne miejsce, gdzie panel sam kasuje plik z dysku — i tylko taki,
-		// którego nikt nie używa, jest starszy niż 30 dni i wypycha katalog
-		// poza limit
-		s.tła.SprzątnijStare(s.wyglądInstancji().Obraz)
+		// the only place where the panel itself deletes a file from disk — and only one
+		// that nobody uses, is older than 30 days and pushes the directory
+		// over the limit
+		s.backgrounds.SweepStale(s.instanceAppearance().Image)
 		select {
 		case <-ctx.Done():
 			return
@@ -438,107 +437,107 @@ func (s *Server) sprzątaj(ctx context.Context) {
 }
 
 func (s *Server) Close() {
-	s.mon.Close()
-	s.tła.Zamknij()
+	s.monitor.Close()
+	s.backgrounds.Close()
 }
 
-// wczytajPoStarcie wczytuje config przy starcie, ale nie umiera na złym pliku.
+// loadAfterStart loads the config at start-up, but does not die on a bad file.
 //
-// ! Wcześniej błąd w YAML-u kończył proces, a w Dockerze z restart: always to
-// pętla restartów bez żadnej strony, na której dałoby się przeczytać dlaczego.
-// Teraz panel wstaje, a baner pokazuje błąd z numerem linii. Zastępczy config to
-// najnowsza wersja z historii w SQLite, która się parsuje; bez niej — pusty.
-// Pliku na dysku nie ruszamy: to właśnie jego człowiek poprawia.
-func (s *Server) wczytajPoStarcie(ctx context.Context) error {
+// ! Previously an error in the YAML ended the process, and in Docker with restart: always that is
+// a restart loop with no page where one could read why.
+// Now the panel comes up, and the banner shows the error with a line number. The substitute config is
+// the newest version from the SQLite history that parses; without it — an empty one.
+// We do not touch the file on disk: that is the very thing the human is fixing.
+func (s *Server) loadAfterStart(ctx context.Context) error {
 	if err := s.reload(ctx); err == nil {
 		return nil
 	}
-	cfg, skąd := s.ostatniaDobraZHistorii(ctx)
+	cfg, source := s.lastGoodFromHistory(ctx)
 	s.mu.Lock()
 	s.cfg = cfg
-	s.źródłoCfg = skąd
+	s.cfgSource = source
 	s.mu.Unlock()
-	s.zastosuj(ctx, cfg)
-	slog.Warn("start mimo błędu w configu", "zastępczy", skąd)
+	s.apply(ctx, cfg)
+	slog.Warn("starting despite config error", "fallback", source)
 	return nil
 }
 
-func (s *Server) ostatniaDobraZHistorii(ctx context.Context) (*config.Config, string) {
-	if wersje, err := s.st.Wersje(ctx, 20); err == nil {
-		for _, w := range wersje {
-			pełna, err := s.st.Wersja(ctx, w.ID)
+func (s *Server) lastGoodFromHistory(ctx context.Context) (*config.Config, string) {
+	if versions, err := s.st.Versions(ctx, 20); err == nil {
+		for _, w := range versions {
+			full, err := s.st.Version(ctx, w.ID)
 			if err != nil {
 				continue
 			}
-			if cfg, err := config.Load([]byte(pełna.Treść)); err == nil {
+			if cfg, err := config.Load([]byte(full.Content)); err == nil {
 				return cfg, "historia"
 			}
 		}
 	}
-	puste, _ := config.Load([]byte("groups: []\n"))
-	return puste, "pusta"
+	empty, _ := config.Load([]byte("groups: []\n"))
+	return empty, "pusta"
 }
 
 func (s *Server) reload(ctx context.Context) error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
-	// ! stempel PRZED odczytem: plik zmieniony między odczytem a stat() dałby
-	// stempel nowszy niż wczytana treść i zmiana zostałaby zgubiona na zawsze
+	// ! stamp BEFORE the read: a file changed between the read and stat() would give a
+	// stamp newer than the loaded content and the change would be lost for good
 	stamp := s.stampOf()
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return s.configZepsuty(stamp, config.BłądPliku{Komunikat: "read config: " + err.Error()}, err)
+		return s.brokenConfig(stamp, config.FileError{Message: "read config: " + err.Error()}, err)
 	}
 	cfg, err := config.Load(raw)
 	if err != nil {
-		return s.configZepsuty(stamp, config.RozbierzBłąd(err), err)
+		return s.brokenConfig(stamp, config.ParseFileError(err), err)
 	}
 
-	ostrzeżenia := append(config.Ostrzeżenia(raw), config.OstrzeżeniaAdresów(cfg)...)
-	for _, o := range ostrzeżenia {
-		slog.Warn("config: podejrzane miejsce", "rodzaj", o.Rodzaj, "linia", o.Linia,
-			"klucz", o.Klucz, "ścieżka", o.Ścieżka, "usługa", o.Usługa)
+	warnings := append(config.Warnings(raw), config.AddressWarnings(cfg)...)
+	for _, o := range warnings {
+		slog.Warn("config: suspicious spot", "kind", o.Kind, "line", o.Line,
+			"key", o.Key, "path", o.Path, "service", o.Service)
 	}
 
 	s.mu.Lock()
 	s.cfg = cfg
 	s.stamp = stamp
-	s.błądPliku = nil
-	s.ostrzeżenia = ostrzeżenia
-	s.źródłoCfg = ""
-	s.ostatniBłąd = ""
+	s.fileErr = nil
+	s.warnings = warnings
+	s.cfgSource = ""
+	s.lastErr = ""
 	s.mu.Unlock()
 
-	s.zastosuj(ctx, cfg)
+	s.apply(ctx, cfg)
 	return nil
 }
 
-// configZepsuty zapamiętuje błąd pliku. Panel zostaje przy poprzedniej
-// konfiguracji, a stempel jest ustawiany MIMO błędu — dzięki temu watch() nie
-// próbuje w kółko co 2 s tego samego pliku, tylko czeka na kolejną zmianę.
-func (s *Server) configZepsuty(stamp string, b config.BłądPliku, err error) error {
-	opis := fmt.Sprintf("%d:%d:%s", b.Linia, b.Kolumna, b.Komunikat)
+// brokenConfig remembers the file error. The panel stays on the previous
+// configuration, and the stamp is set DESPITE the error — thanks to that watch() does not
+// retry the same file every 2 s, but waits for the next change.
+func (s *Server) brokenConfig(stamp string, b config.FileError, err error) error {
+	description := fmt.Sprintf("%d:%d:%s", b.Line, b.Column, b.Message)
 	s.mu.Lock()
 	s.stamp = stamp
-	nowy := opis != s.ostatniBłąd
-	s.ostatniBłąd = opis
-	s.błądPliku = &b
+	new := description != s.lastErr
+	s.lastErr = description
+	s.fileErr = &b
 	s.mu.Unlock()
-	if nowy { // każdy odrębny błąd raz
-		slog.Error("config niepoprawny — panel zostaje przy poprzedniej konfiguracji",
-			"linia", b.Linia, "kolumna", b.Kolumna, "err", b.Komunikat)
+	if new { // each distinct error once
+		slog.Error("config invalid — panel keeps the previous configuration",
+			"line", b.Line, "column", b.Column, "err", b.Message)
 	}
-	s.rozgłośWygląd()
+	s.broadcastAppearance()
 	return err
 }
 
-// zastosuj uruchamia monitor, powiadamiacz i karty na podanym configu.
-func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
-	// ! Próg musi wjechać tutaj, nie tylko przy zapisie z panelu. Bez tego
-	// ustawienie notify.threshold w pliku i restart cicho przywracały wartość
-	// domyślną — a w tym projekcie plik jest źródłem prawdy.
-	if !s.prógZFlagi {
-		s.powiad.UstawPróg(cfg.Notify.Threshold)
+// apply starts the monitor, the notifier and the cards on the given config.
+func (s *Server) apply(ctx context.Context, cfg *config.Config) {
+	// ! The threshold must get in here, not only on a save from the panel. Without that
+	// setting notify.threshold in the file and restarting quietly restored the
+	// default value — and in this project the file is the source of truth.
+	if !s.thresholdFromFlag {
+		s.notifier.SetThreshold(cfg.Notify.Threshold)
 	}
 
 	targets := make([]health.Target, 0, 16)
@@ -562,18 +561,18 @@ func (s *Server) zastosuj(ctx context.Context, cfg *config.Config) {
 		}
 	}
 
-	s.mon.SetTargets(ctx, targets)
-	żywe := make(map[string]bool, len(targets))
+	s.monitor.SetTargets(ctx, targets)
+	live := make(map[string]bool, len(targets))
 	for _, t := range targets {
-		żywe[t.Key] = true
+		live[t.Key] = true
 	}
-	s.powiad.Zapomnij(żywe)
-	s.rozgłośWygląd()
-	slog.Info("config wczytany", "usług", len(targets), "grup", len(cfg.Groups))
+	s.notifier.Forget(live)
+	s.broadcastAppearance()
+	slog.Info("config loaded", "services", len(targets), "groups", len(cfg.Groups))
 }
 
-// watch reaguje na ręczną edycję pliku — plik jest źródłem prawdy, więc panel
-// ma się do niego dostosować, a nie odwrotnie.
+// watch reacts to a manual edit of the file — the file is the source of truth, so the panel
+// must adapt to it, not the other way round.
 func (s *Server) watch(ctx context.Context) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
@@ -582,26 +581,26 @@ func (s *Server) watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.sprawdźZmianęPliku(ctx)
+			s.checkFileChange(ctx)
 		}
 	}
 }
 
-// sprawdźZmianęPliku przeładowuje config, jeśli plik zmienił się na dysku.
+// checkFileChange reloads the config if the file changed on disk.
 //
-// ! Pod s.edycja: zapis z panelu trzyma ten mutex od Save aż po reload(), więc
-// watch nigdy nie przeładuje w połowie zapisu (między Save a historią/gitem
-// stempel jest jeszcze stary). Po wyjściu z zapisu stempel już się zgadza i
-// watch nie robi nic.
-func (s *Server) sprawdźZmianęPliku(ctx context.Context) {
-	s.edycja.Lock()
-	defer s.edycja.Unlock()
+// ! Under s.edit: a save from the panel holds this mutex from Save all the way to reload(), so
+// watch never reloads in the middle of a save (between Save and history/git
+// the stamp is still old). After leaving the save the stamp already matches and
+// watch does nothing.
+func (s *Server) checkFileChange(ctx context.Context) {
+	s.edit.Lock()
+	defer s.edit.Unlock()
 	s.mu.RLock()
-	stary := s.stamp
+	old := s.stamp
 	s.mu.RUnlock()
-	if nowy := s.stampOf(); nowy != "" && nowy != stary {
-		slog.Info("config zmieniony na dysku, przeładowuję")
-		// błąd loguje i pokazuje reload() — raz na odrębny błąd
+	if new := s.stampOf(); new != "" && new != old {
+		slog.Info("config changed on disk, reloading")
+		// the error is logged and shown by reload() — once per distinct error
 		_ = s.reload(ctx)
 	}
 }
@@ -617,54 +616,54 @@ func (s *Server) stampOf() string {
 func key(group, service string) string { return group + "/" + service }
 
 func (s *Server) Handler() http.Handler {
-	// trasy za logowaniem
-	chronione := http.NewServeMux()
-	chronione.HandleFunc("GET /{$}", s.handleIndex)
-	chronione.HandleFunc("GET /api/status", s.handleStatus)
-	chronione.HandleFunc("GET /api/history", s.handleHistory)
-	chronione.HandleFunc("GET /metrics", s.handleMetrics)
-	chronione.HandleFunc("GET /api/tokens", s.handleTokensList)
-	chronione.HandleFunc("POST /api/tokens", s.handleTokenCreate)
-	chronione.HandleFunc("DELETE /api/tokens/{id}", s.handleTokenDelete)
-	chronione.HandleFunc("GET /api/service", s.handleService)
-	chronione.HandleFunc("POST /api/check", s.handleCheckNow)
-	chronione.HandleFunc("POST /api/notify/test", s.handleNotifyTest)
-	chronione.HandleFunc("GET /api/notify", s.handleNotifyGet)
-	chronione.HandleFunc("PUT /api/notify", s.handleNotifyPut)
-	chronione.HandleFunc("GET /api/instance", s.handleInstance)
-	chronione.HandleFunc("GET /api/info", s.handleInfo)
-	chronione.HandleFunc("GET /api/discover", s.handleDiscover)
-	chronione.HandleFunc("POST /api/services/bulk", s.handleServicesBulk)
-	chronione.HandleFunc("GET /api/icons", s.handleIcons)
-	chronione.HandleFunc("GET /api/config", s.handleConfigGet)
-	chronione.HandleFunc("PUT /api/config", s.handleConfigPut)
-	chronione.HandleFunc("POST /api/services", s.handleServiceCreate)
-	chronione.HandleFunc("PATCH /api/services", s.handleServiceUpdate)
-	chronione.HandleFunc("DELETE /api/services", s.handleServiceDelete)
-	chronione.HandleFunc("POST /api/services/move", s.handleServiceMove)
-	chronione.HandleFunc("POST /api/groups/move", s.handleGroupMove)
-	chronione.HandleFunc("PUT /api/title", s.handleTitlePut)
-	chronione.HandleFunc("POST /api/groups", s.handleGroupCreate)
-	chronione.HandleFunc("PATCH /api/groups", s.handleGroupUpdate)
-	chronione.HandleFunc("DELETE /api/groups", s.handleGroupDelete)
-	chronione.HandleFunc("GET /api/versions", s.handleVersionsList)
-	chronione.HandleFunc("GET /api/versions/{id}", s.handleVersionOne)
-	chronione.HandleFunc("POST /api/versions/{id}/restore", s.handleVersionRestore)
-	chronione.HandleFunc("GET /api/users", s.handleUsersList)
-	chronione.HandleFunc("POST /api/users", s.handleUserCreate)
-	chronione.HandleFunc("DELETE /api/users/{id}", s.handleUserDelete)
-	chronione.HandleFunc("POST /api/password", s.handlePasswordChange)
-	chronione.HandleFunc("GET /events", s.handleEvents)
-	chronione.HandleFunc("GET /icon/{name}", s.handleIcon)
-	chronione.HandleFunc("GET /api/appearance", s.handleWyglądGet)
-	chronione.HandleFunc("PUT /api/appearance", s.handleWyglądPut)
-	chronione.HandleFunc("POST /api/background", s.handleTłoUpload)
-	chronione.HandleFunc("GET /api/background", s.handleTłaLista)
-	chronione.HandleFunc("DELETE /api/background/{nazwa}", s.handleTłoUsuń)
-	chronione.HandleFunc("GET /bg/{nazwa}", s.handleBg)
+	// routes behind login
+	protected := http.NewServeMux()
+	protected.HandleFunc("GET /{$}", s.handleIndex)
+	protected.HandleFunc("GET /api/status", s.handleStatus)
+	protected.HandleFunc("GET /api/history", s.handleHistory)
+	protected.HandleFunc("GET /metrics", s.handleMetrics)
+	protected.HandleFunc("GET /api/tokens", s.handleTokensList)
+	protected.HandleFunc("POST /api/tokens", s.handleTokenCreate)
+	protected.HandleFunc("DELETE /api/tokens/{id}", s.handleTokenDelete)
+	protected.HandleFunc("GET /api/service", s.handleService)
+	protected.HandleFunc("POST /api/check", s.handleCheckNow)
+	protected.HandleFunc("POST /api/notify/test", s.handleNotifyTest)
+	protected.HandleFunc("GET /api/notify", s.handleNotifyGet)
+	protected.HandleFunc("PUT /api/notify", s.handleNotifyPut)
+	protected.HandleFunc("GET /api/instance", s.handleInstance)
+	protected.HandleFunc("GET /api/info", s.handleInfo)
+	protected.HandleFunc("GET /api/discover", s.handleDiscover)
+	protected.HandleFunc("POST /api/services/bulk", s.handleServicesBulk)
+	protected.HandleFunc("GET /api/icons", s.handleIcons)
+	protected.HandleFunc("GET /api/config", s.handleConfigGet)
+	protected.HandleFunc("PUT /api/config", s.handleConfigPut)
+	protected.HandleFunc("POST /api/services", s.handleServiceCreate)
+	protected.HandleFunc("PATCH /api/services", s.handleServiceUpdate)
+	protected.HandleFunc("DELETE /api/services", s.handleServiceDelete)
+	protected.HandleFunc("POST /api/services/move", s.handleServiceMove)
+	protected.HandleFunc("POST /api/groups/move", s.handleGroupMove)
+	protected.HandleFunc("PUT /api/title", s.handleTitlePut)
+	protected.HandleFunc("POST /api/groups", s.handleGroupCreate)
+	protected.HandleFunc("PATCH /api/groups", s.handleGroupUpdate)
+	protected.HandleFunc("DELETE /api/groups", s.handleGroupDelete)
+	protected.HandleFunc("GET /api/versions", s.handleVersionsList)
+	protected.HandleFunc("GET /api/versions/{id}", s.handleVersionOne)
+	protected.HandleFunc("POST /api/versions/{id}/restore", s.handleVersionRestore)
+	protected.HandleFunc("GET /api/users", s.handleUsersList)
+	protected.HandleFunc("POST /api/users", s.handleUserCreate)
+	protected.HandleFunc("DELETE /api/users/{id}", s.handleUserDelete)
+	protected.HandleFunc("POST /api/password", s.handlePasswordChange)
+	protected.HandleFunc("GET /events", s.handleEvents)
+	protected.HandleFunc("GET /icon/{name}", s.handleIcon)
+	protected.HandleFunc("GET /api/appearance", s.handleAppearanceGet)
+	protected.HandleFunc("PUT /api/appearance", s.handleAppearancePut)
+	protected.HandleFunc("POST /api/background", s.handleBackgroundUpload)
+	protected.HandleFunc("GET /api/background", s.handleBackgroundList)
+	protected.HandleFunc("DELETE /api/background/{nazwa}", s.handleBackgroundRemove)
+	protected.HandleFunc("GET /bg/{nazwa}", s.handleBg)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", s.wymagajLogowania(chronione))
+	mux.Handle("/", s.requireLogin(protected))
 	mux.HandleFunc("GET /login", s.handleLoginGET)
 	mux.HandleFunc("POST /login", s.handleLoginPOST)
 	mux.HandleFunc("POST /logout", s.handleLogout)
@@ -676,20 +675,20 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.Handle("GET /assets/", http.FileServerFS(files))
-	// wymagajSameOrigin obejmuje CAŁY mux, więc także /login, /setup i /logout
-	return nagłówkiBezpieczeństwa(wymagajSameOrigin(logowanie(mux)))
+	// requireSameOrigin covers the WHOLE mux, so also /login, /setup and /logout
+	return securityHeaders(requireSameOrigin(logging(mux)))
 }
 
-// nagłówkiBezpieczeństwa — CSP bez unsafe-inline dla skryptów zewnętrznych;
-// panel i tak nie ładuje niczego spoza własnego origin.
-func nagłówkiBezpieczeństwa(next http.Handler) http.Handler {
+// securityHeaders — CSP without unsafe-inline for external scripts;
+// the panel does not load anything from outside its own origin anyway.
+func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("X-Frame-Options", "SAMEORIGIN")
-		// ! style-src bez 'unsafe-inline' zostaje — dlatego w szablonie nie ma
-		// ani jednego atrybutu style=, a tło ustawia się przez CSSOM
+		// ! style-src without 'unsafe-inline' stays — that is why the template has not
+		// a single style= attribute, and the background is set through CSSOM
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data:; style-src 'self'; "+
 				"script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'; "+
@@ -698,7 +697,7 @@ func nagłówkiBezpieczeństwa(next http.Handler) http.Handler {
 	})
 }
 
-func logowanie(next http.Handler) http.Handler {
+func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
@@ -708,117 +707,117 @@ func logowanie(next http.Handler) http.Handler {
 	})
 }
 
-type widokUsługi struct {
-	Key      string
-	Group    string
-	Name     string
-	URL      string
-	// Href — to samo co URL, ale tylko gdy wolno go wstawić do atrybutu href
-	// (http/https); pusty dla tcp:// i dla wszystkiego podejrzanego.
+type serviceView struct {
+	Key   string
+	Group string
+	Name  string
+	URL   string
+	// Href — the same as URL, but only when it may be put into an href attribute
+	// (http/https); empty for tcp:// and for anything suspicious.
 	Href     string
 	Host     string
 	IconName string
 	Icon     iconRef
-	Rozmiar  string // "sm" | "md" | "lg" — nigdy puste
+	Size     string // "sm" | "md" | "lg" — never empty
 
 	Description string
 	Tags        []string
-	// TagsJSON — te same tagi jako JSON w atrybucie data-tagi; okno edycji
-	// czyta je stamtąd, więc tag z przecinkiem nie rozpada się na dwa.
+	// TagsJSON — the same tags as JSON in the data-tags attribute; the edit window
+	// reads them from there, so a tag with a comma does not fall apart into two.
 	TagsJSON string
 }
 
-// SzukajTekst — to, co filtr w nagłówku przeszukuje: nazwa, host, opis i tagi.
-func (w widokUsługi) SzukajTekst() string {
+// SearchText — what the filter in the header searches: name, host, description and tags.
+func (w serviceView) SearchText() string {
 	return strings.TrimSpace(strings.Join(append([]string{w.Name, w.Host, w.Description}, w.Tags...), " "))
 }
 
-type widokGrupy struct {
+type groupView struct {
 	Name     string
-	Services []widokUsługi
+	Services []serviceView
 }
 
-// wyglądWidok — zwalidowane wartości do atrybutów data-* w <html>/<body>.
-// Serwer wstrzykuje je do pierwszego malowania, żeby panel nie mrugał
-// domyślnym tłem, zanim JS przeczyta localStorage.
-type wyglądWidok struct {
-	Preset string // allowlista config.PresetyTła
-	Obraz  string // nazwa pliku z /bg/; niepusta wyłącznie przy Preset=="photo"
+// appearanceView — validated values for the data-* attributes in <html>/<body>.
+// The server injects them into the first paint so the panel does not flash the
+// default background before JS reads localStorage.
+type appearanceView struct {
+	Preset string // allowlist config.BackgroundPresets
+	Image  string // file name from /bg/; non-empty only when Preset=="photo"
 	Blur   int    // 0..30
-	Dim    int    // 0..80, krycie warstwy przyciemniającej w procentach
-	Ton    string // "dark" | "light"
-	Widok  string // "grid" | "bento" | "list"
+	Dim    int    // 0..80, opacity of the dimming layer in percent
+	Tone   string // "dark" | "light"
+	View   string // "grid" | "bento" | "list"
 }
 
-// wyglądAPI — kształt wyglądu w JSON (GET /api/appearance, zdarzenie SSE).
-type wyglądAPI struct {
+// appearanceAPI — the shape of the appearance in JSON (GET /api/appearance, SSE event).
+type appearanceAPI struct {
 	Preset string `json:"preset"`
-	Obraz  string `json:"image"`
+	Image  string `json:"image"`
 	Blur   int    `json:"blur"`
 	Dim    int    `json:"dim"`
-	Ton    string `json:"tone"`
-	Widok  string `json:"view"`
+	Tone   string `json:"tone"`
+	View   string `json:"view"`
 }
 
-// wyglądOkna to window.WYGLAD — to samo plus dwie rzeczy, których UI nie ma
-// skąd wziąć: czy wolno zapisać wygląd do pliku i jaki jest limit uploadu.
-type wyglądOkna struct {
-	wyglądAPI
-	Zapis   bool `json:"zapis"`
-	LimitMB int  `json:"limitMB"`
+// appearanceWindow is window.WYGLAD — the same plus two things the UI has no
+// way to get: whether the appearance may be saved to the file and what the upload limit is.
+type appearanceWindow struct {
+	appearanceAPI
+	Writable bool `json:"zapis"`
+	LimitMB  int  `json:"limitMB"`
 }
 
-type widokStrony struct {
-	Title      string
-	Groups     []widokGrupy
-	Stan       template.JS
-	Wersja     string
-	Użytkownik string
-	LiczbaIkon int
+type pageView struct {
+	Title     string
+	Groups    []groupView
+	State     template.JS
+	Version   string
+	User      string
+	IconCount int
 
-	Lang                  string
-	T                     map[string]string
-	TJSON                 template.JS
-	DrugiJezyk            string
-	DrugiJezykNazwa       string
-	DrugiJezykKrotko      string
-	SzukajIkonPlaceholder string
+	Lang                   string
+	T                      map[string]string
+	TJSON                  template.JS
+	SecondLang             string
+	SecondLangName         string
+	SecondLangShort        string
+	SearchIconsPlaceholder string
 
-	Baner      banerAPI
-	Wyglad     wyglądWidok
-	WygladJSON template.JS
-	// MoznaPisac — dziś każdy zalogowany może zapisywać. Pole istnieje po to,
-	// żeby wprowadzenie ról było jedną linią, a nie przeróbką szablonu.
-	MoznaPisac bool
-	TłaLimit   int
+	Banner         bannerAPI
+	Appearance     appearanceView
+	AppearanceJSON template.JS
+	// CanWrite — today every logged-in user may save. The field exists so
+	// that introducing roles is a single line, not a template rework.
+	CanWrite        bool
+	BackgroundLimit int
 }
 
-// ── wygląd instancji ─────────────────────────────────────────────────────────
+// ── instance appearance ──────────────────────────────────────────────────────
 
-// wyglądInstancji zwraca wygląd z pliku, po walidacji. Load już go wyprostował,
-// ale ten kod jest ostatnią bramką przed atrybutem HTML — powtórka kosztuje
-// mikrosekundę, a chroni przed każdą przyszłą ścieżką, która ominie Load.
-func (s *Server) wyglądInstancji() wyglądWidok {
+// instanceAppearance returns the appearance from the file, after validation. Load has already
+// straightened it, but this code is the last gate before an HTML attribute — a repeat costs
+// a microsecond, and protects against every future path that bypasses Load.
+func (s *Server) instanceAppearance() appearanceView {
 	s.mu.RLock()
 	cfg := s.cfg
 	s.mu.RUnlock()
 
-	w := wyglądWidok{Preset: config.DomyślnyPreset, Blur: config.DomyślnyBlur,
-		Dim: config.DomyślnyDim, Ton: config.TonDla(config.DomyślnyPreset),
-		Widok: config.DomyślnyWidok}
+	w := appearanceView{Preset: config.DefaultPreset, Blur: config.DefaultBlur,
+		Dim: config.DefaultDim, Tone: config.ToneFor(config.DefaultPreset),
+		View: config.DefaultView}
 	if cfg == nil {
 		return w
 	}
 	a := cfg.Appearance
-	if config.Dozwolone(a.Background.Preset, config.PresetyTła) {
+	if config.Allowed(a.Background.Preset, config.BackgroundPresets) {
 		w.Preset = a.Background.Preset
-		w.Ton = config.TonDla(w.Preset) // preset niesie ton; jawny tone niżej go nadpisze
+		w.Tone = config.ToneFor(w.Preset) // the preset carries the tone; an explicit tone below overrides it
 	}
-	if config.Dozwolone(a.Background.Tone, config.TonyTła) {
-		w.Ton = a.Background.Tone
+	if config.Allowed(a.Background.Tone, config.BackgroundTones) {
+		w.Tone = a.Background.Tone
 	}
-	if config.Dozwolone(a.View, config.Widoki) {
-		w.Widok = a.View
+	if config.Allowed(a.View, config.Views) {
+		w.View = a.View
 	}
 	if a.Background.Blur >= 0 && a.Background.Blur <= config.MaxBlur {
 		w.Blur = a.Background.Blur
@@ -826,57 +825,57 @@ func (s *Server) wyglądInstancji() wyglądWidok {
 	if a.Background.Dim >= 0 && a.Background.Dim <= config.MaxDim {
 		w.Dim = a.Background.Dim
 	}
-	if w.Preset == config.PresetPhoto && config.NazwaTła.MatchString(a.Background.Image) {
-		w.Obraz = a.Background.Image
+	if w.Preset == config.PresetPhoto && config.BackgroundName.MatchString(a.Background.Image) {
+		w.Image = a.Background.Image
 	}
-	if w.Preset == config.PresetPhoto && w.Obraz == "" {
-		w.Preset = config.DomyślnyPreset // zdjęcie bez pliku to nie jest tło
+	if w.Preset == config.PresetPhoto && w.Image == "" {
+		w.Preset = config.DefaultPreset // a photo without a file is not a background
 	}
-	// ! na końcu, bo preset mógł się wyżej zmienić. Ton wybiera się wyłącznie
-	// przy własnej tapecie — preset niesie jasność, więc i jedyny czytelny ton.
+	// ! at the end, because the preset may have changed above. The tone is chosen only
+	// with one's own wallpaper — the preset carries the brightness, and thus the only readable tone.
 	if w.Preset != config.PresetPhoto {
-		w.Ton = config.TonDla(w.Preset)
+		w.Tone = config.ToneFor(w.Preset)
 	}
 	return w
 }
 
-func (w wyglądWidok) doAPI() wyglądAPI {
-	return wyglądAPI{Preset: w.Preset, Obraz: w.Obraz, Blur: w.Blur, Dim: w.Dim, Ton: w.Ton, Widok: w.Widok}
+func (w appearanceView) toAPI() appearanceAPI {
+	return appearanceAPI{Preset: w.Preset, Image: w.Image, Blur: w.Blur, Dim: w.Dim, Tone: w.Tone, View: w.View}
 }
 
-// wyglądBramy — tło dla /login i /setup. Tapeta zostaje za logowaniem.
-func (s *Server) wyglądBramy() wyglądWidok {
-	w := s.wyglądInstancji()
-	w.Obraz = ""
+// gateAppearance — the background for /login and /setup. The wallpaper stays behind the login.
+func (s *Server) gateAppearance() appearanceView {
+	w := s.instanceAppearance()
+	w.Image = ""
 	if w.Preset == config.PresetPhoto {
-		w.Preset = config.DomyślnyPreset
-		if w.Ton == "light" {
+		w.Preset = config.DefaultPreset
+		if w.Tone == "light" {
 			w.Preset = "dawn"
 		}
 	}
 	return w
 }
 
-// drugi zwraca język, na który przełącza przycisk — mamy dokładnie dwa.
-func drugi(l i18n.Lang) i18n.Lang {
+// second returns the language the button switches to — we have exactly two.
+func second(l i18n.Lang) i18n.Lang {
 	if l == i18n.PL {
 		return i18n.EN
 	}
 	return i18n.PL
 }
 
-// wypełnijJęzyk uzupełnia wszystko, co szablon wie o języku.
-func wypełnijJęzyk(l i18n.Lang) (map[string]string, template.JS, string, string, string) {
-	t := i18n.Mapa(l)
+// fillLang completes everything the template knows about the language.
+func fillLang(l i18n.Lang) (map[string]string, template.JS, string, string, string) {
+	t := i18n.Map(l)
 	b, err := json.Marshal(t)
 	if err != nil {
 		b = []byte("{}")
 	}
-	d := drugi(l)
-	return t, template.JS(b), string(d), d.Nazwa(), d.Krótko()
+	d := second(l)
+	return t, template.JS(b), string(d), d.Name(), d.Short()
 }
 
-// Version ustawiane przy buildzie (-ldflags).
+// Version set at build time (-ldflags).
 var Version = "dev"
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -888,72 +887,72 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lang := i18n.Wybierz(r)
-	dane := widokStrony{Title: cfg.Title, Wersja: Version, LiczbaIkon: s.ikony.Liczba(), Lang: string(lang)}
-	dane.T, dane.TJSON, dane.DrugiJezyk, dane.DrugiJezykNazwa, dane.DrugiJezykKrotko = wypełnijJęzyk(lang)
-	dane.Wyglad = s.wyglądInstancji()
-	dane.Baner = s.banerInstancji(lang)
-	dane.MoznaPisac = true
-	dane.TłaLimit = LimitTłaMB
-	// ! do szablonu idzie JSON ze STRUKTURY po walidacji, nigdy surowe wejście
-	if b, err := json.Marshal(wyglądOkna{wyglądAPI: dane.Wyglad.doAPI(),
-		Zapis: dane.MoznaPisac, LimitMB: dane.TłaLimit}); err == nil {
-		dane.WygladJSON = template.JS(b)
+	lang := i18n.FromRequest(r)
+	data := pageView{Title: cfg.Title, Version: Version, IconCount: s.icons.Count(), Lang: string(lang)}
+	data.T, data.TJSON, data.SecondLang, data.SecondLangName, data.SecondLangShort = fillLang(lang)
+	data.Appearance = s.instanceAppearance()
+	data.Banner = s.instanceBanner(lang)
+	data.CanWrite = true
+	data.BackgroundLimit = BackgroundLimitMB
+	// ! the template gets JSON from the STRUCT after validation, never raw input
+	if b, err := json.Marshal(appearanceWindow{appearanceAPI: data.Appearance.toAPI(),
+		Writable: data.CanWrite, LimitMB: data.BackgroundLimit}); err == nil {
+		data.AppearanceJSON = template.JS(b)
 	} else {
-		dane.WygladJSON = template.JS("{}")
+		data.AppearanceJSON = template.JS("{}")
 	}
-	dane.SzukajIkonPlaceholder = fmt.Sprintf(i18n.T(lang, "szukaj_ikon"), s.ikony.Liczba())
-	if u := UżytkownikZŻądania(r); u != nil {
-		dane.Użytkownik = u.Login
+	data.SearchIconsPlaceholder = fmt.Sprintf(i18n.T(lang, "szukaj_ikon"), s.icons.Count())
+	if u := UserFromRequest(r); u != nil {
+		data.User = u.Login
 	}
-	if dane.Title == "" {
-		dane.Title = "Shy Garlic"
+	if data.Title == "" {
+		data.Title = "Shy Garlic"
 	}
 	for _, g := range cfg.Groups {
-		wg := widokGrupy{Name: g.Name}
+		by := groupView{Name: g.Name}
 		for _, svc := range g.Services {
-			rozmiar := svc.Size
-			if !config.Dozwolone(rozmiar, config.Rozmiary) {
-				rozmiar = config.DomyślnyRozmiar
+			size := svc.Size
+			if !config.Allowed(size, config.Sizes) {
+				size = config.DefaultSize
 			}
-			wg.Services = append(wg.Services, widokUsługi{
+			by.Services = append(by.Services, serviceView{
 				Key:      key(g.Name, svc.Name),
 				Group:    g.Name,
 				Name:     svc.Name,
 				URL:      svc.URL,
-				Href:     hrefZ(svc.URL),
-				Host:     hostZ(svc.URL),
+				Href:     hrefOf(svc.URL),
+				Host:     hostOf(svc.URL),
 				IconName: svc.Icon,
-				Icon:     s.rozwiążIkonę(svc.Icon, svc.Name),
-				Rozmiar:  rozmiar,
+				Icon:     s.resolveIcon(svc.Icon, svc.Name),
+				Size:     size,
 
 				Description: svc.Description,
 				Tags:        []string(svc.Tags),
-				TagsJSON:    tagiJSON(svc.Tags),
+				TagsJSON:    tagsJSON(svc.Tags),
 			})
 		}
-		dane.Groups = append(dane.Groups, wg)
+		data.Groups = append(data.Groups, by)
 	}
 
-	// stan początkowy wstrzyknięty do HTML — bez tego panel mrugałby "unknown"
-	// przez pierwsze pół sekundy po każdym odświeżeniu
-	if b, err := json.Marshal(s.mon.Snapshot()); err == nil {
-		dane.Stan = template.JS(b)
+	// initial state injected into the HTML — without it the panel would flash "unknown"
+	// for the first half second after every refresh
+	if b, err := json.Marshal(s.monitor.Snapshot()); err == nil {
+		data.State = template.JS(b)
 	} else {
-		dane.Stan = template.JS("{}")
+		data.State = template.JS("{}")
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// strona jest dynamiczna (stan usług, język, użytkownik) — cache przeglądarki
-	// potrafiłby pokazać wersję sprzed przełączenia języka
+	// the page is dynamic (service state, language, user) — the browser cache
+	// could show a version from before the language switch
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", dane); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		slog.Error("render", "err", err)
 	}
 }
 
-func tagiJSON(t config.Tagi) string {
-	b, err := json.Marshal(tagiDoJSON(t))
+func tagsJSON(t config.Tags) string {
+	b, err := json.Marshal(tagsToJSON(t))
 	if err != nil {
 		return "[]"
 	}
@@ -962,10 +961,10 @@ func tagiJSON(t config.Tagi) string {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.mon.Snapshot())
+	_ = json.NewEncoder(w).Encode(s.monitor.Snapshot())
 }
 
-// handleEvents to strumień SSE — panel dostaje zmiany od razu, bez odpytywania.
+// handleEvents is the SSE stream — the panel gets changes immediately, without polling.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -977,15 +976,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	zmiany, odepnij := s.mon.Subscribe()
-	defer odepnij()
-	wyglądy, odepnijWygląd := s.subskrybujWygląd()
-	defer odepnijWygląd()
+	changes, unpin := s.monitor.Subscribe()
+	defer unpin()
+	appearances, unpinAppearance := s.subscribeAppearance()
+	defer unpinAppearance()
 
-	// domyślny strumień (bez `event:`) to nadal snapshot zdrowia — nie wolno
-	// go ruszyć, bo rysuj() po drugiej stronie nie sprawdza typu zdarzenia
-	wyślij := func() bool {
-		b, err := json.Marshal(s.mon.Snapshot())
+	// the default stream (without `event:`) is still the health snapshot — it must not
+	// be touched, because draw() on the other side does not check the event type
+	send := func() bool {
+		b, err := json.Marshal(s.monitor.Snapshot())
 		if err != nil {
 			return false
 		}
@@ -995,8 +994,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	wyślijWygląd := func() bool {
-		b, err := json.Marshal(s.wyglądInstancji().doAPI())
+	sendAppearance := func() bool {
+		b, err := json.Marshal(s.instanceAppearance().toAPI())
 		if err != nil {
 			return false
 		}
@@ -1006,10 +1005,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	// układ i tytuł jadą tym samym wybudzeniem co wygląd: zmiana z innej karty
-	// albo z pliku ma dotrzeć do wszystkich otwartych kart
-	wyślijUkład := func() bool {
-		b, err := json.Marshal(s.układInstancji())
+	// layout and title ride the same wake-up as the appearance: a change from another tab
+	// or from the file must reach all open tabs
+	sendLayout := func() bool {
+		b, err := json.Marshal(s.instanceLayout())
 		if err != nil {
 			return false
 		}
@@ -1019,11 +1018,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	// baner pliku jedzie tym samym wybudzeniem — błąd pojawia się i znika na
-	// otwartych kartach bez odświeżania
-	lang := i18n.Wybierz(r)
-	wyślijBaner := func() bool {
-		b, err := json.Marshal(s.banerInstancji(lang))
+	// the file banner rides the same wake-up — an error appears and disappears on
+	// open tabs without a refresh
+	lang := i18n.FromRequest(r)
+	sendBanner := func() bool {
+		b, err := json.Marshal(s.instanceBanner(lang))
 		if err != nil {
 			return false
 		}
@@ -1033,7 +1032,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	if !wyślij() {
+	if !send() {
 		return
 	}
 
@@ -1043,12 +1042,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-zmiany:
-			if !wyślij() {
+		case <-changes:
+			if !send() {
 				return
 			}
-		case <-wyglądy:
-			if !wyślijWygląd() || !wyślijUkład() || !wyślijBaner() {
+		case <-appearances:
+			if !sendAppearance() || !sendLayout() || !sendBanner() {
 				return
 			}
 		case <-keepalive.C:
@@ -1060,48 +1059,48 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// układAPI — tytuł i kolejność grup/usług (same nazwy). Karta porównuje to z
-// własnym DOM-em i przeładowuje się tylko wtedy, gdy się rozjechały.
-type układAPI struct {
-	Tytuł string       `json:"title"`
-	Grupy []układGrupy `json:"groups"`
+// layoutAPI — title and order of groups/services (names only). The card compares it with
+// its own DOM and reloads only when they have drifted apart.
+type layoutAPI struct {
+	Title  string        `json:"title"`
+	Groups []layoutGroup `json:"groups"`
 }
 
-type układGrupy struct {
-	Nazwa  string   `json:"name"`
-	Usługi []string `json:"services"`
+type layoutGroup struct {
+	Name     string   `json:"name"`
+	Services []string `json:"services"`
 }
 
-func (s *Server) układInstancji() układAPI {
+func (s *Server) instanceLayout() layoutAPI {
 	s.mu.RLock()
 	cfg := s.cfg
 	s.mu.RUnlock()
-	u := układAPI{Tytuł: "Shy Garlic", Grupy: []układGrupy{}}
+	u := layoutAPI{Title: "Shy Garlic", Groups: []layoutGroup{}}
 	if cfg == nil {
 		return u
 	}
 	if cfg.Title != "" {
-		u.Tytuł = cfg.Title
+		u.Title = cfg.Title
 	}
 	for _, g := range cfg.Groups {
-		ug := układGrupy{Nazwa: g.Name, Usługi: []string{}}
+		groupLayout := layoutGroup{Name: g.Name, Services: []string{}}
 		for _, svc := range g.Services {
-			ug.Usługi = append(ug.Usługi, svc.Name)
+			groupLayout.Services = append(groupLayout.Services, svc.Name)
 		}
-		u.Grupy = append(u.Grupy, ug)
+		u.Groups = append(u.Groups, groupLayout)
 	}
 	return u
 }
 
-// hrefZ oddaje adres do atrybutu href albo "" — patrz config.AdresKlikalny.
-func hrefZ(raw string) string {
-	if config.AdresKlikalny(raw) {
+// hrefOf returns the address for an href attribute or "" — see config.ClickableAddress.
+func hrefOf(raw string) string {
+	if config.ClickableAddress(raw) {
 		return raw
 	}
 	return ""
 }
 
-func hostZ(raw string) string {
+func hostOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return raw
@@ -1109,7 +1108,7 @@ func hostZ(raw string) string {
 	return u.Host
 }
 
-func pierwszaLitera(s string) string {
+func firstLetter(s string) string {
 	for _, r := range strings.TrimSpace(s) {
 		return strings.ToUpper(string(r))
 	}
