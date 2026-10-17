@@ -32,33 +32,6 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-        # Copies the example config onto the volume - only when there is none.
-        - name: seed-config
-          image: {{ include "shy-garlic.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - sh
-            - -c
-            - |
-              mkdir -p /data/config
-              if [ ! -e /data/config/shygarlic.yaml ]; then
-                cp /seed/shygarlic.yaml /data/config/shygarlic.yaml
-              fi
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              memory: 64Mi
-          volumeMounts:
-            - name: data
-              mountPath: /data
-            - name: seed
-              mountPath: /seed
-              readOnly: true
       containers:
         - name: shy-garlic
           image: {{ include "shy-garlic.image" . }}
@@ -74,6 +47,9 @@ spec:
               value: /data/config/shygarlic.yaml
             - name: SHYG_DATA
               value: /data/shygarlic.db
+            # seeds /data/config on first start; an existing config is never touched
+            - name: SHYG_SEED_CONFIG
+              value: /seed/shygarlic.yaml
             {{- with .Values.trustedProxy }}
             - name: SHYG_TRUSTED_PROXY
               value: {{ . | quote }}
@@ -121,6 +97,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            # the initial config, copied to /data/config by --seed-config on first start
+            - name: seed
+              mountPath: /seed
+              readOnly: true
             # The app and git want a writable $HOME/tmp on a read-only rootfs.
             - name: tmp
               mountPath: /tmp

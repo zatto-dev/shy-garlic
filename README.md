@@ -565,7 +565,7 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | `--addr`, `--config`, `--seed-config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
 | The SQLite database   | webhook address and format, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
@@ -573,6 +573,11 @@ Configuration sits in four layers. The line is not drawn by importance but by
 Every flag has an `SHYG_`-prefixed environment variable (`SHYG_ADDR`,
 `SHYG_CONFIG`, …). Settings → Instance lists all of them together with where
 each value came from: a flag, an environment variable, or the built-in default.
+
+`--seed-config` (`SHYG_SEED_CONFIG`) copies a starting config to `--config`
+on first start, only when there is no config yet — the Helm chart and the
+Kubernetes manifests use it to seed a volume from a ConfigMap. An existing config
+is never overwritten.
 
 ! **The webhook address is not in the file and never will be.** The dashboard
 shows that file and commits it; the URL is a credential.
