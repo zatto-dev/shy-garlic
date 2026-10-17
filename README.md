@@ -300,7 +300,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    command: [serve, -config, /data/shygarlic.yaml, -seed-config, /etc/shygarlic/shygarlic.yaml]
     volumes:
       - shyg-data:/data      # config, accounts, history, icon cache, wallpapers
 volumes:
@@ -320,10 +319,12 @@ docker compose logs shyg | grep setup_token
 Open `http://localhost:8080`.
 
 To keep the config in a directory you manage yourself, for example a git
-repository, bind-mount it instead of using the volume (and drop the `command:`
-line):
+repository, bind-mount the file and point `SHYG_CONFIG` at it, so the panel edits it in
+place:
 
 ```yaml
+    environment:
+      SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
     volumes:
       - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml   # your config, writable
       - shyg-data:/data

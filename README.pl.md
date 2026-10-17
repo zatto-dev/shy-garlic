@@ -299,7 +299,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    command: [serve, -config, /data/shygarlic.yaml, -seed-config, /etc/shygarlic/shygarlic.yaml]
     volumes:
       - shyg-data:/data      # config, konta, historia, cache ikon, tapety
 volumes:
@@ -320,9 +319,12 @@ docker compose logs shyg | grep setup_token
 Wejdź na `http://localhost:8080`.
 
 Żeby trzymać config w katalogu, którym zarządzasz sam, np. w repozytorium gita,
-zamontuj go bind-mountem zamiast wolumenu (i usuń linię `command:`):
+zamontuj plik bind-mountem i wskaż go w `SHYG_CONFIG`, żeby panel edytował go
+na miejscu:
 
 ```yaml
+    environment:
+      SHYG_CONFIG: /etc/shygarlic/shygarlic.yaml
     volumes:
       - ./shygarlic.yaml:/etc/shygarlic/shygarlic.yaml   # Twój config, zapisywalny
       - shyg-data:/data
