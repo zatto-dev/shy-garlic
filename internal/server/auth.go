@@ -499,8 +499,10 @@ func BootstrapUser(ctx context.Context, st *store.Store, login, password string)
 	if n > 0 {
 		return nil
 	}
-	if _, err := st.AddFirstUser(ctx, login, password); err != nil &&
-		!errors.Is(err, store.ErrUserExists) && !errors.Is(err, store.ErrSetupDone) {
+	if _, err := st.AddFirstUser(ctx, login, password); err != nil {
+		if errors.Is(err, store.ErrUserExists) || errors.Is(err, store.ErrSetupDone) {
+			return nil // somebody got there first; nothing was created
+		}
 		return err
 	}
 	slog.Info("admin account created from ENV", "login", login)

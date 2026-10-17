@@ -52,6 +52,10 @@ Knowing where the boundary is drawn saves everyone time.
   are allowed. Link-local addresses (`169.254.0.0/16`, `fe80::/10`, which carry
   cloud metadata services) are blocked for health checks and the webhook, and
   icon fetching refuses every private, loopback, link-local and tunnelling range.
+  With `HTTP_PROXY`/`HTTPS_PROXY` set, the webhook goes through that proxy and
+  the guard sees the proxy's address, not the target's; that is deliberate (a
+  corporate proxy filters on its own). The block also covers the OCI
+  (`192.0.0.192`) and Azure (`168.63.129.16`) metadata addresses.
   The failure text of "send test message" is deliberately generic; the details
   go to the log. Treat a panel account like shell access to the network the
   panel sits in.

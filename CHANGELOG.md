@@ -54,6 +54,14 @@ the entries below say when it does.
   `Permissions-Policy`, no directory listing under `/assets/`, and failed
   sign-ins are logged with a fingerprint of the login instead of the text typed.
 
+- **Hardening follow-ups:** the config nesting check follows quoted multi-line
+  text correctly (it could be bypassed, and rejected valid descriptions with
+  brackets); a live-update stream whose client stops reading is closed after 30 s
+  instead of holding its slot; the Oracle and Azure metadata addresses are
+  blocked too; `/healthz` ignores `--allowed-host` so Kubernetes probes work
+  (the Helm chart gets `allowedHosts`); database failures during first-run
+  setup are no longer reported as "account exists".
+
 ### Changed
 
 - **Setup now needs the setup token** from the log (see Security). If you

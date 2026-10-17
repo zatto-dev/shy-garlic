@@ -1040,10 +1040,32 @@ func (s *Server) releaseStream(r *http.Request) {
 	s.sseStreams[id]--
 }
 
+// streamWriteTimeout — how long one write to an event stream may block. A var so
+// a test can shorten it.
+var streamWriteTimeout = 30 * time.Second
+
+// deadlineWriter gives every write its own deadline; a failed write makes the
+// handler return, which releases the stream slot.
+type deadlineWriter struct {
+	w  http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func (d *deadlineWriter) Write(p []byte) (int, error) {
+	_ = d.rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+	return d.w.Write(p)
+}
+
+// flush pushes buffered data to the connection under a fresh deadline: the actual
+// network write happens here, not in Write.
+func (d *deadlineWriter) flush() error {
+	_ = d.rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+	return d.rc.Flush()
+}
+
 // handleEvents is the SSE stream — the panel gets changes immediately, without polling.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
@@ -1053,8 +1075,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.releaseStream(r)
-	// the server has a WriteTimeout, and a stream is meant to outlive it
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	// The server's WriteTimeout would cut a stream that is meant to live for hours,
+	// so the stream manages its own: every write gets a fresh deadline (see
+	// deadlineWriter). Without one, a client that stops reading (zero TCP window)
+	// would hold its slot, a goroutine and a monitor subscription forever.
+	out := &deadlineWriter{w: w, rc: http.NewResponseController(w)}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1073,10 +1098,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "data: %s\n\n", b); err != nil {
 			return false
 		}
-		flusher.Flush()
+		if out.flush() != nil {
+			return false
+		}
 		return true
 	}
 	sendAppearance := func() bool {
@@ -1084,10 +1111,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "event: wyglad\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: wyglad\ndata: %s\n\n", b); err != nil {
 			return false
 		}
-		flusher.Flush()
+		if out.flush() != nil {
+			return false
+		}
 		return true
 	}
 	// layout and title ride the same wake-up as the appearance: a change from another tab
@@ -1097,10 +1126,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "event: uklad\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: uklad\ndata: %s\n\n", b); err != nil {
 			return false
 		}
-		flusher.Flush()
+		if out.flush() != nil {
+			return false
+		}
 		return true
 	}
 	// the file banner rides the same wake-up — an error appears and disappears on
@@ -1111,10 +1142,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "event: konfig\ndata: %s\n\n", b); err != nil {
+		if _, err := fmt.Fprintf(out, "event: konfig\ndata: %s\n\n", b); err != nil {
 			return false
 		}
-		flusher.Flush()
+		if out.flush() != nil {
+			return false
+		}
 		return true
 	}
 	if !send() {
@@ -1136,10 +1169,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-keepalive.C:
-			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+			if _, err := fmt.Fprint(out, ": keepalive\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
+			if out.flush() != nil {
+				return
+			}
 		}
 	}
 }

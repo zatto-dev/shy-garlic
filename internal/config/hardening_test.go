@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -203,5 +204,32 @@ func TestNestingLimitSparesRealFiles(t *testing.T) {
 	}
 	if err := checkNesting([]byte(strings.Repeat("[", 65))); err == nil {
 		t.Fatal("65 levels accepted")
+	}
+}
+
+// A quote left open at the end of a line used to be forgotten, so a `[` on the
+// continuation line stayed counted as flow nesting: it hid real indentation
+// depth from the scan (bypass) and made valid multi-line text fail.
+func TestNestingLimitTracksQuotesAcrossLines(t *testing.T) {
+	var deep strings.Builder
+	deep.WriteString("x: \"foo\n [ bar\"\n")
+	for i := 0; i < 1400; i++ {
+		deep.WriteString(strings.Repeat(" ", i) + "k:\n")
+	}
+	if err := checkNesting([]byte(deep.String())); err == nil {
+		t.Fatal("1400 indentation levels slipped past a multi-line quoted scalar")
+	}
+	deepSingle := strings.Replace(deep.String(), `"`, "'", 2)
+	if err := checkNesting([]byte(deepSingle)); err == nil {
+		t.Fatal("the same with a single-quoted scalar")
+	}
+
+	var ok strings.Builder
+	ok.WriteString("groups:\n  - name: G\n    services:\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&ok, "      - name: S%d\n        url: http://x\n        description: \"first line\n          [ [ [ second {{ line\"\n", i)
+	}
+	if _, err := Load([]byte(ok.String())); err != nil {
+		t.Fatalf("valid multi-line descriptions with brackets rejected: %v", err)
 	}
 }

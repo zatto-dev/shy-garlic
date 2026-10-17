@@ -376,7 +376,12 @@ func (s *Store) AddFirstUser(ctx context.Context, login, password string) (*User
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO users (login, hash) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`, login, string(h))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
+		// only a UNIQUE violation means "that account exists"; a closed or broken
+		// database must not be reported as success-by-existence
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
+		}
+		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrSetupDone

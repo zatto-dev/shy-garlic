@@ -416,7 +416,9 @@ złośliwą stronę internetową, która próbuje dobić się do panelu w Twojej
 przez DNS rebinding. `localhost`, `127.0.0.1` i `::1` działają zawsze. Pusta
 lista (domyślnie) oznacza brak kontroli. Za reverse proxy lista musi zawierać
 nazwę, którą proxy przekazuje w `Host`; scrapery otwierające `/metrics` po
-adresie IP potrzebują tego adresu na liście.
+adresie IP potrzebują tego adresu na liście (albo muszą wysyłać dozwolony
+nagłówek `Host`). `/healthz` jest wyłączony z kontroli, więc sondy kontenera i
+Kubernetesa działają.
 
 Za reverse proxy (Traefik, Caddy, Pangolin) ustaw `--trusted-proxy` /
 `SHYG_TRUSTED_PROXY` na jego sieć, np. `10.0.0.0/8`. Bez tego `X-Forwarded-For` i

@@ -206,3 +206,28 @@ func TestOpenTightensExistingFiles(t *testing.T) {
 		}
 	}
 }
+
+// Only a real "already there" may be reported as ErrUserExists / ErrSetupDone.
+func TestAddFirstUserReportsDatabaseErrors(t *testing.T) {
+	st := openTest(t)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := st.AddFirstUser(context.Background(), "owner", "password-123")
+	if err == nil {
+		t.Fatal("a closed database reported success")
+	}
+	if errors.Is(err, ErrUserExists) || errors.Is(err, ErrSetupDone) {
+		t.Fatalf("a database failure was reported as %v", err)
+	}
+
+	// the genuine duplicate still is ErrUserExists / ErrSetupDone
+	st2 := openTest(t)
+	ctx := context.Background()
+	if _, err := st2.AddFirstUser(ctx, "owner", "password-123"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st2.AddFirstUser(ctx, "owner", "password-123"); !errors.Is(err, ErrSetupDone) {
+		t.Fatalf("second setup = %v, want ErrSetupDone", err)
+	}
+}

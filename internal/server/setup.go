@@ -120,6 +120,11 @@ func requireAllowedHost(allowed map[string]bool, next http.Handler) http.Handler
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// kubelet and Docker probes send the pod IP as Host
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		h := hostOnly(r.Host)
 		if !allowed[h] && !loopbackHost(h) {
 			http.Error(w, "misdirected request: this host name is not allowed (see --allowed-host)", http.StatusMisdirectedRequest)

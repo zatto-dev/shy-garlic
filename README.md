@@ -417,7 +417,8 @@ from reaching a panel on your network through DNS rebinding. Requests to
 `localhost`, `127.0.0.1` and `::1` always work. Empty (the default) means no
 check. Behind a reverse proxy the list has to contain the name the proxy passes
 on in `Host`; scrapers that open `/metrics` by IP address need that address in
-the list too.
+the list too (or must send an allowed `Host` header). `/healthz` is exempt, so
+container and Kubernetes probes keep working.
 
 Behind a reverse proxy (Traefik, Caddy, Pangolin) set `--trusted-proxy` /
 `SHYG_TRUSTED_PROXY` to its network, e.g. `10.0.0.0/8`. Without it

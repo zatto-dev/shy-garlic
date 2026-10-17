@@ -73,6 +73,11 @@ func checkNesting(src []byte) error {
 	flow := 0
 	var indents []int // open block indentation levels
 	skipBelow := -1   // inside a block scalar: skip lines indented deeper than this
+	// quote is the open quote character, carried ACROSS lines: a quoted scalar may
+	// span several lines, and brackets inside it are text, not nesting. Resetting it
+	// at every line end both let a stray `[` stay counted forever (rejecting valid
+	// files) and let one hide real nesting from the scan (a bypass).
+	var quote byte
 	line := 1
 	for start := 0; start <= len(src); line++ {
 		end := start
@@ -83,37 +88,43 @@ func checkNesting(src []byte) error {
 		start = end + 1
 
 		indent := 0
-		for indent < len(text) && text[indent] == ' ' {
-			indent++
-		}
-		rest := text[indent:]
-		if len(rest) == 0 || rest[0] == '#' {
-			continue
-		}
-		// the content of a `|` / `>` block is text, brackets and all
-		if skipBelow >= 0 {
-			if indent > skipBelow {
+		rest := text
+		depth := 0
+		if quote != 0 {
+			// continuation of a multi-line quoted scalar: no indentation rules apply
+			depth = len(indents)
+		} else {
+			for indent < len(text) && text[indent] == ' ' {
+				indent++
+			}
+			rest = text[indent:]
+			if len(rest) == 0 || rest[0] == '#' {
 				continue
 			}
-			skipBelow = -1
-		}
-		// block levels: pop deeper-or-equal indents, then push this one
-		if flow == 0 {
-			for len(indents) > 0 && indents[len(indents)-1] >= indent {
-				indents = indents[:len(indents)-1]
+			// the content of a `|` / `>` block is text, brackets and all
+			if skipBelow >= 0 {
+				if indent > skipBelow {
+					continue
+				}
+				skipBelow = -1
 			}
-			indents = append(indents, indent)
-		}
-		depth := len(indents)
-		// `- - - x` opens a sequence per marker on the same line
-		for i := 0; i+1 < len(rest) && (rest[i] == '-' || rest[i] == '?') && rest[i+1] == ' '; {
-			depth++
-			i += 2
-			for i < len(rest) && rest[i] == ' ' {
-				i++
+			// block levels: pop deeper-or-equal indents, then push this one
+			if flow == 0 {
+				for len(indents) > 0 && indents[len(indents)-1] >= indent {
+					indents = indents[:len(indents)-1]
+				}
+				indents = append(indents, indent)
+			}
+			depth = len(indents)
+			// `- - - x` opens a sequence per marker on the same line
+			for i := 0; i+1 < len(rest) && (rest[i] == '-' || rest[i] == '?') && rest[i+1] == ' '; {
+				depth++
+				i += 2
+				for i < len(rest) && rest[i] == ' ' {
+					i++
+				}
 			}
 		}
-		var quote byte
 		for i := 0; i < len(rest); i++ {
 			c := rest[i]
 			switch {
@@ -152,7 +163,7 @@ func checkNesting(src []byte) error {
 		if depth+flow > maxNesting {
 			return fmt.Errorf("[%d:%d] yaml: nesting is deeper than %d levels", line, indent+1, maxNesting)
 		}
-		if flow == 0 && blockScalarHeader.Match(rest) {
+		if flow == 0 && quote == 0 && blockScalarHeader.Match(rest) {
 			skipBelow = indent
 		}
 	}

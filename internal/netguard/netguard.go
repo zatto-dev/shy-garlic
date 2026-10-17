@@ -18,6 +18,8 @@ import (
 var blocked = []netip.Prefix{
 	netip.MustParsePrefix("169.254.0.0/16"),    // IPv4 link-local, incl. 169.254.169.254 metadata
 	netip.MustParsePrefix("fe80::/10"),         // IPv6 link-local
+	netip.MustParsePrefix("192.0.0.192/32"),    // Oracle Cloud metadata
+	netip.MustParsePrefix("168.63.129.16/32"),  // Azure WireServer / metadata
 	netip.MustParsePrefix("fd00:ec2::254/128"), // AWS IPv6 metadata endpoint
 }
 

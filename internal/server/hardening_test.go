@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -138,18 +139,18 @@ func TestAllowedHostsRefuseOtherNames(t *testing.T) {
 	s.allowedHosts = parseAllowedHosts([]string{"panel.example.org", " Dash.lan ", ""})
 	h := s.Handler()
 	for host, want := range map[string]int{
-		"panel.example.org":      http.StatusOK,
-		"PANEL.example.org:8443": http.StatusOK,
-		"dash.lan":               http.StatusOK,
-		"localhost:8080":         http.StatusOK,
-		"127.0.0.1:8080":         http.StatusOK,
-		"[::1]:8080":             http.StatusOK,
+		"panel.example.org":      http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
+		"PANEL.example.org:8443": http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
+		"dash.lan":               http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
+		"localhost:8080":         http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
+		"127.0.0.1:8080":         http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
+		"[::1]:8080":             http.StatusSeeOther, // allowed: /login redirects to /setup on a fresh instance
 		"evil.example":           http.StatusMisdirectedRequest,
 		"panel.example.org.evil": http.StatusMisdirectedRequest,
 		"192.168.1.5:8080":       http.StatusMisdirectedRequest,
 		"":                       http.StatusMisdirectedRequest,
 	} {
-		r := httptest.NewRequest("GET", "/healthz", nil)
+		r := httptest.NewRequest("GET", "/login", nil)
 		r.Host = host
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -164,6 +165,25 @@ func TestAllowedHostsRefuseOtherNames(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusMisdirectedRequest {
 		t.Errorf("/setup for a foreign Host: %d", w.Code)
+	}
+}
+
+func TestHealthzIsExemptFromHostCheck(t *testing.T) {
+	s := testServer(t)
+	s.allowedHosts = parseAllowedHosts([]string{"panel.example.org"})
+	h := s.Handler()
+	for path, want := range map[string]int{
+		"/healthz": http.StatusOK,
+		"/metrics": http.StatusMisdirectedRequest, // stays under the check
+		"/":        http.StatusMisdirectedRequest,
+	} {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "10.42.0.17:8080" // a pod IP, as a kubelet probe sends it
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("%s with a pod-IP Host: %d, want %d", path, w.Code, want)
+		}
 	}
 }
 
@@ -632,5 +652,88 @@ func TestEventStreamOutlivesWriteTimeout(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("no event arrived")
+	}
+}
+
+// A client that stops reading must not keep its slot: every write has a deadline
+// and a failed one ends the stream.
+func TestEventStreamEndsWhenClientStopsReading(t *testing.T) {
+	old := streamWriteTimeout
+	streamWriteTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { streamWriteTimeout = old })
+
+	s := testServer(t)
+	cookie := loggedInCookie(t, s)
+	ts := sseServer(t, s, time.Minute)
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(ts.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.(*net.TCPConn).SetReadBuffer(1024)
+	fmt.Fprintf(conn, "GET /events HTTP/1.1\r\nHost: x\r\nCookie: %s=%s\r\n\r\n", cookie.Name, cookie.Value)
+
+	open := func() int {
+		s.sseMu.Lock()
+		defer s.sseMu.Unlock()
+		n := 0
+		for _, c := range s.sseStreams {
+			n += c
+		}
+		return n
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for open() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if open() != 1 {
+		t.Fatal("stream did not open")
+	}
+	// never read from conn; flood the stream with events until the buffers fill
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s.broadcastAppearance()
+				time.Sleep(200 * time.Microsecond)
+			}
+		}
+	}()
+	deadline = time.Now().Add(40 * time.Second)
+	for open() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the slot of a client that stopped reading was never released")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestBootstrapUserDoesNotClaimSuccessOnFailure(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	s := testServer(t)
+	// too short a password: no account, so no "created" line
+	if err := BootstrapUser(context.Background(), s.st, "envadmin", "short"); err == nil {
+		t.Fatal("a rejected account reported success")
+	}
+	if strings.Contains(buf.String(), "created") {
+		t.Errorf("logged a creation that did not happen: %s", buf.String())
+	}
+	if n, _ := s.st.UserCount(context.Background()); n != 0 {
+		t.Fatalf("users = %d", n)
+	}
+	if err := BootstrapUser(context.Background(), s.st, "envadmin", "long-enough-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "admin account created from ENV") {
+		t.Errorf("no creation line: %s", buf.String())
 	}
 }
