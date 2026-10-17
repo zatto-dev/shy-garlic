@@ -188,9 +188,35 @@ To be exact about what that buys you, because privacy claims deserve precision:
 the CDN never sees your browser, never learns how many people use the panel,
 and gets nothing at all after the first fetch. What it does see, once, is a
 server asking for a file. If even that is too much, `--icons icons.zip` ships
-the complete set in one file and makes the number of outbound requests zero.
+the set in one file: no index is downloaded, and an icon in the zip never
+touches the network. A name the zip does not have is still looked up on the
+CDN (Dashboard Icons, then selfh.st), so for zero outbound requests the zip has
+to hold every icon your config uses.
 
-The catalog holds more than 4,000 icons, searchable by name and by alias.
+Fetching never holds up the page. An icon that is not on disk yet waits at most
+1.5 s for the CDN; past that the card shows its letter and the download
+finishes in the background. A name no catalog has is not asked for again for
+10 minutes, and a CDN that times out or fails is left alone for 2 minutes, so
+an offline panel answers at once. The icons your config uses are fetched in the
+background right after start and after every config change.
+
+The catalog holds more than 5,000 icons, searchable by name and by alias. It
+merges two collections: [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache-2.0) comes first, and [selfh.st/icons](https://github.com/selfhst/icons)
+(CC BY 4.0) fills the names Dashboard Icons does not have, such as `llama-cpp`.
+When both have a name, Dashboard Icons wins; `icon: selfhst:<name>` asks for the
+selfh.st artwork explicitly. The two are cached apart (`<cache>/selfhst/` for
+selfh.st), so one never overwrites the other. Icon artwork belongs to its
+respective trademark owners.
+
+Neither collection ships with Shy Garlic: not in the repository, the binary or
+the image. The server fetches each file and serves it unmodified, and the panel
+credits both collections and their licenses in the footer and under the icon
+picker. Dashboard Icons has no NOTICE file, so there is nothing more to carry.
+If you redistribute icons yourself — an `icons.zip` for zip mode, an image with
+a pre-filled cache — include the Apache-2.0 license text for Dashboard Icons
+and the CC BY 4.0 attribution for selfh.st/icons. Details:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## It can read your containers
 
@@ -621,7 +647,7 @@ scripts) and `shyg version` prints the version. Flags take one or two dashes
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                    | SQLite file with accounts and history (in the image: `/data/shygarlic.db`) |
 | `--cache`          | `SHYG_CACHE`            | `icons/` next to the database     | icon cache directory |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` next to the database        | uploaded wallpapers |
-| `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, a complete offline icon set: no downloads |
+| `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, an offline icon set: no index downloads; names missing from the zip still go to the CDN |
 | `--docker`         | `SHYG_DOCKER`           | `/var/run/docker.sock` if present | Docker socket or socket proxy URL (`http://host:2375`) for suggesting services |
 | `--webhook`        | `SHYG_WEBHOOK`          | none (set it in the panel)        | notification webhook address; the old name `SHYG_DISCORD_WEBHOOK` is still read |
 | `--webhook-format` | `SHYG_WEBHOOK_FORMAT`   | `discord`, unless set in the panel | `discord`, `slack`, `ntfy`, `gotify`, `telegram` or `generic` |

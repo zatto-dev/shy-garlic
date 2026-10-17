@@ -345,6 +345,13 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		s.icons.Refresh(ctx)
 		slog.Info("icons", "mode", s.icons.Mode(), "available", s.icons.Count())
+		// now that the indexes are in, fetch what the config uses (and its variants)
+		s.mu.RLock()
+		cfg := s.cfg
+		s.mu.RUnlock()
+		if cfg != nil {
+			s.icons.Prefetch(ctx, configIcons(cfg))
+		}
 	}()
 	return nil
 }
@@ -583,6 +590,9 @@ func (s *Server) apply(ctx context.Context, cfg *config.Config) {
 		}
 	}
 
+	// icons the config uses go to the disk cache in the background, so the first
+	// render does not wait for the CDN
+	s.icons.Prefetch(ctx, configIcons(cfg))
 	s.monitor.SetTargets(ctx, targets)
 	live := make(map[string]bool, len(targets))
 	for _, t := range targets {
@@ -817,6 +827,7 @@ type pageView struct {
 	Version   string
 	User      string
 	IconCount int
+	IconsZip  bool // icons come from icons.zip — the credit must not claim downloads
 
 	Lang                   string
 	T                      map[string]string
@@ -931,7 +942,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lang := i18n.FromRequest(r)
-	data := pageView{Title: cfg.Title, Version: Version, IconCount: s.icons.Count(), Lang: string(lang)}
+	data := pageView{Title: cfg.Title, Version: Version, IconCount: s.icons.Count(), Lang: string(lang),
+		IconsZip: s.icons.Mode() == "zip"}
 	data.T, data.TJSON, data.SecondLang, data.SecondLangName, data.SecondLangShort = fillLang(lang)
 	data.Appearance = s.instanceAppearance()
 	data.Banner = s.instanceBanner(lang)

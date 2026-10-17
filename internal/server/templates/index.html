@@ -307,6 +307,7 @@
   <span>{{.User}}</span>
   <span class="shortcuts">{{.T.shortcuts_hint}}</span>
   <form method="post" action="/logout" class="logout"><button type="submit" class="btn btn--quiet btn--sm">{{.T.log_out}}</button></form>
+  {{template "icon-credit" .}}
 </footer>
 
 <!-- ── service edit dialog ────────────────────────────────────────────── -->
@@ -344,6 +345,7 @@
       <input type="hidden" name="icon" id="icon-field">
     </div>
     <div class="icon-grid" id="icon-grid"></div>
+    {{template "icon-credit" .}}
 
     <details class="advanced">
       <summary>{{.T.health_check}}</summary>
@@ -649,4 +651,18 @@ window.APPEARANCE = {{.AppearanceJSON}};
 <script src="/assets/app.js" defer></script>
 </body>
 </html>
+{{- end}}
+
+{{/* The icon collections' licenses ask for credit where their icons are used:
+     title, author, source and license (Apache-2.0 for Dashboard Icons, CC BY 4.0
+     for selfh.st/icons), and for CC BY whether the work was changed — it is not,
+     the server stores and serves the files byte for byte. */}}
+{{define "icon-credit" -}}
+<p class="icon-credit">{{.T.icon_credit_label}}
+  <a href="https://github.com/homarr-labs/dashboard-icons" target="_blank" rel="noopener noreferrer">Dashboard Icons</a>
+  {{.T.icon_credit_by}} Homarr Labs (<a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer" title="{{.T.icon_credit_license}}">Apache-2.0</a>)
+  <span class="dot-sep">·</span>
+  <a href="https://github.com/selfhst/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a>
+  {{.T.icon_credit_by}} selfh.st (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" title="{{.T.icon_credit_license}}">CC BY 4.0</a>).
+  {{if .IconsZip}}{{.T.icon_credit_changes_zip}}{{else}}{{.T.icon_credit_changes}}{{end}}</p>
 {{- end}}

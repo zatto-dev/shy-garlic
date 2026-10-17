@@ -10,6 +10,34 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+### Added
+
+- selfh.st/icons as a second icon catalog. Names that Dashboard Icons lacks
+  (e.g. `llama-cpp`) are now served, with dark/light variants where selfh.st
+  has them, and show up in the icon picker. Dashboard Icons still wins every
+  name it has, so existing icons do not change; `icon: selfhst:<name>` picks
+  the selfh.st artwork explicitly. selfh.st files are cached separately in
+  `<cache>/selfhst/`. `zip` mode still makes no index requests; a name the
+  zip does not have is looked up on the CDNs as before, now with selfh.st
+  after Dashboard Icons.
+- Credit for both icon collections (title, author, source, license, and that
+  the files are served unmodified) in the panel footer and under the icon
+  picker, in English and Polish, plus `THIRD_PARTY_NOTICES.md`.
+
+### Changed
+
+- Icons never hold up the page. A request for an icon that is not on disk
+  waits at most 1.5 s for the CDN (it used to be up to 20 s, and 40 s with two
+  catalogs behind a firewall that drops packets); past that the card shows its
+  letter and the download finishes in the background, shared by all requests
+  for that name. Names no catalog has are remembered for 10 minutes, a failing
+  CDN host is skipped for 2 minutes, and the icons the config uses are fetched
+  in the background after start and after every config change.
+- Only a 404 sends an icon lookup on to the next catalog; a network error
+  does not.
+- An icon file over the 2 MiB limit is now refused instead of being cut off
+  at the limit and cached truncated.
+
 ### Fixed
 
 - The 0.14.0 release published `latest` pointing at the `-git` image instead
