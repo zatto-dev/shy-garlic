@@ -28,7 +28,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "shy-garlic.image" -}}
-{{ .Values.image.repository }}:{{ default (printf "%s-git" .Chart.AppVersion) .Values.image.tag }}
+{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}
 {{- end }}
 
 {{- define "shy-garlic.adminSecretName" -}}
