@@ -1,6 +1,6 @@
 # Plain-kubectl install, no Helm needed:
 #
-#   kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.13.2"
+#   kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.14.0"
 #
 # Same resources as the Helm chart with default values. Make your own overlay
 # to change the image tag, storage class, size, or to add an Ingress.
@@ -26,4 +26,4 @@ configMapGenerator:
 # The release workflow fails when this tag does not match the git tag.
 images:
   - name: ghcr.io/zatto-dev/shy-garlic
-    newTag: "0.13.2"
+    newTag: "0.14.0"
