@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +20,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zatto-dev/shy-garlic/internal/config"
 )
 
 // Icons are never fetched by the user's browser.
@@ -77,21 +80,46 @@ type Catalog struct {
 	selfhst  selfhstIndex           // the second catalog, used for names Dashboard Icons lacks
 	zipIdx   map[string]*zip.File
 	client   *http.Client
+
+	// homarrAuthoritative: ext is a full Dashboard Icons index (fetched, from
+	// index.json or icons.zip), so a name missing from it is really missing. A list
+	// scanned from the cache directory is not — offline, jellyfin may simply not be
+	// cached yet, and must not be sent to selfh.st because of that.
+	homarrAuthoritative bool
+	net                 netGuard
 }
 
 // rebuildNamesLocked merges both catalogs into the sorted name list. The caller
 // holds k.mu for writing.
 func (k *Catalog) rebuildNamesLocked() {
-	k.names = make([]string, 0, len(k.ext)+len(k.selfhst.names))
+	k.names = make([]string, 0, len(k.ext)+len(k.selfhst.icons))
 	for n := range k.ext {
 		k.names = append(k.names, n)
 	}
-	for n := range k.selfhst.names {
+	for n := range k.selfhst.icons {
 		if _, inHomarr := k.ext[n]; !inHomarr {
 			k.names = append(k.names, n)
 		}
 	}
 	sort.Strings(k.names)
+}
+
+// homarrFileLocked tells whether name is a Dashboard Icons file: in the name
+// index, or one of the variant files metadata.json points to — an index built
+// from metadata.json lists base names only (dagster, not dagster-light). The
+// caller holds k.mu.
+func (k *Catalog) homarrFileLocked(name string) (ext string, ok bool) {
+	if ext, ok := k.ext[name]; ok {
+		return ext, true
+	}
+	for _, suffix := range []string{"-dark", "-light"} {
+		if base, cut := strings.CutSuffix(name, suffix); cut {
+			if w, has := k.variants[base]; has && (w.Dark == name || w.Light == name) {
+				return k.ext[base], true
+			}
+		}
+	}
+	return "", false
 }
 
 // badIconName rejects anything that could leave the cache directory.
@@ -104,7 +132,7 @@ func NewCatalog(zipPath, cacheDir string) *Catalog {
 		ext:      map[string]string{},
 		cacheDir: cacheDir,
 		mode:     "cdn",
-		client:   &http.Client{Timeout: 20 * time.Second},
+		client:   newIconClient(),
 	}
 	if zipPath != "" {
 		if err := k.loadZip(zipPath); err != nil {
@@ -141,11 +169,11 @@ func (k *Catalog) Variants(name string) (dark, light string) {
 	defer k.mu.RUnlock()
 	var w toneVariant
 	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
-		w = k.selfhst.variants[ref]
+		w = k.selfhst.variants(ref)
 	} else if hw, ok := k.variants[name]; ok {
 		w = hw
-	} else if _, inHomarr := k.ext[name]; !inHomarr {
-		w = k.selfhst.variants[name]
+	} else if _, inHomarr := k.homarrFileLocked(name); !inHomarr && k.homarrAuthoritative {
+		w = k.selfhst.variants(name)
 	}
 	if w.Dark == "" || w.Light == "" {
 		return "", ""
@@ -164,6 +192,7 @@ func (k *Catalog) loadZip(path string) error {
 	defer k.mu.Unlock()
 	k.zipIdx = make(map[string]*zip.File, len(r.File))
 	k.names = nil
+	k.homarrAuthoritative = true
 	for _, f := range r.File {
 		if !strings.HasSuffix(f.Name, ".svg") {
 			continue
@@ -292,6 +321,8 @@ func (k *Catalog) fromMetadata(ctx context.Context) (map[string]string, error) {
 }
 
 func (k *Catalog) fetchJSON(ctx context.Context, url string, limit int64) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, indexBudget)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -367,7 +398,9 @@ func (k *Catalog) setNames(ext map[string]string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.ext = ext
+	k.homarrAuthoritative = true
 	k.rebuildNamesLocked()
+	k.net.forgetMisses()
 }
 
 func (k *Catalog) setFromIndex(data []byte) error {
@@ -407,6 +440,7 @@ func (k *Catalog) indexCache() {
 			}
 		}
 	}
+	k.homarrAuthoritative = false
 	k.rebuildNamesLocked()
 }
 
@@ -417,61 +451,42 @@ func (k *Catalog) Has(name string) bool {
 		return false
 	}
 	ref, explicit := strings.CutPrefix(name, selfhstPrefix)
-	k.mu.RLock()
-	_, inHomarr := k.ext[name]
-	_, inSelfhst := k.selfhst.names[ref]
-	k.mu.RUnlock()
-	if (inHomarr && !explicit) || inSelfhst {
-		return true
-	}
-	if k.cacheDir == "" {
+	if ref == "" {
 		return false
 	}
+	k.mu.RLock()
+	_, inHomarr := k.homarrFileLocked(name)
+	inSelfhst := k.selfhst.has(name)
+	_, selfhstFile := k.selfhst.fileExt(ref)
+	k.mu.RUnlock()
 	dirs := []string{k.cacheDir, k.selfhstCacheDir()}
-	if explicit {
+	switch {
+	case explicit && selfhstFile, !explicit && (inHomarr || inSelfhst):
+		return true
+	case explicit:
 		dirs = dirs[1:]
 	}
 	for _, dir := range dirs {
-		for _, ext := range []string{"svg", "png"} {
-			if _, err := os.Stat(filepath.Join(dir, ref+"."+ext)); err == nil {
-				return true
-			}
+		if _, _, ok := readCached(dir, ref, ""); ok {
+			return true
 		}
 	}
 	return false
 }
 
 // Read returns the icon content and its MIME type.
-// Order: zip → on-disk cache → CDN (and a write to the cache). A name Dashboard
-// Icons does not know goes to selfh.st; `selfhst:<name>` goes there directly.
+// Order: zip → on-disk cache → network (see icons_fetch.go: at most
+// iconWaitBudget of waiting, the download itself goes on in the background).
+// A name Dashboard Icons does not know goes to selfh.st; `selfhst:<name>` goes
+// there directly.
 func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error) {
-	if badIconName(name) {
+	if badIconName(name) || name == selfhstPrefix {
 		return nil, "", fmt.Errorf("bad icon name")
-	}
-	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
-		if ref == "" {
-			return nil, "", fmt.Errorf("bad icon name")
-		}
-		return k.readSelfhst(ctx, ref)
 	}
 
 	k.mu.RLock()
-	ext, known := k.ext[name]
-	homarrIndexed := len(k.ext) > 0
-	_, inSelfhst := k.selfhst.files[name]
-	selfhstIndexed := k.selfhst.loaded
 	zipIdx := k.zipIdx
 	k.mu.RUnlock()
-	// both indexes agree the name is selfh.st's alone — no detour through Dashboard
-	// Icons. Without the Dashboard Icons index we cannot know that it lacks the
-	// name, so it is still asked first (the name might be in both).
-	if !known && inSelfhst && homarrIndexed {
-		return k.readSelfhst(ctx, name)
-	}
-	if !known {
-		ext = "svg"
-	}
-
 	if zipIdx != nil {
 		if f, ok := zipIdx[name+".svg"]; ok {
 			rc, err := f.Open()
@@ -483,19 +498,13 @@ func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error)
 		}
 	}
 
-	if data, kind, ok := readCached(k.cacheDir, name, ext); ok {
+	sources := k.sourcesFor(name)
+	// only the first source's cache here: the later ones count only after the
+	// earlier answered 404 (walkSources), so one catalog never shadows the other
+	if data, kind, ok := readCached(sources[0].dir, sources[0].name, sources[0].ext); ok {
 		return data, kind, nil
 	}
-
-	data, kind, err := k.fetchFrom(ctx, cdnIcons, k.cacheDir, name, ext)
-	// a name Dashboard Icons does not list: selfh.st is the last resort when it has
-	// the name, or when its index is missing (zip mode, no network at start)
-	if err != nil && !known && (inSelfhst || !selfhstIndexed) {
-		if sData, sKind, sErr := k.readSelfhst(ctx, name); sErr == nil {
-			return sData, sKind, nil
-		}
-	}
-	return data, kind, err
+	return k.readFromNetwork(ctx, name, sources)
 }
 
 // readCached looks for name in a cache directory, the expected extension first.
@@ -503,7 +512,11 @@ func readCached(dir, name, ext string) ([]byte, string, bool) {
 	if dir == "" {
 		return nil, "", false
 	}
-	for _, e := range []string{ext, "svg", "png"} {
+	exts := []string{"svg", "png"}
+	if ext == "png" {
+		exts = []string{"png", "svg"}
+	}
+	for _, e := range exts {
 		// ! the file exists but has 0 bytes = the previous download left a poisoned
 		// cache (see the comment in fetchFrom). We skip such a file and try to download
 		// again, instead of serving emptiness over and over.
@@ -523,8 +536,14 @@ func iconKind(ext string) string {
 }
 
 // fetchFrom downloads <base>/<ext>/<name>.<ext> and stores it in dir.
+// A 404 comes back as errNotFound; a host that does not answer (or answers 5xx)
+// goes on cooldown, see icons_fetch.go.
 func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([]byte, string, error) {
-	url := fmt.Sprintf("%s/%s/%s.%s", base, ext, name, ext)
+	host := hostOf(base)
+	if k.net.hostDown(host) {
+		return nil, "", fmt.Errorf("CDN %s on cooldown after a failure", host)
+	}
+	url := fmt.Sprintf("%s/%s/%s.%s", base, ext, neturl.PathEscape(name), ext)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
@@ -533,14 +552,22 @@ func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([
 
 	resp, err := k.client.Do(req)
 	if err != nil {
+		k.net.markDown(host)
 		return nil, "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, "", fmt.Errorf("CDN: %s.%s: %w", name, ext, errNotFound)
+	case resp.StatusCode >= 500:
+		k.net.markDown(host)
+		return nil, "", fmt.Errorf("CDN: %s", resp.Status)
+	case resp.StatusCode != http.StatusOK:
 		return nil, "", fmt.Errorf("CDN: %s", resp.Status)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxIconBytes+1))
 	if err != nil {
+		k.net.markDown(host)
 		return nil, "", err
 	}
 	// ! The panel credits the icon collections as served unmodified, so a file over
@@ -589,11 +616,11 @@ func (k *Catalog) Search(q string, limit int) []string {
 		default:
 			// alias: "8311 community" should find the icon "8311"
 			// (selfh.st's display name plays the alias: "llama.cpp" → llama-cpp)
-			aliases := k.aliases[n]
-			if aliases == nil {
-				aliases = k.selfhst.aliases[n]
+			if d, ok := k.selfhst.display[n]; ok && strings.Contains(strings.ToLower(d), q) {
+				middle = append(middle, n)
+				break
 			}
-			for _, a := range aliases {
+			for _, a := range k.aliases[n] {
 				if strings.Contains(strings.ToLower(a), q) {
 					middle = append(middle, n)
 					break
@@ -647,6 +674,20 @@ func (s *Server) resolveIcon(icon, name string) iconRef {
 	}
 }
 
+// configIcons lists the catalog icon names the config uses.
+func configIcons(cfg *config.Config) []string {
+	var out []string
+	for _, g := range cfg.Groups {
+		for _, svc := range g.Services {
+			n := strings.TrimSuffix(strings.TrimSuffix(svc.Icon, ".svg"), ".png")
+			if n != "" && !strings.Contains(n, "://") {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
 func urlEscape(s string) string {
 	r := strings.NewReplacer("&", "%26", "?", "%3F", " ", "%20", "#", "%23")
 	return r.Replace(s)
@@ -662,6 +703,9 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 
 	data, kind, err := s.icons.Read(r.Context(), name)
 	if err != nil {
+		// not on disk yet (the download may still be running) or missing: the card
+		// shows its letter now, and the next render asks again
+		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
 	}

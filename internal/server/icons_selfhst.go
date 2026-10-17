@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -38,57 +41,105 @@ const (
 	selfhstDir      = "selfhst"
 )
 
-type selfhstIndex struct {
-	loaded   bool                   // names come from index.json, not just a scan of the cache
-	names    map[string]string      // reference → "svg" | "png"; what the picker lists
-	files    map[string]string      // every file, variants included → "svg" | "png"
-	variants map[string]toneVariant // reference → selfhst:<ref>-dark / selfhst:<ref>-light
-	aliases  map[string][]string    // reference → display name, when it says more than the reference
+var selfhstRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
+
+// selfhstFlags packs what the panel needs to know about one selfh.st icon.
+type selfhstFlags uint8
+
+const (
+	selfhstPNG   selfhstFlags = 1 << iota // no SVG, the files are PNG
+	selfhstDark                           // <ref>-dark exists
+	selfhstLight                          // <ref>-light exists
+)
+
+func (f selfhstFlags) ext() string {
+	if f&selfhstPNG != 0 {
+		return "png"
+	}
+	return "svg"
 }
 
-func parseSelfhstIndex(data []byte) (selfhstIndex, error) {
-	var entries []struct {
-		Name      string `json:"Name"`
-		Reference string `json:"Reference"`
-		SVG       string `json:"SVG"`
-		Light     string `json:"Light"`
-		Dark      string `json:"Dark"`
+// selfhstIndex is kept small on purpose — the panel is meant to be light: one
+// map of reference → flags (variant file names are derived, not stored) and
+// display names only where they say more than the reference.
+type selfhstIndex struct {
+	loaded  bool                    // from index.json, not just a scan of the cache
+	icons   map[string]selfhstFlags // reference → flags; what the picker lists
+	display map[string]string       // reference → display name, used as a search alias
+}
+
+func (x selfhstIndex) has(ref string) bool {
+	_, ok := x.icons[ref]
+	return ok
+}
+
+// fileExt resolves a file name — an icon or one of its -dark/-light variants.
+func (x selfhstIndex) fileExt(name string) (string, bool) {
+	if f, ok := x.icons[name]; ok {
+		return f.ext(), true
 	}
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return selfhstIndex{}, err
+	for _, v := range []struct {
+		suffix string
+		flag   selfhstFlags
+	}{{"-dark", selfhstDark}, {"-light", selfhstLight}} {
+		if base, ok := strings.CutSuffix(name, v.suffix); ok {
+			if f, ok := x.icons[base]; ok && f&v.flag != 0 {
+				return f.ext(), true
+			}
+		}
 	}
-	idx := selfhstIndex{
-		loaded:   true,
-		names:    make(map[string]string, len(entries)),
-		files:    make(map[string]string, 3*len(entries)),
-		variants: make(map[string]toneVariant, len(entries)),
-		aliases:  make(map[string][]string, len(entries)),
+	return "", false
+}
+
+func (x selfhstIndex) variants(ref string) toneVariant {
+	f := x.icons[ref]
+	if f&selfhstDark == 0 || f&selfhstLight == 0 {
+		return toneVariant{}
 	}
-	for _, e := range entries {
+	return toneVariant{Dark: selfhstPrefix + ref + "-dark", Light: selfhstPrefix + ref + "-light"}
+}
+
+// parseSelfhstIndex decodes index.json entry by entry, keeping only what is
+// used; the raw document is never held in memory as a whole.
+func parseSelfhstIndex(r io.Reader) (selfhstIndex, error) {
+	dec := json.NewDecoder(r)
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
+		return selfhstIndex{}, fmt.Errorf("selfh.st index is not a list")
+	}
+	idx := selfhstIndex{loaded: true, icons: make(map[string]selfhstFlags, 3200), display: map[string]string{}}
+	for dec.More() {
+		var e struct {
+			Name      string `json:"Name"`
+			Reference string `json:"Reference"`
+			SVG       string `json:"SVG"`
+			Light     string `json:"Light"`
+			Dark      string `json:"Dark"`
+		}
+		if err := dec.Decode(&e); err != nil {
+			return selfhstIndex{}, err
+		}
 		ref := e.Reference
-		if ref == "" || badIconName(ref) {
+		// ! the index comes from the network: a reference becomes a file name and a
+		// URL path, so only the shape selfh.st actually uses gets through
+		if !selfhstRef.MatchString(ref) || badIconName(ref) {
 			continue
 		}
-		ext := "svg"
+		var f selfhstFlags
 		if e.SVG != "Yes" {
-			ext = "png"
+			f |= selfhstPNG
 		}
-		idx.names[ref] = ext
-		idx.files[ref] = ext
 		if e.Dark == "Yes" {
-			idx.files[ref+"-dark"] = ext
+			f |= selfhstDark
 		}
 		if e.Light == "Yes" {
-			idx.files[ref+"-light"] = ext
+			f |= selfhstLight
 		}
-		if e.Dark == "Yes" && e.Light == "Yes" {
-			idx.variants[ref] = toneVariant{Dark: selfhstPrefix + ref + "-dark", Light: selfhstPrefix + ref + "-light"}
-		}
+		idx.icons[ref] = f
 		if e.Name != "" && !strings.EqualFold(e.Name, ref) {
-			idx.aliases[ref] = []string{e.Name}
+			idx.display[ref] = e.Name
 		}
 	}
-	if len(idx.names) == 0 {
+	if len(idx.icons) == 0 {
 		return selfhstIndex{}, fmt.Errorf("empty selfh.st index")
 	}
 	return idx, nil
@@ -110,24 +161,15 @@ func (k *Catalog) refreshSelfhst(ctx context.Context) {
 	file := filepath.Join(dir, "index.json")
 	if dir != "" {
 		if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) < indexValidity {
-			if data, err := os.ReadFile(file); err == nil && k.setSelfhstFrom(data) == nil {
+			if k.setSelfhstFromFile(file) == nil {
 				slog.Info("selfh.st icon catalog from cache", "icons", k.selfhstCount())
 				return
 			}
 		}
 	}
 
-	data, err := k.fetchJSON(ctx, selfhstIndexURL, 8<<20)
+	err := k.downloadSelfhstIndex(ctx, dir, file)
 	if err == nil {
-		err = k.setSelfhstFrom(data)
-	}
-	if err == nil {
-		if dir != "" && os.MkdirAll(dir, 0o755) == nil {
-			tmp := filepath.Join(dir, ".index.json.tmp")
-			if os.WriteFile(tmp, data, 0o644) == nil {
-				_ = os.Rename(tmp, file)
-			}
-		}
 		slog.Info("selfh.st icon catalog fetched", "icons", k.selfhstCount())
 		return
 	}
@@ -136,14 +178,64 @@ func (k *Catalog) refreshSelfhst(ctx context.Context) {
 	if dir == "" {
 		return
 	}
-	if data, err := os.ReadFile(file); err == nil && k.setSelfhstFrom(data) == nil {
+	if k.setSelfhstFromFile(file) == nil {
 		return
 	}
 	k.indexSelfhstCache(dir)
 }
 
-func (k *Catalog) setSelfhstFrom(data []byte) error {
-	idx, err := parseSelfhstIndex(data)
+// downloadSelfhstIndex streams index.json to a temporary file in the cache,
+// parses it from there and only then puts it in place — memory holds the
+// parsed index, never the whole document.
+func (k *Catalog) downloadSelfhstIndex(ctx context.Context, dir, file string) error {
+	ctx, cancel := context.WithTimeout(ctx, indexBudget)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, selfhstIndexURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "ShyGarlic/"+Version)
+	resp, err := k.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", selfhstIndexURL, resp.Status)
+	}
+	body := io.LimitReader(resp.Body, 8<<20)
+	if dir == "" || os.MkdirAll(dir, 0o755) != nil {
+		return k.setSelfhstFrom(body)
+	}
+	tmp, err := os.CreateTemp(dir, ".index-*.tmp")
+	if err != nil {
+		return k.setSelfhstFrom(body)
+	}
+	defer os.Remove(tmp.Name()) // a no-op after the rename
+	_, err = io.Copy(tmp, body)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := k.setSelfhstFromFile(tmp.Name()); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), file)
+}
+
+func (k *Catalog) setSelfhstFromFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return k.setSelfhstFrom(f)
+}
+
+func (k *Catalog) setSelfhstFrom(r io.Reader) error {
+	idx, err := parseSelfhstIndex(r)
 	if err != nil {
 		return err
 	}
@@ -151,6 +243,7 @@ func (k *Catalog) setSelfhstFrom(data []byte) error {
 	defer k.mu.Unlock()
 	k.selfhst = idx
 	k.rebuildNamesLocked()
+	k.net.forgetMisses()
 	return nil
 }
 
@@ -161,18 +254,17 @@ func (k *Catalog) indexSelfhstCache(dir string) {
 	if err != nil {
 		return
 	}
-	idx := selfhstIndex{names: map[string]string{}, files: map[string]string{}}
+	idx := selfhstIndex{icons: map[string]selfhstFlags{}}
 	for _, e := range entries {
 		n := e.Name()
 		if strings.HasPrefix(n, ".") {
 			continue
 		}
-		for _, ext := range []string{"svg", "png"} {
-			if b, ok := strings.CutSuffix(n, "."+ext); ok {
-				if _, is := idx.names[b]; !is {
-					idx.names[b] = ext
-					idx.files[b] = ext
-				}
+		if b, ok := strings.CutSuffix(n, ".svg"); ok {
+			idx.icons[b] = 0
+		} else if b, ok := strings.CutSuffix(n, ".png"); ok {
+			if _, is := idx.icons[b]; !is {
+				idx.icons[b] = selfhstPNG
 			}
 		}
 	}
@@ -180,25 +272,11 @@ func (k *Catalog) indexSelfhstCache(dir string) {
 	defer k.mu.Unlock()
 	k.selfhst = idx
 	k.rebuildNamesLocked()
+	k.net.forgetMisses()
 }
 
 func (k *Catalog) selfhstCount() int {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return len(k.selfhst.names)
-}
-
-// readSelfhst serves a selfh.st file: its own cache subdirectory, then the CDN.
-func (k *Catalog) readSelfhst(ctx context.Context, ref string) ([]byte, string, error) {
-	k.mu.RLock()
-	ext, known := k.selfhst.files[ref]
-	k.mu.RUnlock()
-	if !known {
-		ext = "svg"
-	}
-	dir := k.selfhstCacheDir()
-	if data, kind, ok := readCached(dir, ref, ext); ok {
-		return data, kind, nil
-	}
-	return k.fetchFrom(ctx, selfhstCDN, dir, ref, ext)
+	return len(k.selfhst.icons)
 }

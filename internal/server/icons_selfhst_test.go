@@ -16,11 +16,11 @@ import (
 // Paths as the two catalogs are reached through cdnRedirector: the host is
 // swapped for the mock, the path stays exactly what the real URL carries.
 const (
-	homarrSVG     = "/gh/homarr-labs/dashboard-icons@main/svg/"
-	homarrMeta    = "/homarr-labs/dashboard-icons/main/metadata.json"
-	selfhstSVG    = "/gh/selfhst/icons@main/svg/"
-	selfhstPNG    = "/gh/selfhst/icons@main/png/"
-	selfhstIdxURL = "/selfhst/icons/main/index.json"
+	homarrSVG      = "/gh/homarr-labs/dashboard-icons@main/svg/"
+	homarrMeta     = "/homarr-labs/dashboard-icons/main/metadata.json"
+	selfhstSVG     = "/gh/selfhst/icons@main/svg/"
+	selfhstPNGPath = "/gh/selfhst/icons@main/png/"
+	selfhstIdxURL  = "/selfhst/icons/main/index.json"
 )
 
 // iconMock is a fake CDN for both catalogs: path → body, everything else 404.
@@ -48,6 +48,12 @@ func (m *iconMock) asked(path string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Contains(m.hits, path)
+}
+
+func (m *iconMock) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.hits)
 }
 
 func (m *iconMock) set(files map[string]string) {
@@ -82,16 +88,16 @@ func selfhstIndexJSON(t *testing.T) string {
 func twoCatalogs(t *testing.T) (*Catalog, string, *iconMock) {
 	t.Helper()
 	m := &iconMock{files: map[string]string{
-		homarrMeta:                         `{"jellyfin":{"base":"svg","aliases":[]}}`,
-		selfhstIdxURL:                      selfhstIndexJSON(t),
-		homarrSVG + "jellyfin.svg":         "<svg>homarr jellyfin</svg>",
-		selfhstSVG + "jellyfin.svg":        "<svg>selfhst jellyfin</svg>",
-		selfhstSVG + "llama-cpp.svg":       "<svg>selfhst llama</svg>",
-		selfhstSVG + "llama-cpp-dark.svg":  "<svg>selfhst llama dark ink</svg>",
-		selfhstSVG + "llama-cpp-light.svg": "<svg>selfhst llama light ink</svg>",
-		selfhstPNG + "13-feet-ladder.png":  "PNG13",
-		selfhstSVG + "half-pair.svg":       "<svg>half</svg>",
-		selfhstSVG + "half-pair-light.svg": "<svg>half light</svg>",
+		homarrMeta:                            `{"jellyfin":{"base":"svg","aliases":[]}}`,
+		selfhstIdxURL:                         selfhstIndexJSON(t),
+		homarrSVG + "jellyfin.svg":            "<svg>homarr jellyfin</svg>",
+		selfhstSVG + "jellyfin.svg":           "<svg>selfhst jellyfin</svg>",
+		selfhstSVG + "llama-cpp.svg":          "<svg>selfhst llama</svg>",
+		selfhstSVG + "llama-cpp-dark.svg":     "<svg>selfhst llama dark ink</svg>",
+		selfhstSVG + "llama-cpp-light.svg":    "<svg>selfhst llama light ink</svg>",
+		selfhstPNGPath + "13-feet-ladder.png": "PNG13",
+		selfhstSVG + "half-pair.svg":          "<svg>half</svg>",
+		selfhstSVG + "half-pair-light.svg":    "<svg>half light</svg>",
 	}}
 	k, dir := newCatalogWithMockCDN(t, m.handler)
 	index, _ := json.Marshal(map[string]string{"jellyfin": "svg"})
@@ -303,6 +309,9 @@ func TestIconEndpointServesSelfhstSVG(t *testing.T) {
 		s.handleIcon(rec, req)
 		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/svg+xml" {
 			t.Errorf("GET /icon/%s = %d %q, want 200 image/svg+xml", n, rec.Code, rec.Header().Get("Content-Type"))
+		}
+		if csp := rec.Header().Get("Content-Security-Policy"); csp != "default-src 'none'; sandbox" {
+			t.Errorf("GET /icon/%s: CSP = %q, want the sandbox policy", n, csp)
 		}
 	}
 }

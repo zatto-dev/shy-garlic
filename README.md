@@ -188,7 +188,17 @@ To be exact about what that buys you, because privacy claims deserve precision:
 the CDN never sees your browser, never learns how many people use the panel,
 and gets nothing at all after the first fetch. What it does see, once, is a
 server asking for a file. If even that is too much, `--icons icons.zip` ships
-the complete set in one file and makes the number of outbound requests zero.
+the set in one file: no index is downloaded, and an icon in the zip never
+touches the network. A name the zip does not have is still looked up on the
+CDN (Dashboard Icons, then selfh.st), so for zero outbound requests the zip has
+to hold every icon your config uses.
+
+Fetching never holds up the page. An icon that is not on disk yet waits at most
+1.5 s for the CDN; past that the card shows its letter and the download
+finishes in the background. A name no catalog has is not asked for again for
+10 minutes, and a CDN that times out or fails is left alone for 2 minutes, so
+an offline panel answers at once. The icons your config uses are fetched in the
+background right after start and after every config change.
 
 The catalog holds more than 5,000 icons, searchable by name and by alias. It
 merges two collections: [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
@@ -637,7 +647,7 @@ scripts) and `shyg version` prints the version. Flags take one or two dashes
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                    | SQLite file with accounts and history (in the image: `/data/shygarlic.db`) |
 | `--cache`          | `SHYG_CACHE`            | `icons/` next to the database     | icon cache directory |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` next to the database        | uploaded wallpapers |
-| `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, a complete offline icon set: no downloads |
+| `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, an offline icon set: no index downloads; names missing from the zip still go to the CDN |
 | `--docker`         | `SHYG_DOCKER`           | `/var/run/docker.sock` if present | Docker socket or socket proxy URL (`http://host:2375`) for suggesting services |
 | `--webhook`        | `SHYG_WEBHOOK`          | none (set it in the panel)        | notification webhook address; the old name `SHYG_DISCORD_WEBHOOK` is still read |
 | `--webhook-format` | `SHYG_WEBHOOK_FORMAT`   | `discord`, unless set in the panel | `discord`, `slack`, `ntfy`, `gotify`, `telegram` or `generic` |

@@ -188,7 +188,18 @@ Ikonę dociąga **serwer**, raz, i cache'uje ją na dysku.
 nigdy nie widzi Twojej przeglądarki, nie dowiaduje się, ile osób korzysta z
 panelu, i po pierwszym pobraniu nie dostaje już nic. Widzi natomiast, raz,
 serwer proszący o plik. Jeśli i to jest za dużo — `--icons icons.zip` wozi
-komplet w jednym pliku i sprowadza liczbę zapytań na zewnątrz do zera.
+zestaw w jednym pliku: żaden spis nie jest pobierany, a ikona z zipa nigdy nie
+dotyka sieci. Nazwy, której w zipie nie ma, panel nadal szuka w CDN (najpierw
+Dashboard Icons, potem selfh.st), więc zero zapytań na zewnątrz wymaga, żeby
+zip miał każdą ikonę używaną w konfiguracji.
+
+Pobieranie nigdy nie wstrzymuje strony. Ikona, której nie ma jeszcze na
+dysku, czeka na CDN najwyżej 1,5 s; potem karta pokazuje literę, a pobranie
+kończy się w tle. Nazwa, której nie ma żaden katalog, nie jest odpytywana
+ponownie przez 10 minut, a CDN, który nie odpowiedział albo zwrócił błąd, jest
+pomijany przez 2 minuty, więc panel bez sieci odpowiada od razu. Ikony używane
+w konfiguracji są pobierane w tle zaraz po starcie i po każdej zmianie
+konfiguracji.
 
 Katalog ma ponad 5000 pozycji, wyszukiwanych po nazwie i po aliasie. Łączy dwie
 kolekcje: najpierw [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
@@ -641,7 +652,7 @@ myślniki (`-addr` albo `--addr`). Flaga z wiersza poleceń wygrywa ze zmienną
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                     | plik SQLite z kontami i historią (w obrazie: `/data/shygarlic.db`) |
 | `--cache`          | `SHYG_CACHE`            | `icons/` obok bazy                 | katalog cache ikon |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` obok bazy                    | wgrane tapety |
-| `--icons`          | `SHYG_ICONS`            | brak                               | `icons.zip`, komplet ikon offline: bez pobierania |
+| `--icons`          | `SHYG_ICONS`            | brak                               | `icons.zip`, zestaw ikon offline: bez pobierania spisu; nazwy spoza zipa nadal idą do CDN |
 | `--docker`         | `SHYG_DOCKER`           | `/var/run/docker.sock`, jeśli jest | gniazdo Dockera albo adres proxy gniazda (`http://host:2375`) do podpowiadania usług |
 | `--webhook`        | `SHYG_WEBHOOK`          | brak (ustaw w panelu)              | adres webhooka powiadomień; stara nazwa `SHYG_DISCORD_WEBHOOK` jest nadal czytana |
 | `--webhook-format` | `SHYG_WEBHOOK_FORMAT`   | `discord`, o ile nie ustawiono w panelu | `discord`, `slack`, `ntfy`, `gotify`, `telegram` albo `generic` |

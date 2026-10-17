@@ -26,6 +26,15 @@ the entries below say when it does.
 
 ### Changed
 
+- Icons never hold up the page. A request for an icon that is not on disk
+  waits at most 1.5 s for the CDN (it used to be up to 20 s, and 40 s with two
+  catalogs behind a firewall that drops packets); past that the card shows its
+  letter and the download finishes in the background, shared by all requests
+  for that name. Names no catalog has are remembered for 10 minutes, a failing
+  CDN host is skipped for 2 minutes, and the icons the config uses are fetched
+  in the background after start and after every config change.
+- Only a 404 sends an icon lookup on to the next catalog; a network error
+  does not.
 - An icon file over the 2 MiB limit is now refused instead of being cut off
   at the limit and cached truncated.
 
