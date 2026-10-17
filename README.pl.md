@@ -199,6 +199,14 @@ z selfh.st. Obie kolekcje mają osobny cache (`<cache>/selfhst/` dla selfh.st),
 więc jedna nie nadpisuje drugiej. Grafiki ikon należą do właścicieli znaków
 towarowych.
 
+Żadna z kolekcji nie jest dołączona do Shy Garlica: ani do repozytorium, ani do
+binarki, ani do obrazu. Serwer pobiera każdy plik i serwuje go bez modyfikacji,
+a panel podaje autorstwo i licencje obu kolekcji w stopce i pod wyborem ikony.
+Dashboard Icons nie ma pliku NOTICE, więc nie ma nic więcej do dołączania. Jeśli
+sam rozprowadzasz ikony — `icons.zip` do trybu zip, obraz z wypełnionym cache —
+dołącz tekst licencji Apache-2.0 dla Dashboard Icons i atrybucję CC BY 4.0 dla
+selfh.st/icons. Szczegóły: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Umie zajrzeć do Twoich kontenerów
 
 Panel potrafi zaproponować gotowe wpisy na podstawie kontenerów działających na

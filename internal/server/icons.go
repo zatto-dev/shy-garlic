@@ -49,6 +49,7 @@ const (
 	metadataURL   = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/metadata.json"
 	treeURL       = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/tree.json"
 	indexValidity = 7 * 24 * time.Hour
+	maxIconBytes  = 2 << 20
 )
 
 // toneVariant is two separate artworks of the same icon — with dark and with light
@@ -538,9 +539,14 @@ func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("CDN: %s", resp.Status)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxIconBytes+1))
 	if err != nil {
 		return nil, "", err
+	}
+	// ! The panel credits the icon collections as served unmodified, so a file over
+	// the limit is refused, never cut at the limit and cached as a broken artwork.
+	if len(data) > maxIconBytes {
+		return nil, "", fmt.Errorf("CDN: %s.%s is larger than %d bytes", name, ext, maxIconBytes)
 	}
 	// ! jsDelivr is sometimes "warm" — status 200, but zero body bytes, until it has
 	// itself fetched the file from GitHub. Without this guard such an empty payload

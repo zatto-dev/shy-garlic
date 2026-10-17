@@ -20,6 +20,14 @@ the entries below say when it does.
   `<cache>/selfhst/`. `zip` mode still makes no index requests; a name the
   zip does not have is looked up on the CDNs as before, now with selfh.st
   after Dashboard Icons.
+- Credit for both icon collections (title, author, source, license, and that
+  the files are served unmodified) in the panel footer and under the icon
+  picker, in English and Polish, plus `THIRD_PARTY_NOTICES.md`.
+
+### Changed
+
+- An icon file over the 2 MiB limit is now refused instead of being cut off
+  at the limit and cached truncated.
 
 ### Fixed
 

@@ -199,6 +199,15 @@ selfh.st artwork explicitly. The two are cached apart (`<cache>/selfhst/` for
 selfh.st), so one never overwrites the other. Icon artwork belongs to its
 respective trademark owners.
 
+Neither collection ships with Shy Garlic: not in the repository, the binary or
+the image. The server fetches each file and serves it unmodified, and the panel
+credits both collections and their licenses in the footer and under the icon
+picker. Dashboard Icons has no NOTICE file, so there is nothing more to carry.
+If you redistribute icons yourself — an `icons.zip` for zip mode, an image with
+a pre-filled cache — include the Apache-2.0 license text for Dashboard Icons
+and the CC BY 4.0 attribution for selfh.st/icons. Details:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## It can read your containers
 
 The panel can propose ready-made entries from the containers running on the

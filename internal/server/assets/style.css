@@ -1542,6 +1542,16 @@ dialog input[type="checkbox"] { accent-color: var(--acc); }
   font: 400 11px/1 var(--font-mono); letter-spacing: .02em; color: var(--ink2);
 }
 
+/* Credit for the icon collections (their licenses ask for it). In the footer it
+   takes a line of its own; under the icon picker it is the same text, smaller. */
+.icon-credit {
+  margin: 6px 0 0;
+  font-size: 11px; line-height: 1.5; color: var(--ink2);
+}
+.footer .icon-credit { flex-basis: 100%; margin: 0; }
+.icon-credit a { color: inherit; text-decoration: underline; }
+.icon-credit a:hover { color: var(--ink); }
+
 .logout { display: inline; }
 .footer .shortcuts + .logout { margin-left: 0; }
 .logout .btn {

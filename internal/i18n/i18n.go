@@ -92,6 +92,15 @@ var texts = map[string]map[Lang]string{
 	"group":        {EN: "Group", PL: "Grupa"},
 	"icon":         {EN: "Icon", PL: "Ikona"},
 	"search_icons": {EN: "Search %d icons…", PL: "Szukaj wśród %d ikon…"},
+
+	// icon credit (Apache-2.0 and CC BY 4.0 ask for it); work and author names stay as they are
+	"icon_credit_label":   {EN: "Icons:", PL: "Ikony:"},
+	"icon_credit_by":      {EN: "by", PL: "autorstwa"},
+	"icon_credit_license": {EN: "license", PL: "licencja"},
+	"icon_credit_changes": {
+		EN: "Fetched by this server and served from its cache unmodified. Logos belong to their owners.",
+		PL: "Pobierane przez ten serwer i serwowane z jego cache bez modyfikacji. Logotypy należą do ich właścicieli.",
+	},
 	"health_check": {EN: "Health check", PL: "Sprawdzanie"},
 	"interval":     {EN: "Interval", PL: "Co ile"},
 	"timeout":      {EN: "Timeout", PL: "Timeout"},
