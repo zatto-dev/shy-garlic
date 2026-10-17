@@ -321,7 +321,7 @@ shyg serve -config shygarlic.yaml -data shygarlic.db -addr :8080
 ### From source
 
 ```bash
-go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.25
+go install github.com/zatto-dev/shy-garlic/cmd/shyg@latest   # Go 1.27
 ```
 
 ### Kubernetes / Talos Linux
@@ -390,6 +390,34 @@ from the config file.
 The first visit lands on `/setup`, where you create the administrator account.
 While the database is empty nobody gets any further; once an account exists,
 `/setup` is closed.
+
+Creating the account needs the **setup token**, which proves you run the
+instance rather than whoever reached the port first. The panel prints it in its
+log when it starts:
+
+```bash
+docker logs shyg 2>&1 | grep setup_token                      # Docker
+kubectl -n shy-garlic logs deploy/shy-garlic | grep setup_token # Kubernetes
+```
+
+```text
+level=WARN msg="first run: no account exists yet. Open /setup and enter this setup token …" setup_token=3f9c01ab-5d27e4c1-9a0b7d33-c1e8f642
+```
+
+Paste it into the *Setup token* field. It lives in memory only: a restart before
+the account exists prints a new one, and it is discarded when the account is
+created. Setting `SHYG_ADMIN_USER` and `SHYG_ADMIN_PASSWORD` creates the account
+at start and skips `/setup` (and the token) altogether.
+
+To make sure the panel only answers to the name you open it by, set
+`--allowed-host` / `SHYG_ALLOWED_HOSTS` to a comma-separated list of host names
+(no ports), e.g. `SHYG_ALLOWED_HOSTS=dash.example.org,dash.lan`. A request for
+any other `Host` gets `421 Misdirected Request`; this stops a malicious web page
+from reaching a panel on your network through DNS rebinding. Requests to
+`localhost`, `127.0.0.1` and `::1` always work. Empty (the default) means no
+check. Behind a reverse proxy the list has to contain the name the proxy passes
+on in `Host`; scrapers that open `/metrics` by IP address need that address in
+the list too.
 
 Behind a reverse proxy (Traefik, Caddy, Pangolin) set `--trusted-proxy` /
 `SHYG_TRUSTED_PROXY` to its network, e.g. `10.0.0.0/8`. Without it
@@ -519,8 +547,8 @@ so point `path` at the final address. Only the first 1 MiB is searched.
 | `appearance.background.dim`    | dimming under the content in %, `0`–`80`                | `50`                        |
 | `appearance.background.tone`   | text brightness: `dark` or `light`                      | `dark`                      |
 | `appearance.view`              | `grid`, `bento` or `list`                               | `grid`                      |
-| `check.interval`               | how often to check                                      | `30s`                       |
-| `check.timeout`                | how long to wait for an answer                          | `5s`                        |
+| `check.interval`               | how often to check; 1 s to 24 h, anything else falls back to the default and is flagged in the banner | `30s`                       |
+| `check.timeout`                | how long to wait for an answer; 1 s to 24 h, same rule  | `5s`                        |
 | `check.expect`                 | status codes that mean "alive"                          | `[200, 301, 302, 401, 403]` |
 | `check.insecure`               | ignore certificate errors                               | `false`                     |
 | `check.path`                   | path (and query) asked instead of the one in `url`; starts with `/`, same host | —                    |
@@ -536,7 +564,7 @@ Configuration sits in four layers. The line is not drawn by importance but by
 
 | Layer                 | What                                                                                                | Why here                                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
+| Flags and environment | `--addr`, `--config`, `--data`, `--cache`, `--backgrounds`, `--icons`, `--docker`, `--trusted-proxy`, `--metrics-allow`, `--allowed-host`, `--webhook`, `--webhook-format` | has to be known before the server starts, or belongs to the deployment — and `--trusted-proxy` decides who may set `X-Forwarded-For`, so it must not be clickable from the dashboard |
 | This file             | `title`, `appearance`, `notify.threshold`, `discovery.docker`, `groups`                             | the product's content: readable, and safe in a commit                                                                                                                                |
 | The SQLite database   | webhook address and format, API tokens (hashed), accounts, sessions, history                                                        | **credentials and state** — the database is never committed                                                                                                                          |
 | Your browser          | your own appearance override                                                                        | it concerns one browser and nobody else                                                                                                                                              |
@@ -557,7 +585,9 @@ shows that file and commits it; the URL is a credential.
 Accounts live in SQLite with bcrypt-hashed passwords. The session is an
 `HttpOnly`, `SameSite=Strict` cookie valid for 30 days, mutating routes carry a
 CSRF token, and five failed attempts from one address lock sign-in for five
-minutes. The API answers `401` without a session.
+minutes. Changing a password is rate-limited the same way. The API answers `401`
+without a session. Behind HTTPS (directly or through a trusted proxy) the panel
+also sends `Strict-Transport-Security`.
 
 There are no per-user permissions: every account can do everything. What the
 panel does and does not defend against, and how it expects to be deployed, is

@@ -29,7 +29,7 @@ if [ -n "${SHYG_BUILD_HOST:-}" ] && [ "$(hostname)" != "$SHYG_BUILD_HOST" ]; the
   exit $rc
 fi
 
-export PATH=/usr/local/go/bin:$PATH
+export PATH=${SHYG_GOROOT:+$SHYG_GOROOT/bin:}/usr/local/go/bin:$PATH
 
 case "${1:-test}" in
   test)  go test ./... ;;

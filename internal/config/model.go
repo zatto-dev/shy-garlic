@@ -16,6 +16,12 @@ import (
 const (
 	DefaultInterval = 30 * time.Second
 	DefaultTimeout  = 5 * time.Second
+
+	// Accepted range for check.interval and check.timeout. Below a second the
+	// ticker would flood the checked service; above a day the value is
+	// certainly a typo. Outside it Load falls back to the default and warns.
+	MinCheckDuration = time.Second
+	MaxCheckDuration = 24 * time.Hour
 )
 
 // DefaultExpect — codes treated as "the service is alive".
@@ -94,6 +100,10 @@ type Config struct {
 	Notify     Notify     `yaml:"notify"`
 	Discovery  Discovery  `yaml:"discovery"`
 	Groups     []Group    `yaml:"groups"`
+
+	// LoadWarnings — values Load replaced with defaults (e.g. an interval of
+	// -5s). Filled by Load, never read from or written to the file.
+	LoadWarnings []Warning `yaml:"-"`
 }
 
 // Notify — notification configuration that is NOT a secret.

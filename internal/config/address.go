@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -43,4 +44,29 @@ func ClickableAddress(address string) bool {
 	}
 	s := strings.ToLower(u.Scheme)
 	return s == "http" || s == "https"
+}
+
+var userinfoPattern = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*://)[^/?#]*@`)
+
+// HasCredentials says whether the address carries user[:password]@.
+func HasCredentials(address string) bool {
+	if u, err := url.Parse(address); err == nil {
+		return u.User != nil
+	}
+	return userinfoPattern.MatchString(address)
+}
+
+// RedactURL drops the userinfo (user:password@) from an address. Use it for
+// everything that is SHOWN or SENT — notifications, HTML, JSON, logs. The health
+// check keeps using the full address, because that is what authenticates it.
+func RedactURL(address string) string {
+	u, err := url.Parse(address)
+	if err != nil {
+		return userinfoPattern.ReplaceAllString(address, "$1")
+	}
+	if u.User == nil {
+		return address
+	}
+	u.User = nil
+	return u.String()
 }

@@ -61,6 +61,9 @@ func run() error {
 		"proxy CIDRs allowed to set X-Forwarded-For and X-Forwarded-Proto (comma-separated)")
 	metricsAllow := fs.String("metrics-allow", envOr("SHYG_METRICS_ALLOW", ""),
 		"CIDRs from which /metrics answers without a token (comma-separated; default none — token required)")
+	allowedHost := fs.String("allowed-host", envOr("SHYG_ALLOWED_HOSTS", ""),
+		"Host names the panel answers to, comma-separated, without ports (default: any). "+
+			"Set it to the name you open the panel with; other names get 421 (protects against DNS rebinding). Loopback always works")
 	debug := fs.Bool("debug", false, "debug logs")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -80,7 +83,7 @@ func run() error {
 		cfgPath: *cfgPath, addr: *addr, dataPath: *dataPath,
 		iconsZip: *iconsZip, cacheDir: *cacheDir, backgroundDir: *backgroundDir,
 		webhook: *webhook, webhookFormat: *webhookFormat, failThreshold: *failThreshold, dockerSock: *dockerSock,
-		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow,
+		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow, allowedHost: *allowedHost,
 	}
 	o.thresholdFromFlag = source(fs, "fail-threshold", "") == "flaga"
 	o.instance = instanceDescription(fs, o)
@@ -114,6 +117,7 @@ type cliOptions struct {
 	dockerSock        string
 	trustedProxy      string
 	metricsAllow      string
+	allowedHost       string
 	failThreshold     int
 	thresholdFromFlag bool
 	instance          []server.OptionInfo
@@ -153,6 +157,7 @@ func instanceDescription(fs *flag.FlagSet, o cliOptions) []server.OptionInfo {
 		{Key: "webhook-format", Value: o.webhookFormat, Source: source(fs, "webhook-format", "SHYG_WEBHOOK_FORMAT")},
 		{Key: "trusted-proxy", Value: o.trustedProxy, Source: source(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
 		{Key: "metrics-allow", Value: o.metricsAllow, Source: source(fs, "metrics-allow", "SHYG_METRICS_ALLOW")},
+		{Key: "allowed-host", Value: o.allowedHost, Source: source(fs, "allowed-host", "SHYG_ALLOWED_HOSTS")},
 	}
 }
 
@@ -204,6 +209,7 @@ func serve(o cliOptions) error {
 		Webhook: o.webhook, FailThreshold: o.failThreshold, DockerSock: o.dockerSock,
 		TrustedProxy: split(o.trustedProxy),
 		MetricsAllow: split(o.metricsAllow),
+		AllowedHosts: split(o.allowedHost),
 
 		WebhookFromEnv: o.webhook != "",
 		WebhookFormat:  o.webhookFormat, WebhookFormatFromEnv: o.webhookFormat != "",
@@ -219,13 +225,7 @@ func serve(o cliOptions) error {
 		return err
 	}
 
-	srv := &http.Server{
-		Addr:              o.addr,
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		// no WriteTimeout — SSE keeps the connection open
-		IdleTimeout: 120 * time.Second,
-	}
+	srv := server.NewHTTPServer(o.addr, s.Handler())
 
 	go func() {
 		<-ctx.Done()

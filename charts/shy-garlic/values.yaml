@@ -40,7 +40,8 @@ config:
   initial: ""
 
 # ── Administrator account ───────────────────────────────────────────────────
-# By default nothing is set: the first visit to /setup creates the admin.
+# By default nothing is set: the first visit to /setup creates the admin (it needs
+# the setup token from the pod's log).
 # Optionally create the account at start-up from a Secret.
 admin:
   # Name of an existing Secret with the keys below. Takes precedence over

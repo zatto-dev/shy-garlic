@@ -293,6 +293,11 @@ func (s *Server) handleServiceCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "name and group are required")
 		return
 	}
+	if !validEntryName(req.Name) || !validEntryName(req.Group) || (req.NewName != "" && !validEntryName(req.NewName)) ||
+		(req.NewGroup != "" && !validEntryName(req.NewGroup)) {
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
+		return
+	}
 	if !config.ValidServiceAddress(req.URL) {
 		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 		return
@@ -341,7 +346,7 @@ func (req serviceRequest) parseCheck() (config.Check, string) {
 		}
 		v, err := time.ParseDuration(t)
 		// below one second the ticker would flood the checked service
-		if err != nil || v < time.Second {
+		if err != nil || v < config.MinCheckDuration || v > config.MaxCheckDuration {
 			return c, "blad_czas_sprawdzania"
 		}
 		*f.out = config.Duration(v)
@@ -410,6 +415,11 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "name and group are required")
 		return
 	}
+	if !validEntryName(req.Name) || !validEntryName(req.Group) || (req.NewName != "" && !validEntryName(req.NewName)) ||
+		(req.NewGroup != "" && !validEntryName(req.NewGroup)) {
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
+		return
+	}
 	lang := i18n.FromRequest(r)
 	if !config.ValidServiceAddress(req.URL) {
 		jsonError(w, http.StatusBadRequest, i18n.T(lang, "blad_adres_uslugi"))
@@ -429,6 +439,11 @@ func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	// a field inherited from a merge key saving would be impossible
 	if current, ok := s.serviceFromConfig(req.Group, req.Name); ok {
 		currentCheck = current.Check
+		// the page shows the address without its login (RedactURL), so the dialog
+		// sends that back; it is not a change and must not strip the credentials
+		if req.URL == config.RedactURL(current.URL) {
+			req.URL = ""
+		}
 		// the dialog always sends back the size — the default `md` must not land in the file
 		if size == current.Size {
 			size = ""
@@ -622,6 +637,10 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "provide name")
 		return
 	}
+	if !validEntryName(req.Name) {
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
+		return
+	}
 	if s.withEdit(w, r, fmt.Sprintf(i18n.T(i18n.FromRequest(r), "opis_dodano_grupe"), req.Name),
 		func(d *config.Document) error { return d.AddGroup(req.Name) }) {
 		jsonReply(w, http.StatusCreated, map[string]any{"ok": true})
@@ -635,6 +654,10 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(w, r, &req); err != nil || req.Name == "" || req.NewName == "" {
 		jsonError(w, http.StatusBadRequest, "provide name and newName")
+		return
+	}
+	if !validEntryName(req.NewName) {
+		jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
 		return
 	}
 	// every service of the group changes key; pairs from the config before the change,
@@ -837,7 +860,18 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "no session")
 		return
 	}
+	// ! The old password is a login oracle for whoever holds a session cookie
+	// (a stolen cookie, an unattended browser): same limiter as sign-in, keyed by
+	// user and address.
+	ip := ipAddress(r)
+	limit := fmt.Sprintf("password:%d:%s", me.ID, ip)
+	if !s.lim.allow(limit) {
+		slog.Warn("too many password change attempts", "login", me.Login, "ip", ip)
+		jsonError(w, http.StatusTooManyRequests, i18n.T(i18n.FromRequest(r), "za_duzo_prob"))
+		return
+	}
 	if _, err := s.st.Authenticate(r.Context(), me.Login, req.Old); err != nil {
+		s.lim.recordFailure(limit)
 		jsonError(w, http.StatusForbidden, "the current password does not match")
 		return
 	}
@@ -1001,7 +1035,7 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 
 	icon := s.resolveIcon(svc.Icon, svc.Name)
 	jsonReply(w, http.StatusOK, map[string]any{
-		"key": serviceKey, "name": svc.Name, "group": group, "url": svc.URL, "icon": svc.Icon,
+		"key": serviceKey, "name": svc.Name, "group": group, "url": config.RedactURL(svc.URL), "icon": svc.Icon,
 		"iconSrc": icon.Src, "iconWariantCiemny": icon.VariantDark, "iconWariantJasny": icon.VariantLight,
 		"size": svc.Size, "description": svc.Description, "tags": tagsToJSON(svc.Tags),
 		"interval": svc.Check.Interval.String(), "timeout": svc.Check.Timeout.String(),
@@ -1210,7 +1244,10 @@ func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.notifier.Test(r.Context()); err != nil {
-		jsonError(w, http.StatusBadGateway, err.Error())
+		// ! The details (resolved addresses, refused connections, TLS errors) are a
+		// port scanner for whoever can press the button; they go to the log only.
+		slog.Warn("webhook test failed", "err", err)
+		jsonError(w, http.StatusBadGateway, i18n.T(i18n.FromRequest(r), "webhook_test_failed"))
 		return
 	}
 	jsonReply(w, http.StatusOK, map[string]any{"ok": true})
@@ -1504,6 +1541,11 @@ func (s *Server) handleServicesBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, u := range req.Services {
+		if !validEntryName(u.Name) || (u.Group != "" && !validEntryName(u.Group)) ||
+			(req.Group != "" && !validEntryName(req.Group)) {
+			jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "invalid_name"))
+			return
+		}
 		if !config.ValidServiceAddress(u.URL) {
 			jsonError(w, http.StatusBadRequest, i18n.T(i18n.FromRequest(r), "blad_adres_uslugi"))
 			return

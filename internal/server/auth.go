@@ -380,7 +380,7 @@ func (s *Server) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	u, err := s.st.Authenticate(r.Context(), login, password)
 	if err != nil {
 		s.lim.recordFailure(ip)
-		slog.Warn("login failed", "login", login, "ip", ip)
+		slog.Warn("login failed", "login", loginForLog(login), "ip", ip)
 		w.WriteHeader(http.StatusUnauthorized)
 		lang := i18n.FromRequest(r)
 		s.renderLogin(w, s.withLang(lang, loginView{
@@ -407,7 +407,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// handleSetup works only as long as there is not a single account.
+// handleSetup works only as long as there is not a single account, and only with
+// the setup token printed in the log (see setup.go).
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	n, err := s.st.UserCount(r.Context())
 	if err != nil {
@@ -418,10 +419,14 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	s.SetupToken() // makes sure it exists and has been logged
+	lang := i18n.FromRequest(r)
+	view := func(message, login string) loginView {
+		return s.withLang(lang, loginView{Setup: true, Error: message, Login: login,
+			Version: Version, Title: i18n.T(lang, "pierwsze_urucho")})
+	}
 	if r.Method == http.MethodGet {
-		lang := i18n.FromRequest(r)
-		s.renderLogin(w, s.withLang(lang, loginView{
-			Setup: true, Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
+		s.renderLogin(w, view("", ""))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, formLimit)
@@ -431,20 +436,40 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	login := strings.TrimSpace(r.FormValue("login"))
 	password := r.FormValue("password")
-	u, err := s.st.AddUser(r.Context(), login, password)
+
+	// a wrong token counts as a failed attempt in the sign-in limiter
+	ip := ipAddress(r)
+	if !s.lim.allow(ip) {
+		slog.Warn("too many setup attempts", "ip", ip)
+		w.WriteHeader(http.StatusTooManyRequests)
+		s.renderLogin(w, view(i18n.T(lang, "za_duzo_prob"), login))
+		return
+	}
+	if !s.checkSetupToken(r.FormValue("setup_token")) {
+		s.lim.recordFailure(ip)
+		slog.Warn("setup refused: wrong setup token", "ip", ip)
+		w.WriteHeader(http.StatusForbidden)
+		s.renderLogin(w, view(i18n.T(lang, "setup_token_bad"), login))
+		return
+	}
+
+	u, err := s.st.AddFirstUser(r.Context(), login, password)
+	if errors.Is(err, store.ErrSetupDone) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther) // someone else finished first
+		return
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		lang := i18n.FromRequest(r)
 		message := i18n.T(lang, "blad_konta")
 		if strings.Contains(err.Error(), "8 characters") {
 			message = i18n.T(lang, "haslo_za_krotkie")
 		} else if strings.Contains(err.Error(), "too short") {
 			message = i18n.T(lang, "login_za_krotki")
 		}
-		s.renderLogin(w, s.withLang(lang, loginView{Setup: true, Error: message, Login: login,
-			Version: Version, Title: i18n.T(lang, "pierwsze_urucho")}))
+		s.renderLogin(w, view(message, login))
 		return
 	}
+	s.clearSetupToken()
 	if err := s.setSession(w, r, u.ID); err != nil {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
@@ -474,7 +499,8 @@ func BootstrapUser(ctx context.Context, st *store.Store, login, password string)
 	if n > 0 {
 		return nil
 	}
-	if _, err := st.AddUser(ctx, login, password); err != nil && !errors.Is(err, store.ErrUserExists) {
+	if _, err := st.AddFirstUser(ctx, login, password); err != nil &&
+		!errors.Is(err, store.ErrUserExists) && !errors.Is(err, store.ErrSetupDone) {
 		return err
 	}
 	slog.Info("admin account created from ENV", "login", login)

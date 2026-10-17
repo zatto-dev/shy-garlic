@@ -33,11 +33,17 @@ import (
 var files embed.FS
 
 type Server struct {
-	path        string
-	monitor     *health.Monitor
-	tmpl        *template.Template
-	st          *store.Store
-	lim         *limiter
+	path    string
+	monitor *health.Monitor
+	tmpl    *template.Template
+	st      *store.Store
+	lim     *limiter
+	setup   setupGate
+	// allowedHosts — Host names the panel answers to (empty = any); set once in New.
+	allowedHosts map[string]bool
+	// sseStreams counts open /events streams per user — see handleEvents.
+	sseMu       sync.Mutex
+	sseStreams  map[int64]int
 	icons       *Catalog
 	backgrounds *BackgroundStore
 	notifier    *notify.Notifier
@@ -122,6 +128,7 @@ type Options struct {
 	DockerSock    string   // Docker socket for suggesting services (empty = default)
 	TrustedProxy  []string // CIDRs of proxies allowed to say X-Forwarded-*
 	MetricsAllow  []string // CIDRs from which /metrics responds without a token (default: none)
+	AllowedHosts  []string // Host names the panel answers to (default: any) — protection against DNS rebinding
 
 	// WebhookFromEnv — the address came from a flag or a variable, so the
 	// panel will not overwrite it. The deploy should win over clicking: otherwise a restart of
@@ -175,6 +182,9 @@ func New(path string, st *store.Store, o Options) (*Server, error) {
 		tokenLogGate:    &logGate{period: time.Minute},
 		tokenUsage:      map[int64]time.Time{},
 		availabilityTTL: 30 * time.Second,
+
+		allowedHosts: parseAllowedHosts(o.AllowedHosts),
+		sseStreams:   map[int64]int{},
 	}
 	if err := s.setMetricsAllow(o.MetricsAllow); err != nil {
 		return nil, err
@@ -202,6 +212,11 @@ func New(path string, st *store.Store, o Options) (*Server, error) {
 		return nil, fmt.Errorf("reading webhook format from DB: %w", err)
 	} else if f != "" {
 		s.notifier.SetFormat(notify.Format(f))
+	}
+	// A fresh instance: print the setup token now, so it is in the log before the
+	// first visitor arrives.
+	if n, err := st.UserCount(context.Background()); err == nil && n == 0 {
+		s.SetupToken()
 	}
 	return s, nil
 }
@@ -260,6 +275,12 @@ func (s *Server) instanceBanner(l i18n.Lang) bannerAPI {
 }
 
 func warningDescription(l i18n.Lang, o config.Warning) string {
+	switch o.Kind {
+	case config.KindCheck:
+		return fmt.Sprintf(i18n.T(l, "banner_warn_check"), o.Service, o.Group, o.Key, o.Address, o.Suggestion)
+	case config.KindCredentials:
+		return fmt.Sprintf(i18n.T(l, "banner_warn_credentials"), o.Service, o.Group, o.Address)
+	}
 	if o.Kind == config.KindAddress {
 		return fmt.Sprintf(i18n.T(l, "baner_ostrz_adres"), o.Service, o.Group, o.Address)
 	}
@@ -410,7 +431,7 @@ func (s *Server) notify(ctx context.Context, serviceKey string, r health.Result)
 	s.mu.RUnlock()
 
 	s.notifier.Observe(ctx, notify.Event{
-		Key: serviceKey, Name: name, Group: group, URL: address,
+		Key: serviceKey, Name: name, Group: group, URL: config.RedactURL(address),
 		State: string(r.State), Code: r.Code, Err: r.Err, MS: r.MS, At: r.At,
 	})
 }
@@ -494,6 +515,7 @@ func (s *Server) reload(ctx context.Context) error {
 	}
 
 	warnings := append(config.Warnings(raw), config.AddressWarnings(cfg)...)
+	warnings = append(warnings, cfg.LoadWarnings...)
 	for _, o := range warnings {
 		slog.Warn("config: suspicious spot", "kind", o.Kind, "line", o.Line,
 			"key", o.Key, "path", o.Path, "service", o.Service)
@@ -674,9 +696,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	mux.Handle("GET /assets/", http.FileServerFS(files))
-	// requireSameOrigin covers the WHOLE mux, so also /login, /setup and /logout
-	return securityHeaders(requireSameOrigin(logging(mux)))
+	mux.Handle("GET /assets/", noDirectoryListing(http.FileServerFS(files)))
+	// requireSameOrigin covers the WHOLE mux, so also /login, /setup and /logout.
+	// The Host check goes first: a request for a foreign name never reaches anything.
+	return securityHeaders(requireAllowedHost(s.allowedHosts, requireSameOrigin(logging(mux))))
+}
+
+// noDirectoryListing answers 404 for a directory, instead of the file server's
+// generated index of the embedded files.
+func noDirectoryListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // securityHeaders — CSP without unsafe-inline for external scripts;
@@ -687,6 +722,14 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("X-Frame-Options", "SAMEORIGIN")
+		// the panel needs none of these browser features
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+		// only when the request really came over HTTPS (directly, or through a
+		// trusted proxy): over plain HTTP the header is ignored by browsers anyway,
+		// and sending it on a LAN-only http:// setup would only mislead
+		if overHTTPS(r) {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		// ! style-src without 'unsafe-inline' stays — that is why the template has not
 		// a single style= attribute, and the background is set through CSSOM
 		h.Set("Content-Security-Policy",
@@ -919,8 +962,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 				Key:      key(g.Name, svc.Name),
 				Group:    g.Name,
 				Name:     svc.Name,
-				URL:      svc.URL,
-				Href:     hrefOf(svc.URL),
+				URL:      config.RedactURL(svc.URL),
+				Href:     hrefOf(config.RedactURL(svc.URL)),
 				Host:     hostOf(svc.URL),
 				IconName: svc.Icon,
 				Icon:     s.resolveIcon(svc.Icon, svc.Name),
@@ -964,6 +1007,39 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(s.monitor.Snapshot())
 }
 
+// maxStreamsPerUser — how many /events streams one account may keep open. A
+// person has a handful of tabs; more is a script holding connections open.
+const maxStreamsPerUser = 8
+
+func streamOwner(r *http.Request) int64 {
+	if u := UserFromRequest(r); u != nil {
+		return u.ID
+	}
+	return 0
+}
+
+func (s *Server) acquireStream(r *http.Request) bool {
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+	id := streamOwner(r)
+	if s.sseStreams[id] >= maxStreamsPerUser {
+		return false
+	}
+	s.sseStreams[id]++
+	return true
+}
+
+func (s *Server) releaseStream(r *http.Request) {
+	s.sseMu.Lock()
+	defer s.sseMu.Unlock()
+	id := streamOwner(r)
+	if s.sseStreams[id] <= 1 {
+		delete(s.sseStreams, id)
+		return
+	}
+	s.sseStreams[id]--
+}
+
 // handleEvents is the SSE stream — the panel gets changes immediately, without polling.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
@@ -971,6 +1047,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	// each stream holds a goroutine, a monitor subscription and a connection
+	if !s.acquireStream(r) {
+		http.Error(w, "too many open streams", http.StatusTooManyRequests)
+		return
+	}
+	defer s.releaseStream(r)
+	// the server has a WriteTimeout, and a stream is meant to outlive it
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -1103,7 +1188,7 @@ func hrefOf(raw string) string {
 func hostOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		return raw
+		return config.RedactURL(raw)
 	}
 	return u.Host
 }
@@ -1113,4 +1198,34 @@ func firstLetter(s string) string {
 		return strings.ToUpper(string(r))
 	}
 	return "?"
+}
+
+// ── HTTP server limits ───────────────────────────────────────────────────────
+
+const (
+	readTimeout    = 30 * time.Second
+	writeTimeout   = 60 * time.Second
+	idleTimeout    = 120 * time.Second
+	maxHeaderBytes = 64 << 10
+)
+
+// NewHTTPServer builds the http.Server with the limits the panel runs under.
+//
+// ReadTimeout and WriteTimeout bound a slow client holding a goroutine and a
+// connection. The two handlers that legitimately take longer lift their own
+// deadline: /events (SSE, open for hours) and the wallpaper upload.
+func NewHTTPServer(addr string, h http.Handler) *http.Server {
+	return newHTTPServer(addr, h, writeTimeout)
+}
+
+func newHTTPServer(addr string, h http.Handler, write time.Duration) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      write,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+	}
 }

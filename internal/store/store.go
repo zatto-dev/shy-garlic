@@ -14,6 +14,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,12 +27,17 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserNotFound       = errors.New("user not found")
 	ErrUserExists         = errors.New("user already exists")
+	// ErrSetupDone: the first account already exists, so setup is closed.
+	ErrSetupDone = errors.New("setup already done")
 )
 
 // SessionDuration — how long the login cookie lives.
 const SessionDuration = 30 * 24 * time.Hour
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db  *sql.DB
+	now func() time.Time // replaced in tests
+}
 
 type User struct {
 	ID        int64
@@ -47,18 +55,57 @@ type Result struct {
 }
 
 func Open(path string) (*Store, error) {
+	prepareFiles(path)
 	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
 	// SQLite dislikes concurrent writes; a single writer is entirely enough
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, now: time.Now}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
+	tightenFiles(path)
 	return s, nil
+}
+
+// inMemory says whether path is not a plain file.
+func inMemory(path string) bool {
+	return path == ":memory:" || path == "" || strings.HasPrefix(path, "file:")
+}
+
+// prepareFiles creates the data directory (0700) and the database file (0600)
+// when they do not exist. SQLite gives the -wal and -shm files the mode of the
+// main file, so creating it private makes the whole set private. The database
+// holds password hashes, session hashes and the webhook address.
+func prepareFiles(path string) {
+	if inMemory(path) {
+		return
+	}
+	if dir := filepath.Dir(path); dir != "." {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			_ = os.MkdirAll(dir, 0o700)
+		}
+	}
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+		f.Close()
+	}
+}
+
+// tightenFiles narrows files left over from older versions (created 0644) to
+// 0600. Errors are ignored on purpose: a read-only mount or a file owned by
+// someone else must not stop the panel.
+func tightenFiles(path string) {
+	if inMemory(path) {
+		return
+	}
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if fi, err := os.Stat(path + suffix); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(path+suffix, 0o600)
+		}
+	}
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -119,7 +166,10 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	if err := s.backfillTokenUserIDs(); err != nil {
 		return err
 	}
-	return s.hashSessions()
+	if err := s.hashSessions(); err != nil {
+		return err
+	}
+	return s.normalizeSessionExpiry()
 }
 
 // backfillTokenUserIDs: API tokens remembered only the author's text login, so
@@ -176,6 +226,72 @@ func (s *Store) hashSessions() error {
 	}
 	for _, t := range plain {
 		if _, err := s.db.Exec(`UPDATE sessions SET token = ? WHERE token = ?`, tokenHash(t), t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sessionTimeFormat — how expires_at is stored: UTC, in the exact shape of SQLite's
+// own CURRENT_TIMESTAMP ("2026-10-17 12:34:56"), so comparing the two as text is
+// correct. The driver used to write time.Time with the local offset and zone name
+// ("… +0200 CEST"); as text that sorts by local wall-clock digits, so in any zone
+// east of UTC a session stayed valid for hours past its expiry.
+const sessionTimeFormat = "2006-01-02 15:04:05"
+
+var legacyTimeFormats = []string{
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02 15:04:05.999999999 -0700 -0700",
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02 15:04:05.999999999-07:00",
+}
+
+// parseLegacyTime reads an expires_at written by an older version.
+func parseLegacyTime(v string) (time.Time, bool) {
+	if i := strings.Index(v, " m="); i >= 0 { // monotonic clock reading from time.Time.String()
+		v = v[:i]
+	}
+	for _, layout := range legacyTimeFormats {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// normalizeSessionExpiry rewrites expires_at values from older databases into
+// sessionTimeFormat (UTC). Idempotent: rows already in the new shape are 19
+// characters long and are left alone. A value that cannot be read is dropped
+// together with its session — the user signs in again, which is safer than
+// guessing.
+func (s *Store) normalizeSessionExpiry() error {
+	rows, err := s.db.Query(`SELECT token, CAST(expires_at AS TEXT) FROM sessions WHERE length(CAST(expires_at AS TEXT)) <> ?`, len(sessionTimeFormat))
+	if err != nil {
+		return err
+	}
+	type legacy struct{ token, expires string }
+	var old []legacy
+	for rows.Next() {
+		var l legacy
+		if err := rows.Scan(&l.token, &l.expires); err != nil {
+			rows.Close()
+			return err
+		}
+		old = append(old, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, l := range old {
+		if t, ok := parseLegacyTime(l.expires); ok {
+			_, err = s.db.Exec(`UPDATE sessions SET expires_at = ? WHERE token = ?`, t.UTC().Format(sessionTimeFormat), l.token)
+		} else {
+			_, err = s.db.Exec(`DELETE FROM sessions WHERE token = ?`, l.token)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -240,6 +356,33 @@ func (s *Store) AddUser(ctx context.Context, login, password string) (*User, err
 	}
 	id, _ := res.LastInsertId()
 	return &User{ID: id, Login: login, CreatedAt: time.Now()}, nil
+}
+
+// AddFirstUser creates the first account, and only if there is none: the check
+// and the insert are ONE statement, so concurrent setup requests cannot all
+// succeed (eight parallel POSTs used to create eight administrators).
+// Returns ErrSetupDone when an account already exists.
+func (s *Store) AddFirstUser(ctx context.Context, login, password string) (*User, error) {
+	if len(login) < 2 {
+		return nil, errors.New("login too short")
+	}
+	if len(password) < 8 {
+		return nil, errors.New("password must be at least 8 characters")
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO users (login, hash) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`, login, string(h))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUserExists, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrSetupDone
+	}
+	id, _ := res.LastInsertId()
+	return &User{ID: id, Login: login, CreatedAt: s.now()}, nil
 }
 
 func (s *Store) ChangePassword(ctx context.Context, userID int64, newPassword string) error {
@@ -318,9 +461,10 @@ func (s *Store) NewSession(ctx context.Context, userID int64) (string, time.Time
 		return "", time.Time{}, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(b)
-	expiresAt := time.Now().Add(SessionDuration)
+	expiresAt := s.now().Add(SessionDuration)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`, tokenHash(token), userID, expiresAt)
+		`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)`,
+		tokenHash(token), userID, expiresAt.UTC().Format(sessionTimeFormat))
 	return token, expiresAt, err
 }
 
