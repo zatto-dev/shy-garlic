@@ -183,19 +183,19 @@ func TestHomePageShowsDescriptionAndTagsAndSearchesByThem(t *testing.T) {
 		t.Error("the description was not escaped")
 	}
 	// description and tags are in the search index, next to the name and host
-	re := `data-szukaj="Sonarr sonarr.home.arpa Seriale`
+	re := `data-search="Sonarr sonarr.home.arpa Seriale`
 	if !strings.Contains(html, re) {
-		t.Errorf("no description in data-szukaj:\n%s", html[strings.Index(html, `data-nazwa="Sonarr"`):][:400])
+		t.Errorf("no description in data-search:\n%s", html[strings.Index(html, `data-name="Sonarr"`):][:400])
 	}
-	for _, want := range []string{`class="opis-uslugi"`, `class="tagi"`, `class="tag"`, `>4k<`} {
+	for _, want := range []string{`class="service-description"`, `class="tags"`, `class="tag"`, `>4k<`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("HTML lacks %s", want)
 		}
 	}
 	// a service without a description and tags does not get empty elements
-	i := strings.Index(html, `data-nazwa="Jellyfin"`)
+	i := strings.Index(html, `data-name="Jellyfin"`)
 	j := strings.Index(html[i:], `</li>`)
-	if strings.Contains(html[i:i+j], `class="opis-uslugi"`) || strings.Contains(html[i:i+j], `class="tagi"`) {
+	if strings.Contains(html[i:i+j], `class="service-description"`) || strings.Contains(html[i:i+j], `class="tags"`) {
 		t.Error("empty description/tags rendered for Jellyfin")
 	}
 }

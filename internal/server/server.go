@@ -722,7 +722,7 @@ type serviceView struct {
 
 	Description string
 	Tags        []string
-	// TagsJSON — the same tags as JSON in the data-tagi attribute; the edit window
+	// TagsJSON — the same tags as JSON in the data-tags attribute; the edit window
 	// reads them from there, so a tag with a comma does not fall apart into two.
 	TagsJSON string
 }

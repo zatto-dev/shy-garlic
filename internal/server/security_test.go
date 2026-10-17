@@ -185,7 +185,7 @@ func TestRenderDoesNotLinkUnsafeAddress(t *testing.T) {
 	}
 	// ! data-url was filtered by html/template as a URL: tcp:// turned into
 	// "#ZgotmplZ", and the edit form saved that back to the file
-	if !strings.Contains(html, `data-adres="tcp://10.0.0.5:22"`) {
+	if !strings.Contains(html, `data-address="tcp://10.0.0.5:22"`) {
 		t.Error("a tcp:// address does not reach the edit form")
 	}
 	// you can still see what we are checking

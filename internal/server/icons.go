@@ -558,7 +558,7 @@ func (k *Catalog) Search(q string, limit int) []string {
 //
 // When an icon has separate variants for the dark/light theme, Src stays empty and
 // the template renders BOTH images at once (WariantCiemny/WariantJasny) — which one
-// shows is decided by pure CSS on the data-ton attribute on <html>. The theme is a
+// shows is decided by pure CSS on the data-tone attribute on <html>. The theme is a
 // choice of the BROWSER (it can be switched without reloading the page, see
 // appearance.tone in the config), so the server does not know which to show when
 // rendering the page — it must give both and leave the decision to CSS, with zero

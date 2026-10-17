@@ -75,7 +75,7 @@ func TestStartWithBrokenConfigDoesNotDie(t *testing.T) {
 		t.Fatalf("start with a broken file must succeed (crash loop in Docker): %v", err)
 	}
 	html := homePage(t, s)
-	if !strings.Contains(html, `id="baner-config"`) || !strings.Contains(html, `data-stan="error"`) {
+	if !strings.Contains(html, `id="banner-config"`) || !strings.Contains(html, `data-state="error"`) {
 		t.Errorf("no error banner:\n%.600s", html)
 	}
 	// error line number (a tab on line 3)
@@ -126,7 +126,7 @@ func TestStartWithoutFileAlsoDoesNotDie(t *testing.T) {
 	if err := s.loadAfterStart(context.Background()); err != nil {
 		t.Fatalf("missing file = banner, not exit: %v", err)
 	}
-	if html := homePage(t, s); !strings.Contains(html, `data-stan="error"`) {
+	if html := homePage(t, s); !strings.Contains(html, `data-state="error"`) {
 		t.Error("no banner for a missing file")
 	}
 }
@@ -144,7 +144,7 @@ func TestBrokenFileDuringRunLogsOnceAndClearsBanner(t *testing.T) {
 	if err := s.loadAfterStart(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if html := homePage(t, s); strings.Contains(html, `data-stan="error"`) {
+	if html := homePage(t, s); strings.Contains(html, `data-state="error"`) {
 		t.Fatal("banner for a good file")
 	}
 	if b := s.instanceBanner("en"); len(b.Warnings) != 1 {
@@ -167,7 +167,7 @@ func TestBrokenFileDuringRunLogsOnceAndClearsBanner(t *testing.T) {
 		t.Fatalf("error logged %d times, want 1", n)
 	}
 	html := homePage(t, s)
-	if !strings.Contains(html, `data-stan="error"`) || !strings.Contains(html, "Dobry") ||
+	if !strings.Contains(html, `data-state="error"`) || !strings.Contains(html, "Dobry") ||
 		!strings.Contains(html, "last working configuration") {
 		t.Errorf("after breaking: the panel should stay on the previous configuration with a banner:\n%.800s", html)
 	}
@@ -190,7 +190,7 @@ func TestBrokenFileDuringRunLogsOnceAndClearsBanner(t *testing.T) {
 	breakFile("title: Naprawiony\ngroups:\n  - name: Sieć\n")
 	s.checkFileChange(s.ctx)
 	html = homePage(t, s)
-	if strings.Contains(html, `data-stan="error"`) || !strings.Contains(html, "Naprawiony") {
+	if strings.Contains(html, `data-state="error"`) || !strings.Contains(html, "Naprawiony") {
 		t.Errorf("after the fix the banner should vanish and the panel load the file:\n%.800s", html)
 	}
 }
@@ -212,7 +212,7 @@ func TestUnknownKeyIsWarningInBanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := homePage(t, s)
-	if !strings.Contains(html, `data-stan="warnings"`) {
+	if !strings.Contains(html, `data-state="warnings"`) {
 		t.Fatalf("no warnings banner:\n%.600s", html)
 	}
 	for _, want := range []string{`unknown key`, "chek", "line 5", `did you mean`, "check"} {
@@ -238,7 +238,7 @@ func TestGoodFileHasNoBanner(t *testing.T) {
 	if err := s.loadAfterStart(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if html := homePage(t, s); !strings.Contains(html, `data-stan="ok"`) {
+	if html := homePage(t, s); !strings.Contains(html, `data-state="ok"`) {
 		t.Error("the banner is not in state ok")
 	}
 }
@@ -262,7 +262,7 @@ func TestRawEditorRepairsBrokenFile(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("repair through the editor: %d %s", w.Code, w.Body)
 	}
-	if html := homePage(t, s); strings.Contains(html, `data-stan="error"`) || !strings.Contains(html, "Naprawa") {
+	if html := homePage(t, s); strings.Contains(html, `data-state="error"`) || !strings.Contains(html, "Naprawa") {
 		t.Errorf("banner stayed after the fix:\n%.600s", html)
 	}
 	// structural operations on a broken file give a readable error, not a panic

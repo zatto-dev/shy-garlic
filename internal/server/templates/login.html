@@ -1,6 +1,6 @@
 {{define "login.html" -}}
 <!doctype html>
-<html lang="{{.Lang}}" data-preset="{{.Appearance.Preset}}" data-ton="{{.Appearance.Tone}}">
+<html lang="{{.Lang}}" data-preset="{{.Appearance.Preset}}" data-tone="{{.Appearance.Tone}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,31 +10,31 @@
 <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/assets/favicon-180.png">
 </head>
-<body class="brama">
+<body class="gate">
 
 <!-- ── background layer ───────────────────────────────────────────────── -->
 <!-- There is no app.js here, so the background must work with CSS alone, from the <html> attributes.
      There is never a wallpaper here: the server substitutes a preset, and /bg/ sits behind the login. -->
-<div id="tlo" aria-hidden="true">
-  <div class="tlo-warstwa">
-    <div class="tlo-blob"></div>
-    <div class="tlo-blob"></div>
-    <div class="tlo-blob"></div>
-    <div class="tlo-blob"></div>
-    <div class="tlo-ziarno"></div>
+<div id="background" aria-hidden="true">
+  <div class="background-layer">
+    <div class="background-blob"></div>
+    <div class="background-blob"></div>
+    <div class="background-blob"></div>
+    <div class="background-blob"></div>
+    <div class="background-grain"></div>
   </div>
 </div>
 
-<main class="brama-karta">
+<main class="gate-card">
   <img src="/assets/logo.png" alt="" width="64" height="64" class="logo">
   <h1>Shy Garlic</h1>
   {{if .Setup}}
-    <p class="brama-opis">{{.T.opis_setup}}</p>
+    <p class="gate-description">{{.T.opis_setup}}</p>
   {{else}}
-    <p class="brama-opis">{{.T.opis_logowania}}</p>
+    <p class="gate-description">{{.T.opis_logowania}}</p>
   {{end}}
 
-  {{if .Error}}<p class="brama-blad" role="alert">{{.Error}}</p>{{end}}
+  {{if .Error}}<p class="gate-error" role="alert">{{.Error}}</p>{{end}}
 
   <form method="post" action="{{if .Setup}}/setup{{else}}/login{{end}}" autocomplete="on">
     <input type="hidden" name="next" value="{{.Next}}">
@@ -49,17 +49,17 @@
              autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}"
              {{if .Setup}}minlength="8"{{end}}>
     </label>
-    {{if .Setup}}<p class="brama-podpowiedz">{{.T.min_8}}</p>{{end}}
+    {{if .Setup}}<p class="gate-hint">{{.T.min_8}}</p>{{end}}
     <button type="submit" class="btn btn--primary btn--lg">{{if .Setup}}{{.T.zaloz_konto}}{{else}}{{.T.zaloguj}}{{end}}</button>
   </form>
 
-  <p class="brama-jezyk">
+  <p class="gate-lang">
     <a href="/lang?set={{.SecondLang}}" rel="nofollow"
        title="{{.T.jezyk}}: {{.SecondLangName}}" aria-label="{{.T.jezyk}}: {{.SecondLangName}}"
        >{{.SecondLangShort}}</a>
   </p>
 
-  <p class="brama-stopka">Shy Garlic {{.Version}}</p>
+  <p class="gate-footer">Shy Garlic {{.Version}}</p>
 </main>
 </body>
 </html>

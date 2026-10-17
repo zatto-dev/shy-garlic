@@ -18,15 +18,15 @@
   };
   const STATES = ["up", "degraded", "down", "unknown"];
 
-  const summary = $("#podsumowanie");
-  const connection = $("#polaczenie");
-  const chipUp = $("#chip-dziala");
-  const chipProblems = $("#chip-problemy");
+  const summary = $("#summary");
+  const connection = $("#connection");
+  const chipUp = $("#chip-running");
+  const chipProblems = $("#chip-problems");
   let cards = new Map();
   let lastState = {};
 
   function refreshIndex() {
-    cards = new Map($$(".karta").map((el) => [el.dataset.key, el]));
+    cards = new Map($$(".card").map((el) => [el.dataset.key, el]));
   }
   refreshIndex();
 
@@ -91,19 +91,19 @@
 
   function applyAppearance(withTransition) {
     const w = effectiveAppearance();
-    const otherBackground = root.dataset.preset !== w.preset || root.dataset.ton !== w.tone;
+    const otherBackground = root.dataset.preset !== w.preset || root.dataset.tone !== w.tone;
 
     root.dataset.preset = w.preset;
-    root.dataset.ton = w.tone;
-    document.body.dataset.widok = w.view;
+    root.dataset.tone = w.tone;
+    document.body.dataset.view = w.view;
 
     // the only legitimate dynamic route: CSSOM. CSP style-src 'self' allows
     // neither a style= attribute nor a <style> in the document.
-    root.style.setProperty("--tlo-rozmycie", w.blur + "px");
+    root.style.setProperty("--background-blur", w.blur + "px");
     // A fraction, not a percent — CSS multiplies it by .56 for the top end of the gradient.
     root.style.setProperty("--dim", String(w.dim / 100));
-    root.style.setProperty("--tlo-inset", -(2 * w.blur + 4) + "px");
-    root.style.setProperty("--tlo-obraz",
+    root.style.setProperty("--background-inset", -(2 * w.blur + 4) + "px");
+    root.style.setProperty("--background-image",
       w.preset === "photo" && w.image ? 'url("/bg/' + encodeURIComponent(w.image) + '")' : "none");
 
     refreshPicker(w);
@@ -118,17 +118,17 @@
 
   // The new layer fades in over the old one; the old one disappears after the animation.
   function crossfade() {
-    const backgroundEl = $("#tlo");
+    const backgroundEl = $("#background");
     if (!backgroundEl || backgroundEl.children.length > 2) return;
     const oldLayer = backgroundEl.lastElementChild;
     if (!oldLayer) return;
     const newLayer = oldLayer.cloneNode(true);
-    newLayer.classList.add("wchodzi");
+    newLayer.classList.add("entering");
     backgroundEl.append(newLayer);
     setTimeout(() => {
       const previous = newLayer.previousElementSibling;
       if (previous) previous.remove();
-      newLayer.classList.remove("wchodzi");
+      newLayer.classList.remove("entering");
     }, 900);
   }
 
@@ -143,59 +143,59 @@
   })();
 
   // ── background picker ───────────────────────────────────────────────────
-  const backgroundPicker = $("#picker-tla");
-  const backgroundButton = $("#przycisk-tla");
-  const menuPanel = $("#menu-uslugi-panel");
-  const menuButton = $("#menu-uslugi");
-  const scrim = $("#zaslona");
-  const wallpaperTile = $(".kafel-tapety");
-  const wallpaperFileInput = $("#plik-tapety");
-  const blurSlider = $("#suwak-rozmycia");
-  const backgroundList = $("#tlo-lista");
+  const backgroundPicker = $("#picker-backgrounds");
+  const backgroundButton = $("#background-button");
+  const menuPanel = $("#menu-services-panel");
+  const menuButton = $("#menu-services");
+  const scrim = $("#backdrop");
+  const wallpaperTile = $(".tile-wallpaper");
+  const wallpaperFileInput = $("#wallpaper-file");
+  const blurSlider = $("#blur-slider");
+  const backgroundList = $("#background-list");
   let backgroundsEnabled = false;
   let uploadedBackgrounds = [];
 
   function refreshPicker(w) {
-    for (const tile of $$(".kafel-presetu, .kafel-tapety")) {
+    for (const tile of $$(".tile-preset, .tile-wallpaper")) {
       tile.setAttribute("aria-pressed", String(tile.dataset.preset === w.preset));
     }
     if (wallpaperTile) {
-      wallpaperTile.classList.toggle("pusty", uploadedBackgrounds.length === 0);
-      const sub = $(".kafel-sub", wallpaperTile);
+      wallpaperTile.classList.toggle("empty", uploadedBackgrounds.length === 0);
+      const sub = $(".tile-sub", wallpaperTile);
       if (sub) sub.textContent = uploadedBackgrounds.length ? "" : tr("tapeta_upusc");
     }
     if (blurSlider) blurSlider.value = String(w.blur);
-    const value = $("#wartosc-rozmycia");
+    const value = $("#blur-value");
     if (value) value.textContent = w.blur + " px";
-    const dimInput = $("#suwak-przyciemnienia");
+    const dimInput = $("#dim-slider");
     if (dimInput) dimInput.value = String(w.dim);
-    const dimValue = $("#wartosc-przyciemnienia");
+    const dimValue = $("#dim-value");
     if (dimValue) dimValue.textContent = w.dim + "%";
     // Tone and dimming only make sense for a custom wallpaper: a preset carries
     // its brightness by definition, and its layer is part of the preset design.
     // ! The tone row is NO LONGER hidden within a wallpaper — the automatic pick from the
     // luminance measurement can be wrong, and a hidden control means the user cannot
     // fix it.
-    const toneRow = $("#picker-ton");
+    const toneRow = $("#picker-tone");
     if (toneRow) toneRow.hidden = w.preset !== "photo";
-    const dimRow = $("#wiersz-przyciemnienia");
+    const dimRow = $("#dim-row");
     if (dimRow) dimRow.hidden = w.preset !== "photo";
-    $("#ton-jasny").setAttribute("aria-pressed", String(w.tone === "dark"));
-    $("#ton-ciemny").setAttribute("aria-pressed", String(w.tone === "light"));
-    for (const li of $$(".tlo-pozycja", backgroundList)) {
-      const inUse = li.dataset.nazwa === w.image && w.preset === "photo";
-      li.classList.toggle("uzywana", inUse);
+    $("#tone-light").setAttribute("aria-pressed", String(w.tone === "dark"));
+    $("#tone-dark").setAttribute("aria-pressed", String(w.tone === "light"));
+    for (const li of $$(".background-item", backgroundList)) {
+      const inUse = li.dataset.name === w.image && w.preset === "photo";
+      li.classList.toggle("in-use", inUse);
       // the border colour alone says nothing to a screen reader — hence the title
-      const selectButton = $("button[data-akcja='tapeta']", li);
-      if (selectButton) selectButton.title = inUse ? li.dataset.nazwa + " · " + tr("tapeta_uzywana") : li.dataset.nazwa;
+      const selectButton = $("button[data-action='wallpaper']", li);
+      if (selectButton) selectButton.title = inUse ? li.dataset.name + " · " + tr("tapeta_uzywana") : li.dataset.name;
     }
     // The shortcut to the instance layer is seen only by someone who may write to the file.
-    $("#picker-do-ustawien").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
+    $("#picker-to-settings").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
   }
 
   function refreshView(view) {
-    for (const b of $$("#przelacznik-widoku [data-widok]")) {
-      b.setAttribute("aria-selected", String(b.dataset.widok === view));
+    for (const b of $$("#view-switcher [data-view]")) {
+      b.setAttribute("aria-selected", String(b.dataset.view === view));
     }
   }
 
@@ -227,22 +227,22 @@
   menuButton.addEventListener("click", () => togglePopover(menuPanel, menuButton, "aria-expanded"));
   scrim.addEventListener("click", closePopovers);
 
-  $("#ton-jasny").addEventListener("click", () => saveAppearance({ tone: "dark" }));
-  $("#ton-ciemny").addEventListener("click", () => saveAppearance({ tone: "light" }));
+  $("#tone-light").addEventListener("click", () => saveAppearance({ tone: "dark" }));
+  $("#tone-dark").addEventListener("click", () => saveAppearance({ tone: "light" }));
 
   blurSlider.addEventListener("input", () => {
     const v = Math.max(0, Math.min(30, parseInt(blurSlider.value, 10) || 0));
-    root.style.setProperty("--tlo-rozmycie", v + "px");
-    root.style.setProperty("--tlo-inset", -(2 * v + 4) + "px");
-    $("#wartosc-rozmycia").textContent = v + " px";
+    root.style.setProperty("--background-blur", v + "px");
+    root.style.setProperty("--background-inset", -(2 * v + 4) + "px");
+    $("#blur-value").textContent = v + " px";
   });
   blurSlider.addEventListener("change", () => {
     saveAppearance({ blur: Math.max(0, Math.min(30, parseInt(blurSlider.value, 10) || 0)) });
   });
 
-  const dimSlider = $("#suwak-przyciemnienia");
+  const dimSlider = $("#dim-slider");
   dimSlider.addEventListener("input", () => {
-    $("#wartosc-przyciemnienia").textContent = dimSlider.value + "%";
+    $("#dim-value").textContent = dimSlider.value + "%";
   });
   dimSlider.addEventListener("change", () => {
     saveAppearance({ dim: Math.max(0, Math.min(80, parseInt(dimSlider.value, 10) || 0)) });
@@ -257,16 +257,16 @@
   });
 
   // And this one leads to the instance layer — the picker itself does not write to the file.
-  $("#picker-do-ustawien").addEventListener("click", () => {
+  $("#picker-to-settings").addEventListener("click", () => {
     closePopovers();
-    $("#ustawienia").click();
+    $("#settings").click();
     setTimeout(() => {
-      const tab = $('[role="tab"][aria-controls="panel-wyglad"]');
+      const tab = $('[role="tab"][aria-controls="panel-appearance"]');
       if (tab) tab.click();
     }, 0);
   });
 
-  $("#picker-podmien").addEventListener("click", () => wallpaperFileInput.click());
+  $("#picker-replace").addEventListener("click", () => wallpaperFileInput.click());
   wallpaperFileInput.addEventListener("change", () => {
     const file = wallpaperFileInput.files && wallpaperFileInput.files[0];
     wallpaperFileInput.value = "";
@@ -282,20 +282,20 @@
       backgroundList.textContent = "";
       for (const t of uploadedBackgrounds) {
         const li = document.createElement("li");
-        li.className = "tlo-pozycja";
-        li.dataset.nazwa = t.name;
+        li.className = "background-item";
+        li.dataset.name = t.name;
 
         const selectButton = document.createElement("button");
         selectButton.type = "button";
-        selectButton.dataset.akcja = "tapeta";
-        selectButton.dataset.nazwa = t.name;
+        selectButton.dataset.action = "wallpaper";
+        selectButton.dataset.name = t.name;
         selectButton.textContent = t.name;
 
         const removeButton = document.createElement("button");
         removeButton.type = "button";
-        removeButton.className = "btn btn--icon btn--sm btn--danger tlo-usun";
-        removeButton.dataset.akcja = "usun-tapete";
-        removeButton.dataset.nazwa = t.name;
+        removeButton.className = "btn btn--icon btn--sm btn--danger background-remove";
+        removeButton.dataset.action = "remove-wallpaper";
+        removeButton.dataset.name = t.name;
         removeButton.title = tr("tapeta_usun");
         removeButton.setAttribute("aria-label", tr("tapeta_usun") + " " + t.name);
         // SVG, not the "×" character — the rest of the panel draws icons, and a glyph here
@@ -359,15 +359,15 @@
   }
 
   async function uploadWallpaper(file) {
-    if (!backgroundsEnabled) return notify(tr("tapeta_wylaczona"), "ostrzezenie");
+    if (!backgroundsEnabled) return notify(tr("tapeta_wylaczona"), "warning");
     // the type from the name is only a hint — the server has the last word anyway,
     // reading it from the file content
     if (file.type && !BACKGROUND_TYPES.includes(file.type)) {
-      return notify(tr("tapeta_zly_typ"), "ostrzezenie");
+      return notify(tr("tapeta_zly_typ"), "warning");
     }
     const limitMB = (window.WYGLAD && window.WYGLAD.limitMB) || 8;
     if (file.size > limitMB * 1024 * 1024) {
-      return notify(substitute(tr("tapeta_za_duza"), limitMB), "ostrzezenie");
+      return notify(substitute(tr("tapeta_za_duza"), limitMB), "warning");
     }
 
     const tone = await toneFromImage(file);
@@ -384,7 +384,7 @@
       saveAppearance(fields);
       notify(tr("tapeta_wgrana"));
     } catch (err) {
-      notify(err.message || tr("blad_zapisu_tla"), "ostrzezenie");
+      notify(err.message || tr("blad_zapisu_tla"), "warning");
     }
   }
 
@@ -435,9 +435,9 @@
       const s = STATES.indexOf(r.state) !== -1 ? r.state : "unknown";
       counts[s]++;
 
-      const box = $(".stan", el);
-      const label = $(".etykieta", el);
-      if (box.dataset.stan !== s) box.dataset.stan = s;
+      const box = $(".state", el);
+      const label = $(".label", el);
+      if (box.dataset.state !== s) box.dataset.state = s;
 
       const text = stateLabel(s, r);
       if (label.textContent !== text) label.textContent = text;
@@ -447,7 +447,7 @@
       box.title = `${STATE_DESCRIPTIONS[s]}${reason} · ${tr("sprawdzone")} ${when}`;
       box.setAttribute("aria-label", `${STATE_DESCRIPTIONS[s]}${reason}`);
 
-      const meta = $(".karta-meta span", el);
+      const meta = $(".card-meta span", el);
       if (meta) meta.textContent = r.at ? " · " + age(r.at) : "";
     }
 
@@ -513,8 +513,8 @@
     const emptyPaths = { up: "", degraded: "", down: "" };
     const result = points.length ? barPaths(points, W, H, gap) : { d: emptyPaths, scaleMax: 0, step: 0 };
     for (const p of $$("path", svg)) {
-      p.setAttribute("d", result.d[p.dataset.stan] || "");
-      p.setAttribute("fill", FILL[p.dataset.stan] || "var(--unknown)");
+      p.setAttribute("d", result.d[p.dataset.state] || "");
+      p.setAttribute("fill", FILL[p.dataset.state] || "var(--unknown)");
     }
     return result;
   }
@@ -525,14 +525,14 @@
       const r = await fetch(`/api/history?key=${encodeURIComponent(key)}&n=40`);
       if (!r.ok) return;
       const d = await r.json();
-      drawChart($(".wykres", el), d.points || [], 0.6);
+      drawChart($(".chart", el), d.points || [], 0.6);
       if (d.samples > 0) {
-        const box = $(".stan", el);
+        const box = $(".state", el);
         box.dataset.uptime = d.uptime.toFixed(1);
         const ariaLabel = `${tr("dostepnosc_24h")}: ${d.uptime.toFixed(1)}% (${d.samples} ${tr("sprawdzen")})`;
-        $(".wykres", el).setAttribute("aria-label", ariaLabel);
-        $(".wykres", el).setAttribute("title", ariaLabel);
-        const meta = $(".karta-meta b", el);
+        $(".chart", el).setAttribute("aria-label", ariaLabel);
+        $(".chart", el).setAttribute("title", ariaLabel);
+        const meta = $(".card-meta b", el);
         if (meta) meta.textContent = d.uptime.toFixed(1) + "%";
       }
     } catch (_) {}
@@ -574,15 +574,15 @@
   // File state banner. The texts come ready from the server (in the tab's language);
   // everything goes through textContent, nothing through innerHTML.
   function showBanner(b) {
-    const el = $("#baner-config");
+    const el = $("#banner-config");
     if (!el) return;
-    el.dataset.stan = b.state;
+    el.dataset.state = b.state;
     el.hidden = b.state === "ok";
-    $("#baner-tytul").textContent = b.title || "";
-    const errorEl = $("#baner-blad");
+    $("#banner-title").textContent = b.title || "";
+    const errorEl = $("#banner-error");
     errorEl.textContent = b.error || "";
     errorEl.hidden = !b.error;
-    const list = $("#baner-lista");
+    const list = $("#banner-list");
     list.textContent = "";
     for (const t of b.warnings || []) {
       const li = document.createElement("li");
@@ -593,15 +593,15 @@
   }
 
   function setDisconnected(lost) {
-    connection.classList.toggle("zerwane", lost);
+    connection.classList.toggle("broken", lost);
     connection.textContent = lost ? tr("brak_polaczenia") : tr("na_zywo");
-    chipUp.classList.toggle("zerwane", lost);
-    chipProblems.classList.toggle("zerwane", lost);
+    chipUp.classList.toggle("broken", lost);
+    chipProblems.classList.toggle("broken", lost);
   }
 
   // ── filtering ───────────────────────────────────────────────────────────
-  const filter = $("#filtr");
-  const emptyState = $("#pusto");
+  const filter = $("#filter");
+  const emptyState = $("#empty-state");
   let problemsOnly = false;
 
   // The search ignores case and diacritics ("zdjecia" finds "zdjęcia").
@@ -613,11 +613,11 @@
   function applyFilter() {
     const q = simplify(filter.value.trim());
     let visible = 0;
-    $$(".grupa").forEach((group) => {
+    $$(".group").forEach((group) => {
       let inGroup = 0;
-      $$(".karta", group).forEach((k) => {
-        const state = $(".stan", k).dataset.stan;
-        const matches = (!q || simplify(k.dataset.szukaj).includes(q)) &&
+      $$(".card", group).forEach((k) => {
+        const state = $(".state", k).dataset.state;
+        const matches = (!q || simplify(k.dataset.search).includes(q)) &&
           (!problemsOnly || state === "down" || state === "degraded");
         k.hidden = !matches;
         if (matches) inGroup++;
@@ -632,14 +632,14 @@
 
   function toggleProblemsOnly(force) {
     problemsOnly = force !== undefined ? force : !problemsOnly;
-    chipProblems.classList.toggle("wlaczony", problemsOnly);
+    chipProblems.classList.toggle("enabled", problemsOnly);
     chipProblems.setAttribute("aria-pressed", String(problemsOnly));
     applyFilter();
   }
 
   filter.addEventListener("input", applyFilter);
   filter.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { const p = $(".karta:not([hidden]) a"); if (p) p.click(); }
+    if (e.key === "Enter") { const p = $(".card:not([hidden]) a"); if (p) p.click(); }
   });
 
   // ── keyboard shortcuts ──────────────────────────────────────────────────
@@ -667,17 +667,17 @@
 
   // ── edit mode ───────────────────────────────────────────────────────────
   let dockerAvailable = false;
-  const editButton = $("#tryb-edycji");
+  const editButton = $("#edit-mode");
   // the title edit state lives here, because toggleEditMode(true) is called at start-up,
   // before execution reaches the rest of the title code
   let editingTitle = false;
   let cancelTitleEdit = null;
 
   function toggleEditMode(force) {
-    const on = force !== undefined ? force : !document.body.classList.contains("edycja");
-    document.body.classList.toggle("edycja", on);
+    const on = force !== undefined ? force : !document.body.classList.contains("edit");
+    document.body.classList.toggle("edit", on);
     editButton.setAttribute("aria-pressed", String(on));
-    $("#dodaj-grupe").hidden = !on;
+    $("#add-group").hidden = !on;
     if (!on && cancelTitleEdit) cancelTitleEdit();
     storage.write(EDIT_KEY, on ? "1" : "0");
   }
@@ -715,40 +715,40 @@
       if (d.dockerNew) badge.textContent = substitute(tr("menu_docker_nowe"), d.dockerNew);
 
       wallpaperTile.hidden = !backgroundsEnabled;
-      $("#picker-podmien").hidden = !backgroundsEnabled;
-      $("#picker-do-ustawien").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
+      $("#picker-replace").hidden = !backgroundsEnabled;
+      $("#picker-to-settings").hidden = !(window.WYGLAD && window.WYGLAD.zapis);
 
-      $("#powiad-stan").textContent = d.notify ? tr("powiad_wlaczone") : tr("powiad_wylaczone");
-      $("#powiad-test").hidden = !d.notify;
+      $("#notify-state").textContent = d.notify ? tr("powiad_wlaczone") : tr("powiad_wylaczone");
+      $("#notify-test").hidden = !d.notify;
     } catch (_) {}
   }
 
   // ── toast ───────────────────────────────────────────────────────────────
-  const toast = $("#komunikat");
+  const toast = $("#message");
   let toastTimer = null;
 
   function notify(text, variant) {
     if (!text) return;
     clearTimeout(toastTimer);
     toast.textContent = text;
-    toast.className = "komunikat" + (variant ? " " + variant : "");
+    toast.className = "message" + (variant ? " " + variant : "");
     toast.hidden = false;
     toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
   }
 
   function notifyError(err) {
     const msg = (err && err.message) || String(err);
-    notify(msg, msg === tr("konflikt_pliku") ? "ostrzezenie" : "");
+    notify(msg, msg === tr("konflikt_pliku") ? "warning" : "");
   }
 
   // ── mini-dialogs instead of prompt() and confirm() ──────────────────────
-  const nameDialog = $("#okno-nazwy");
-  const nameForm = $("#form-nazwy");
-  const nameField = $("#pole-nazwy");
+  const nameDialog = $("#name-dialog");
+  const nameForm = $("#name-form");
+  const nameField = $("#name-field");
 
   function askForName(title, value) {
-    $("#tytul-nazwy").textContent = title;
-    $("#blad-nazwy").hidden = true;
+    $("#name-title").textContent = title;
+    $("#name-error").hidden = true;
     nameField.value = value || "";
     nameDialog.showModal();
     nameField.focus();
@@ -773,20 +773,20 @@
     });
   }
 
-  const confirmDialog = $("#okno-potwierdzenia");
+  const confirmDialog = $("#confirm-dialog");
 
   function confirmAction(text) {
-    $("#tekst-potwierdzenia").textContent = text;
+    $("#confirm-text").textContent = text;
     confirmDialog.showModal();
     return new Promise((resolve) => {
       let result = false;
       const onYes = () => { result = true; confirmDialog.close(); };
       const onClose = () => {
-        $("#potwierdz-tak").removeEventListener("click", onYes);
+        $("#confirm-yes").removeEventListener("click", onYes);
         confirmDialog.removeEventListener("close", onClose);
         resolve(result);
       };
-      $("#potwierdz-tak").addEventListener("click", onYes);
+      $("#confirm-yes").addEventListener("click", onYes);
       confirmDialog.addEventListener("close", onClose);
     });
   }
@@ -796,38 +796,38 @@
   // The icon goes only through our /icon/ — the browser never asks
   // a CDN. When the file is missing, a tile with the first letter remains.
   function showLetterFallback(img) {
-    const container = img.closest(".ikona");
+    const container = img.closest(".icon");
     if (!container) return;
-    const card = img.closest(".karta");
-    const name = (card && card.dataset.nazwa) || img.alt || "?";
+    const card = img.closest(".card");
+    const name = (card && card.dataset.name) || img.alt || "?";
     container.textContent = "";
     const l = document.createElement("span");
-    l.className = "litera";
+    l.className = "letter";
     l.textContent = name.trim().charAt(0).toUpperCase() || "?";
     container.append(l);
   }
 
   document.addEventListener("error", (e) => {
     const img = e.target;
-    if (img instanceof HTMLImageElement && img.closest(".ikona")) showLetterFallback(img);
+    if (img instanceof HTMLImageElement && img.closest(".icon")) showLetterFallback(img);
   }, true);
 
   // ── service details ─────────────────────────────────────────────────────
-  const detailsDialog = $("#okno-detali");
+  const detailsDialog = $("#details-dialog");
   let currentKey = null;
 
   function tile(label, value, unit) {
     const d = document.createElement("div");
-    d.className = "kafel";
+    d.className = "tile";
     const e = document.createElement("span");
-    e.className = "etykieta-staty";
+    e.className = "stat-label";
     e.textContent = label;
     const b = document.createElement("b");
     b.textContent = value;
     d.append(e, b);
     if (unit) {
       const j = document.createElement("span");
-      j.className = "jednostka";
+      j.className = "unit";
       j.textContent = " " + unit;
       d.append(j);
     }
@@ -837,12 +837,12 @@
   // An overlay of transparent rectangles with <title> — the only place where the
   // user sees the reason for a single sample without going deeper.
   function overlayBarTitles(svg, points, step) {
-    for (const oldBar of $$(".detale-slupek", svg)) oldBar.remove();
+    for (const oldBar of $$(".detail-bar", svg)) oldBar.remove();
     const fields = svg.viewBox && svg.viewBox.baseVal;
     const H = (fields && fields.height) || 90;
     points.forEach((p, i) => {
       const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      r.setAttribute("class", "detale-slupek");
+      r.setAttribute("class", "detail-bar");
       r.setAttribute("x", (i * step).toFixed(2));
       r.setAttribute("y", "0");
       r.setAttribute("width", Math.max(0.6, step).toFixed(2));
@@ -901,42 +901,42 @@
     try {
       const d = await api("GET", `/api/service?key=${encodeURIComponent(key)}&n=120`);
 
-      $("#detale-nazwa").textContent = d.name;
-      const link = $("#detale-url");
+      $("#detail-name").textContent = d.name;
+      const link = $("#detail-url");
       link.textContent = d.url;
       // ! only http(s) reaches href — `javascript:` from the YAML file is XSS
       const href = safeHref(d.url);
-      const openLink = $("#detale-otworz");
+      const openLink = $("#detail-open");
       for (const a of [link, openLink]) {
         if (href) a.href = href; else a.removeAttribute("href");
       }
       openLink.hidden = !href;
 
-      const descriptionEl = $("#detale-opis");
+      const descriptionEl = $("#detail-description");
       descriptionEl.textContent = d.description || "";
       descriptionEl.hidden = !d.description;
-      fillTags($("#detale-tagi"), d.tags);
+      fillTags($("#detail-tags"), d.tags);
 
-      const icon = $("#detale-ikona");
+      const icon = $("#detail-icon");
       icon.textContent = "";
       renderIcon(icon, { src: d.iconSrc, dark: d.iconWariantCiemny, light: d.iconWariantJasny }, d.name || "", 28);
 
       const state = d.now && d.now.state ? d.now.state : "unknown";
-      const box = $("#detale-stan");
-      box.dataset.stan = state;
-      $("#detale-stan .etykieta").textContent = stateLabel(state, d.now || {});
+      const box = $("#detail-state");
+      box.dataset.state = state;
+      $("#detail-state .label").textContent = stateLabel(state, d.now || {});
 
       // reason for the current state (e.g. "content: missing …") — only when something is wrong
-      const reason = $("#detale-powod");
+      const reason = $("#detail-reason");
       const hasProblem = (state === "degraded" || state === "down") && d.now && d.now.err;
       reason.textContent = hasProblem ? `${tr("powod_stanu")}: ${d.now.err}` : "";
-      reason.dataset.stan = state;
+      reason.dataset.state = state;
       reason.hidden = !hasProblem;
-      const checkEl = $("#detale-kontrola");
+      const checkEl = $("#detail-check");
       checkEl.textContent = checkDescription(d);
       checkEl.hidden = !checkEl.textContent;
 
-      const stats = $("#detale-staty");
+      const stats = $("#detail-stats");
       stats.textContent = "";
       const percent = (x) => (x.samples ? x.uptime.toFixed(1) : "—");
       stats.append(
@@ -948,14 +948,14 @@
       );
 
       const points = d.points || [];
-      const chart = $("#detale-wykres");
+      const chart = $("#detail-chart");
       const result = drawChart(chart, points, 1.4);
       overlayBarTitles(chart, points, result.step);
-      $("#detale-skala").textContent = points.length
+      $("#detail-scale").textContent = points.length
         ? `${points.length} × ${d.interval} · 0–${result.scaleMax} ms`
         : tr("brak_danych");
 
-      const list = $("#detale-zmiany");
+      const list = $("#detail-changes");
       list.textContent = "";
       if (!d.changes || !d.changes.length) {
         const li = document.createElement("li");
@@ -964,16 +964,16 @@
       } else {
         for (const z of d.changes) {
           const li = document.createElement("li");
-          li.dataset.na = z.to;
+          li.dataset.to = z.to;
           const when = document.createElement("span");
-          when.className = "kiedy";
+          when.className = "when";
           when.textContent = new Date(z.at).toLocaleString(LANG, {
             day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
           });
           const what = document.createElement("span");
           what.textContent = `${STATE_DESCRIPTIONS[z.from] || z.from} → ${STATE_DESCRIPTIONS[z.to] || z.to}`;
           const reason = document.createElement("span");
-          reason.className = "powod";
+          reason.className = "reason";
           reason.textContent = changeReason(z);
           li.append(when, what, reason);
           list.append(li);
@@ -986,9 +986,9 @@
     }
   }
 
-  $("#detale-sprawdz").addEventListener("click", async () => {
+  $("#detail-check-now").addEventListener("click", async () => {
     if (!currentKey) return;
-    const b = $("#detale-sprawdz");
+    const b = $("#detail-check-now");
     const originalText = b.textContent;
     b.disabled = true;
     b.textContent = tr("sprawdzam");
@@ -1007,10 +1007,10 @@
   //
   // Every file change goes through here: first we ask the server "what would
   // happen" (?dry=1), show the diff, and only after confirmation do we save.
-  const diffDialog = $("#okno-diff");
+  const diffDialog = $("#diff-dialog");
 
   function renderDiff(text) {
-    const el = $("#tresc-diff");
+    const el = $("#diff-content");
     el.textContent = "";
     for (const line of (text || "").split("\n")) {
       if (line === "") continue;
@@ -1024,7 +1024,7 @@
 
   function showDiff(preview, previewOnly) {
     renderDiff(preview.diff);
-    const counter = $("#licznik-diff");
+    const counter = $("#diff-counter");
     counter.textContent = "";
     if (!preview.diff) {
       counter.textContent = tr("bez_zmian");
@@ -1033,20 +1033,20 @@
       const minus = document.createElement("b"); minus.className = "minus"; minus.textContent = "−" + preview.removed;
       counter.append(plus, " " + tr("linii_dodanych") + " · ", minus, " " + tr("linii_usunietych"));
     }
-    $("#tytul-diff").textContent = preview.summary || tr("podglad_zmian");
-    $("#diff-zapisz").hidden = !!previewOnly || !preview.diff;
-    $("#diff-anuluj").textContent = previewOnly ? tr("zamknij") : tr("anuluj");
+    $("#diff-title").textContent = preview.summary || tr("podglad_zmian");
+    $("#diff-save").hidden = !!previewOnly || !preview.diff;
+    $("#diff-cancel").textContent = previewOnly ? tr("zamknij") : tr("anuluj");
 
     diffDialog.showModal();
     return new Promise((resolve) => {
       const closeDialog = (result) => {
-        $("#diff-zapisz").onclick = null;
-        $("#diff-anuluj").onclick = null;
+        $("#diff-save").onclick = null;
+        $("#diff-cancel").onclick = null;
         diffDialog.close();
         resolve(result);
       };
-      $("#diff-zapisz").onclick = () => closeDialog(true);
-      $("#diff-anuluj").onclick = () => closeDialog(false);
+      $("#diff-save").onclick = () => closeDialog(true);
+      $("#diff-cancel").onclick = () => closeDialog(false);
     });
   }
 
@@ -1064,9 +1064,9 @@
   }
 
   // ── service dialog ──────────────────────────────────────────────────────
-  const serviceDialog = $("#okno-uslugi");
-  const serviceForm = $("#form-uslugi");
-  const serviceError = $("#blad-uslugi");
+  const serviceDialog = $("#service-dialog");
+  const serviceForm = $("#service-form");
+  const serviceError = $("#service-error");
   let editedService = null; // {group, name} or null when adding
   let serviceSize = "md";
   // values of the description/tags fields at the moment of opening — we send only what changed
@@ -1112,33 +1112,33 @@
 
   function cardTags(card) {
     try {
-      const t = JSON.parse(card.dataset.tagi || "[]");
+      const t = JSON.parse(card.dataset.tags || "[]");
       return Array.isArray(t) ? t.map(String) : [];
     } catch (_) { return []; }
   }
   const fieldTags = (v) => v.split(",").map((x) => x.trim()).filter(Boolean);
 
   function groupNames() {
-    return $$(".grupa").map((g) => g.dataset.grupa);
+    return $$(".group").map((g) => g.dataset.group);
   }
 
   function setSize(size) {
     serviceSize = SIZES.includes(size) ? size : "md";
     for (const r of SIZES) {
-      $("#rozmiar-" + r).setAttribute("aria-pressed", String(r === serviceSize));
+      $("#size-" + r).setAttribute("aria-pressed", String(r === serviceSize));
     }
   }
   for (const r of SIZES) {
-    $("#rozmiar-" + r).addEventListener("click", () => setSize(r));
+    $("#size-" + r).addEventListener("click", () => setSize(r));
   }
 
   function openServiceDialog(card, defaultGroup) {
-    editedService = card ? { group: card.dataset.grupa, name: card.dataset.nazwa } : null;
+    editedService = card ? { group: card.dataset.group, name: card.dataset.name } : null;
     serviceError.hidden = true;
     serviceForm.reset();
     closePopovers();
 
-    const groupSelect = $("#wybor-grupy");
+    const groupSelect = $("#group-select");
     groupSelect.textContent = "";
     for (const g of groupNames()) {
       const o = document.createElement("option");
@@ -1146,15 +1146,15 @@
       groupSelect.append(o);
     }
 
-    $("#tytul-uslugi").textContent = card ? tr("edytuj_usluge") : tr("nowa_usluga");
+    $("#service-title").textContent = card ? tr("edytuj_usluge") : tr("nowa_usluga");
     if (card) {
-      serviceForm.name.value = card.dataset.nazwa;
-      serviceForm.url.value = card.dataset.adres;
-      groupSelect.value = card.dataset.grupa;
+      serviceForm.name.value = card.dataset.name;
+      serviceForm.url.value = card.dataset.address;
+      groupSelect.value = card.dataset.group;
       groupSelect.disabled = false; // changing the group = moving the service
-      setIconWithVariants(card.dataset.ikona || "");
-      setSize(card.dataset.rozmiar);
-      serviceForm.description.value = card.dataset.opis || "";
+      setIconWithVariants(card.dataset.icon || "");
+      setSize(card.dataset.size);
+      serviceForm.description.value = card.dataset.description || "";
       serviceForm.tags.value = cardTags(card).join(", ");
       loadCheck(card.dataset.key);
     } else {
@@ -1175,8 +1175,8 @@
 
   // renderIcon appends the icon image to `el`. When the icon has separate variants for the
   // dark/light theme (dark/light — paths on our server), it appends BOTH and it is
-  // pure CSS (.ikona-motyw--*, see style.css) that decides which one shows, by
-  // the data-ton attribute on <html> — without this extra JS the dark logo
+  // pure CSS (.icon-theme--*, see style.css) that decides which one shows, by
+  // the data-tone attribute on <html> — without this extra JS the dark logo
   // vanished on the dark theme, because one fixed graphic always came.
   function renderIcon(el, { src, dark, light }, alt, size) {
     size = size || 24;
@@ -1186,27 +1186,27 @@
       img.width = size; img.height = size;
       if (!className) return img;
       const wrapper = document.createElement("span");
-      wrapper.className = "ikona-motyw " + className;
+      wrapper.className = "icon-theme " + className;
       wrapper.append(img);
       return wrapper;
     };
     if (dark && light) {
-      el.append(make("ikona-motyw--ciemny", dark), make("ikona-motyw--jasny", light));
+      el.append(make("icon-theme--dark", dark), make("icon-theme--light", light));
     } else if (src) {
       el.append(make(null, src));
     }
   }
 
   function setIcon(name, variant) {
-    $("#pole-ikony").value = name;
-    const preview = $("#ikona-podglad");
+    $("#icon-field").value = name;
+    const preview = $("#icon-preview");
     preview.textContent = "";
     if (name) {
       const dark = variant && variant[0], light = variant && variant[1];
       renderIcon(preview, { src: `/icon/${encodeURIComponent(name)}.svg`, dark, light }, "", 28);
     } else {
       const s = document.createElement("span");
-      s.className = "litera";
+      s.className = "letter";
       s.textContent = (serviceForm.name.value || "?").trim().charAt(0).toUpperCase() || "?";
       preview.append(s);
     }
@@ -1237,13 +1237,13 @@
   }
 
   let iconTimer = null;
-  $("#szukaj-ikony").addEventListener("input", (e) => {
+  $("#icon-search").addEventListener("input", (e) => {
     clearTimeout(iconTimer);
     iconTimer = setTimeout(() => searchIcons(e.target.value), 120);
   });
 
   async function searchIcons(q) {
-    const grid = $("#siatka-ikon");
+    const grid = $("#icon-grid");
     try {
       const d = await api("GET", `/api/icons?q=${encodeURIComponent(q)}&limit=48`);
       grid.textContent = "";
@@ -1251,14 +1251,14 @@
       for (const n of d.icons) {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "btn btn--tile kafel-ikony";
+        b.className = "btn btn--tile tile-icons";
         b.setAttribute("aria-pressed", "false");
         b.title = n;
         const w = variants[n];
         renderIcon(b, { src: `/icon/${encodeURIComponent(n)}.svg`, dark: w && w[0], light: w && w[1] }, n, 24);
         b.addEventListener("click", () => {
           setIcon(n, w);
-          $$(".kafel-ikony", grid).forEach((x) => x.setAttribute("aria-pressed", "false"));
+          $$(".tile-icons", grid).forEach((x) => x.setAttribute("aria-pressed", "false"));
           b.setAttribute("aria-pressed", "true");
         });
         grid.append(b);
@@ -1283,7 +1283,7 @@
       name: editedService ? editedService.name : f.name.value.trim(),
       newName: editedService ? f.name.value.trim() : undefined,
       url: f.url.value.trim(),
-      icon: $("#pole-ikony").value,
+      icon: $("#icon-field").value,
       size: serviceSize,
     };
     // Check: when adding the whole, when editing only the fields changed since
@@ -1310,32 +1310,32 @@
 
   // ── actions on cards, groups and backgrounds ────────────────────────────
   document.addEventListener("click", async (e) => {
-    const button = e.target.closest("[data-akcja]");
+    const button = e.target.closest("[data-action]");
     if (!button) return;
-    const action = button.dataset.akcja;
+    const action = button.dataset.action;
 
     // "open" is a plain link — let the browser do its thing
-    if (action === "otworz") return;
+    if (action === "open") return;
 
     e.preventDefault();
-    const card = button.closest(".karta");
+    const card = button.closest(".card");
 
-    if (action === "szczegoly") return openDetails(card.dataset.key);
+    if (action === "details") return openDetails(card.dataset.key);
 
-    if (action === "edytuj") return openServiceDialog(card);
+    if (action === "edit") return openServiceDialog(card);
 
-    if (action === "usun") {
+    if (action === "remove") {
       try {
         const ok = await applyChange("DELETE",
-          `/api/services?group=${encodeURIComponent(card.dataset.grupa)}&name=${encodeURIComponent(card.dataset.nazwa)}`);
+          `/api/services?group=${encodeURIComponent(card.dataset.group)}&name=${encodeURIComponent(card.dataset.name)}`);
         if (ok) location.reload();
       } catch (err) { notifyError(err); }
     }
 
-    if (action === "dodaj-do") return openServiceDialog(null, button.dataset.grupa);
+    if (action === "add-to") return openServiceDialog(null, button.dataset.group);
 
-    if (action === "zmien-grupe") {
-      const oldName = button.dataset.grupa;
+    if (action === "change-group") {
+      const oldName = button.dataset.group;
       const newName = await askForName(tr("zmien_nazwe_grupy"), oldName);
       if (!newName || newName === oldName) return;
       try {
@@ -1344,15 +1344,15 @@
       } catch (err) { notifyError(err); }
     }
 
-    if (action === "usun-grupe") {
-      const g = button.dataset.grupa;
+    if (action === "remove-group") {
+      const g = button.dataset.group;
       try {
         const ok = await applyChange("DELETE", `/api/groups?name=${encodeURIComponent(g)}`);
         if (ok) location.reload();
       } catch (err) { notifyError(err); }
     }
 
-    if (action === "widok") return saveAppearance({ view: button.dataset.widok });
+    if (action === "view") return saveAppearance({ view: button.dataset.view });
 
     if (action === "preset") {
       const preset = button.dataset.preset;
@@ -1364,23 +1364,23 @@
       return setWallpaper(current.image || uploadedBackgrounds[0].name);
     }
 
-    if (action === "tapeta") return setWallpaper(button.dataset.nazwa);
+    if (action === "wallpaper") return setWallpaper(button.dataset.name);
 
-    if (action === "usun-tapete") {
-      const name = button.dataset.nazwa;
+    if (action === "remove-wallpaper") {
+      const name = button.dataset.name;
       try {
         await api("DELETE", `/api/background/${encodeURIComponent(name)}`);
         await loadBackgrounds();
         notify(tr("zapisano"));
       } catch (err) {
-        notify(err.message || tr("tapeta_uzywana_blad"), "ostrzezenie");
+        notify(err.message || tr("tapeta_uzywana_blad"), "warning");
       }
     }
   });
 
-  $("#menu-nowa-usluga").addEventListener("click", () => openServiceDialog(null));
-  $("#menu-nowa-grupa").addEventListener("click", () => newGroup());
-  $("#dodaj-grupe").addEventListener("click", () => newGroup());
+  $("#menu-new-service").addEventListener("click", () => openServiceDialog(null));
+  $("#menu-new-group").addEventListener("click", () => newGroup());
+  $("#add-group").addEventListener("click", () => newGroup());
 
   async function newGroup() {
     closePopovers();
@@ -1392,11 +1392,11 @@
     } catch (err) { notifyError(err); }
   }
 
-  $$("[data-zamknij]").forEach((b) =>
+  $$("[data-close]").forEach((b) =>
     b.addEventListener("click", () => b.closest("dialog").close()));
 
   // ── Docker suggestions ──────────────────────────────────────────────────
-  const dockerDialog = $("#okno-docker");
+  const dockerDialog = $("#docker-dialog");
 
   // Keys written out literally, not concatenated from `k.why` — otherwise the i18n
   // consistency test has no way to check whether the translations exist at all.
@@ -1408,16 +1408,16 @@
 
   $("#menu-docker").addEventListener("click", async () => {
     closePopovers();
-    if (!dockerAvailable) return notify(tr("docker_niedostepny"), "ostrzezenie");
+    if (!dockerAvailable) return notify(tr("docker_niedostepny"), "warning");
 
-    const list = $("#lista-kandydatow");
-    const errorEl = $("#blad-docker");
+    const list = $("#candidate-list");
+    const errorEl = $("#docker-error");
     list.textContent = "";
     errorEl.hidden = true;
     try {
       const d = await api("GET", "/api/discover");
 
-      const groupSelect = $("#docker-grupa");
+      const groupSelect = $("#docker-group");
       groupSelect.textContent = "";
       for (const g of d.groups || groupNames()) {
         const o = document.createElement("option");
@@ -1433,19 +1433,19 @@
 
       for (const k of d.candidates || []) {
         const li = document.createElement("li");
-        if (k.known) li.classList.add("znana");
+        if (k.known) li.classList.add("known");
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.checked = !k.known && !!k.url;
         checkbox.disabled = k.known || !k.url;
-        checkbox.dataset.nazwa = k.name;
+        checkbox.dataset.name = k.name;
         checkbox.dataset.url = k.url || "";
-        checkbox.dataset.ikona = k.icon || "";
-        checkbox.dataset.grupa = k.group || "";
+        checkbox.dataset.icon = k.icon || "";
+        checkbox.dataset.group = k.group || "";
 
         const icon = document.createElement("span");
-        icon.className = "ikona";
+        icon.className = "icon";
         const img = document.createElement("img");
         img.src = `/icon/${encodeURIComponent(k.icon || "")}`;
         img.alt = k.name || "";
@@ -1454,15 +1454,15 @@
 
         const infoBox = document.createElement("div");
         const name = document.createElement("span");
-        name.className = "nazwa-k";
+        name.className = "candidate-name";
         name.textContent = k.name;
         const address = document.createElement("span");
-        address.className = "adres";
+        address.className = "address";
         address.textContent = k.url || k.image;
         infoBox.append(name, address);
 
         const reason = document.createElement("span");
-        reason.className = "powod";
+        reason.className = "reason";
         reason.textContent = k.known ? tr("docker_juz_jest") : (REASONS[k.why] || k.why);
 
         li.append(checkbox, icon, infoBox, reason);
@@ -1476,30 +1476,30 @@
     }
   });
 
-  $("#docker-dodaj").addEventListener("click", async () => {
-    const checked = $$("#lista-kandydatow input[type=checkbox]:checked");
+  $("#docker-add").addEventListener("click", async () => {
+    const checked = $$("#candidate-list input[type=checkbox]:checked");
     if (!checked.length) return;
-    const group = $("#docker-grupa").value;
+    const group = $("#docker-group").value;
     const services = checked.map((p) => ({
-      group: p.dataset.grupa || group,
-      name: p.dataset.nazwa,
+      group: p.dataset.group || group,
+      name: p.dataset.name,
       url: p.dataset.url,
-      icon: p.dataset.ikona,
+      icon: p.dataset.icon,
     }));
     try {
       const ok = await applyChange("POST", "/api/services/bulk", { group: group, services: services });
       dockerDialog.close();
       if (ok) location.reload();
     } catch (err) {
-      $("#blad-docker").textContent = err.message;
-      $("#blad-docker").hidden = false;
+      $("#docker-error").textContent = err.message;
+      $("#docker-error").hidden = false;
     }
   });
 
   // ── settings ────────────────────────────────────────────────────────────
-  const settingsDialog = $("#okno-ustawien");
-  const settingsError = $("#blad-ustawien");
-  const settingsOk = $("#ok-ustawien");
+  const settingsDialog = $("#settings-dialog");
+  const settingsError = $("#settings-error");
+  const settingsOk = $("#settings-ok");
 
   function showError(msg) {
     settingsOk.hidden = true;
@@ -1528,11 +1528,11 @@
     tab.addEventListener("click", () => showTab(tab.getAttribute("aria-controls")));
   }
 
-  $("#ustawienia").addEventListener("click", async () => {
+  $("#settings").addEventListener("click", async () => {
     settingsError.hidden = true;
     settingsOk.hidden = true;
     closePopovers();
-    showTab("panel-wyglad");
+    showTab("panel-appearance");
     fillInstanceAppearance();
     await loadAccounts();
     await loadInfo();
@@ -1548,37 +1548,37 @@
 
   function fillInstanceAppearance() {
     const w = window.WYGLAD || {};
-    for (const tile of $$("#inst-presety .kafel-presetu")) {
+    for (const tile of $$("#instance-presets .tile-preset")) {
       tile.setAttribute("aria-pressed", String(tile.dataset.preset === w.preset));
     }
-    $("#inst-blur").value = String(w.blur == null ? 10 : w.blur);
-    $("#inst-blur-wartosc").textContent = $("#inst-blur").value + " px";
-    $("#inst-dim").value = String(w.dim == null ? 50 : w.dim);
-    $("#inst-dim-wartosc").textContent = $("#inst-dim").value + "%";
+    $("#instance-blur").value = String(w.blur == null ? 10 : w.blur);
+    $("#instance-blur-value").textContent = $("#instance-blur").value + " px";
+    $("#instance-dim").value = String(w.dim == null ? 50 : w.dim);
+    $("#instance-dim-value").textContent = $("#instance-dim").value + "%";
   }
 
-  for (const tile of $$("#inst-presety .kafel-presetu")) {
+  for (const tile of $$("#instance-presets .tile-preset")) {
     tile.addEventListener("click", () => {
-      for (const k of $$("#inst-presety .kafel-presetu")) k.setAttribute("aria-pressed", "false");
+      for (const k of $$("#instance-presets .tile-preset")) k.setAttribute("aria-pressed", "false");
       tile.setAttribute("aria-pressed", "true");
     });
   }
-  $("#inst-blur").addEventListener("input", () => {
-    $("#inst-blur-wartosc").textContent = $("#inst-blur").value + " px";
+  $("#instance-blur").addEventListener("input", () => {
+    $("#instance-blur-value").textContent = $("#instance-blur").value + " px";
   });
-  $("#inst-dim").addEventListener("input", () => {
-    $("#inst-dim-wartosc").textContent = $("#inst-dim").value + "%";
+  $("#instance-dim").addEventListener("input", () => {
+    $("#instance-dim-value").textContent = $("#instance-dim").value + "%";
   });
 
   // The save goes the same way as every other file edit: diff preview,
   // version in SQLite, commit to git.
-  $("#inst-zapisz").addEventListener("click", async () => {
-    const selectedTile = $('#inst-presety .kafel-presetu[aria-pressed="true"]');
+  $("#instance-save").addEventListener("click", async () => {
+    const selectedTile = $('#instance-presets .tile-preset[aria-pressed="true"]');
     try {
       const ok = await applyChange("PUT", "/api/appearance", {
         preset: selectedTile ? selectedTile.dataset.preset : (window.WYGLAD || {}).preset,
-        blur: parseInt($("#inst-blur").value, 10),
-        dim: parseInt($("#inst-dim").value, 10),
+        blur: parseInt($("#instance-blur").value, 10),
+        dim: parseInt($("#instance-dim").value, 10),
       });
       if (!ok) return;
       showOk(tr("wyglad_zapisany"));
@@ -1592,7 +1592,7 @@
   let loadedFormat = "";
 
   function showFormatHint(fromEnv) {
-    const hint = $("#webhook-format-podpowiedz");
+    const hint = $("#webhook-format-hint");
     hint.textContent = fromEnv
       ? tr("webhook_format_ze_srodowiska")
       : tr("format_podpowiedz_" + formatField.value);
@@ -1606,26 +1606,26 @@
     formatField.value = d.format;
     formatField.disabled = d.formatZrodlo === "srodowisko";
     showFormatHint(formatField.disabled);
-    const field = $("#webhook-adres");
+    const field = $("#webhook-address");
     field.value = "";
     field.placeholder = d.webhook || "https://…";
     // The address from the environment is the property of the deploy — the field is to be dead, and the
     // user should know why, instead of clicking on something that will not work anyway.
     const fromEnv = d.zrodlo === "srodowisko";
     field.disabled = fromEnv;
-    $("#webhook-zapisz").disabled = fromEnv && formatField.disabled;
+    $("#webhook-save").disabled = fromEnv && formatField.disabled;
     // The address already stands in the field as a placeholder — the status should say something else,
     // otherwise the same string hangs twice one under another.
-    $("#powiad-stan").textContent = fromEnv
+    $("#notify-state").textContent = fromEnv
       ? tr("webhook_ze_srodowiska")
       : (d.wlaczony ? tr("powiad_wlaczone") : tr("webhook_zrodlo_brak"));
-    $("#webhook-prog").value = String(d.prog);
-    $("#powiad-test").hidden = !d.wlaczony;
+    $("#webhook-threshold").value = String(d.prog);
+    $("#notify-test").hidden = !d.wlaczony;
   }
 
-  $("#webhook-zapisz").addEventListener("click", async () => {
-    const body = { prog: parseInt($("#webhook-prog").value, 10) };
-    const address = $("#webhook-adres").value.trim();
+  $("#webhook-save").addEventListener("click", async () => {
+    const body = { prog: parseInt($("#webhook-threshold").value, 10) };
+    const address = $("#webhook-address").value.trim();
     // An empty field means "do not change" — clearing is a separate gesture,
     // otherwise merely opening the tab would wipe the webhook when saving the threshold.
     if (address) body.webhook = address;
@@ -1643,16 +1643,16 @@
 
   async function loadInstance() {
     const d = await api("GET", "/api/instance");
-    const tbody = $("#tabela-instancji tbody");
+    const tbody = $("#instance-table tbody");
     tbody.replaceChildren();
     for (const o of (d.opcje || [])) {
       const row = document.createElement("tr");
       // textContent, not innerHTML: the values are file paths and CIDRs
       // supplied by the operator.
       for (const [text, className] of [
-        [o.klucz, "instancja-klucz"],
-        [o.wartosc || "—", "instancja-wartosc"],
-        [tr("zrodlo_" + o.zrodlo), "instancja-zrodlo"],
+        [o.klucz, "instance-key"],
+        [o.wartosc || "—", "instance-value"],
+        [tr("zrodlo_" + o.zrodlo), "instance-source"],
       ]) {
         const td = document.createElement("td");
         td.className = className;
@@ -1665,8 +1665,8 @@
 
   // ── API tokens (read-only) ────────────────────────────────────────────────
 
-  const newTokenBox = $("#nowy-token");
-  const newTokenField = $("#nowy-token-wartosc");
+  const newTokenBox = $("#new-token");
+  const newTokenField = $("#new-token-value");
 
   function hideNewToken() {
     newTokenBox.hidden = true;
@@ -1674,7 +1674,7 @@
   }
 
   async function loadTokens() {
-    const list = $("#lista-tokenow");
+    const list = $("#token-list");
     list.textContent = "";
     hideNewToken();
     try {
@@ -1710,7 +1710,7 @@
     } catch (err) { showError(err.message); }
   }
 
-  $("#form-tokenu").addEventListener("submit", async (e) => {
+  $("#token-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
@@ -1728,7 +1728,7 @@
     } catch (err) { showError(err.message); }
   });
 
-  $("#kopiuj-token").addEventListener("click", async () => {
+  $("#copy-token").addEventListener("click", async () => {
     const value = newTokenField.value;
     if (!value) return;
     let ok = false;
@@ -1749,7 +1749,7 @@
   });
 
   async function loadAccounts() {
-    const list = $("#lista-kont");
+    const list = $("#account-list");
     list.textContent = "";
     try {
       const d = await api("GET", "/api/users");
@@ -1773,7 +1773,7 @@
     } catch (err) { showError(err.message); }
   }
 
-  $("#form-konta").addEventListener("submit", async (e) => {
+  $("#account-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
@@ -1782,7 +1782,7 @@
     } catch (err) { showError(err.message); }
   });
 
-  $("#form-hasla").addEventListener("submit", async (e) => {
+  $("#password-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
@@ -1797,9 +1797,9 @@
   // a real <textarea>, so undo, paste and selection work
   // natively — which contenteditable editors cannot do.
 
-  const fileField = $("#surowy-yaml");
-  const colorLayer = $("#podswietlenie-yaml");
-  const editorBox = $("#edytor-yaml");
+  const fileField = $("#raw-yaml");
+  const colorLayer = $("#yaml-highlight");
+  const editorBox = $("#yaml-editor");
 
   // Above this threshold we give up highlighting and show plain text.
   // The panel config has a few dozen lines; this limit exists in case
@@ -1816,10 +1816,10 @@
     const content = fragment.slice(leading.length);
     if (!content) return escHtml(fragment);
 
-    let className = "tok-tekst";
-    if (/^[&*]/.test(content) || content.startsWith("<<")) className = "tok-kotwica";
-    else if (/^[-+]?\d+(\.\d+)?[a-z%]*$/i.test(content)) className = "tok-liczba";
-    else if (/^(true|false|null|yes|no|on|off|~)$/i.test(content)) className = "tok-slowo";
+    let className = "tok-text";
+    if (/^[&*]/.test(content) || content.startsWith("<<")) className = "tok-anchor";
+    else if (/^[-+]?\d+(\.\d+)?[a-z%]*$/i.test(content)) className = "tok-number";
+    else if (/^(true|false|null|yes|no|on|off|~)$/i.test(content)) className = "tok-word";
     return escHtml(leading) + withSpan(className, content);
   }
 
@@ -1834,7 +1834,7 @@
     // list dash together with the space after it
     const dash = rest.match(/^-(\s+|$)/);
     if (dash) {
-      result += withSpan("tok-myslnik", "-") + escHtml(dash[1]);
+      result += withSpan("tok-dash", "-") + escHtml(dash[1]);
       rest = rest.slice(dash[0].length);
     }
 
@@ -1843,7 +1843,7 @@
     if (keyMatch) {
       // `<<` is a merge key, not an ordinary field name — let it look like the alias
       // it points to
-      const className = keyMatch[1] === "<<" ? "tok-kotwica" : "tok-klucz";
+      const className = keyMatch[1] === "<<" ? "tok-anchor" : "tok-key";
       result += withSpan(className, keyMatch[1] + ":") + escHtml(keyMatch[2]);
       rest = rest.slice(keyMatch[0].length);
     }
@@ -1863,7 +1863,7 @@
       }
       if (char === '"' || char === "'") { quote = char; continue; }
       if (char === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
-        return codeTokens(line.slice(0, i)) + withSpan("tok-komentarz", line.slice(i));
+        return codeTokens(line.slice(0, i)) + withSpan("tok-comment", line.slice(i));
       }
     }
     return codeTokens(line);
@@ -1873,11 +1873,11 @@
     if (!fileField || !colorLayer) return;
     const codeEl = colorLayer.firstElementChild;
     if (fileField.value.length > HIGHLIGHT_LIMIT) {
-      editorBox.classList.add("bez-kolorow");
+      editorBox.classList.add("no-colors");
       codeEl.textContent = "";
       return;
     }
-    editorBox.classList.remove("bez-kolorow");
+    editorBox.classList.remove("no-colors");
     // The trailing newline is deliberate: without it <pre> swallows the last empty
     // row and the layers drift apart by one line.
     codeEl.innerHTML = fileField.value.split("\n").map(lineTokens).join("\n") + "\n";
@@ -1903,20 +1903,20 @@
   // Fullscreen without a second <dialog>: one modal is one focus trap
   // and one state to close.
   function setEditorFullscreen(enable) {
-    const enabled = enable === undefined ? !settingsDialog.classList.contains("pelny-ekran") : enable;
-    settingsDialog.classList.toggle("pelny-ekran", enabled);
-    $("#yaml-pelny-ekran").setAttribute("aria-pressed", String(enabled));
+    const enabled = enable === undefined ? !settingsDialog.classList.contains("fullscreen") : enable;
+    settingsDialog.classList.toggle("fullscreen", enabled);
+    $("#yaml-fullscreen").setAttribute("aria-pressed", String(enabled));
     if (enabled) fileField.focus();
     syncScroll();
   }
 
-  $("#yaml-pelny-ekran").addEventListener("click", () => setEditorFullscreen());
+  $("#yaml-fullscreen").addEventListener("click", () => setEditorFullscreen());
 
   // ! The native <dialog> closes everything on Esc. In fullscreen that would mean
   // losing unsaved changes with one key, so the first Esc only
   // leaves fullscreen.
   settingsDialog.addEventListener("cancel", (e) => {
-    if (settingsDialog.classList.contains("pelny-ekran")) {
+    if (settingsDialog.classList.contains("fullscreen")) {
       e.preventDefault();
       setEditorFullscreen(false);
     }
@@ -1931,15 +1931,15 @@
     } catch (err) { showError(err.message); }
   }
 
-  $("#przeladuj-yaml").addEventListener("click", loadYaml);
-  $("#zapisz-yaml").addEventListener("click", async () => {
+  $("#reload-yaml").addEventListener("click", loadYaml);
+  $("#save-yaml").addEventListener("click", async () => {
     try {
-      const ok = await applyChange("PUT", "/api/config", { yaml: $("#surowy-yaml").value });
+      const ok = await applyChange("PUT", "/api/config", { yaml: $("#raw-yaml").value });
       if (ok) location.reload();
     } catch (err) { showError(err.message); }
   });
 
-  $("#powiad-test").addEventListener("click", async () => {
+  $("#notify-test").addEventListener("click", async () => {
     try {
       await api("POST", "/api/notify/test");
       showOk(tr("test_wyslany"));
@@ -1948,7 +1948,7 @@
 
   // ── change history ──────────────────────────────────────────────────────
   async function loadVersions() {
-    const list = $("#lista-wersji");
+    const list = $("#version-list");
     list.textContent = "";
     try {
       const d = await api("GET", "/api/versions");
@@ -1963,17 +1963,17 @@
         const li = document.createElement("li");
 
         const when = document.createElement("span");
-        when.className = "kiedy";
+        when.className = "when";
         when.textContent = new Date(w.at).toLocaleString(LANG, {
           day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
         });
 
         const what = document.createElement("span");
-        what.className = "co";
+        what.className = "what";
         what.textContent = w.summary + (w.author ? ` · ${w.author}` : "");
 
         const changes = document.createElement("span");
-        changes.className = "zmiany";
+        changes.className = "changes";
         changes.textContent = `+${w.added} −${w.removed}`;
 
         const showButton = document.createElement("button");
@@ -2006,9 +2006,9 @@
   //
   // The save goes straight through api(), without the diff dialog — it is a single field, and an entry
   // in the history lets you undo it. Enter and blur save, Esc goes back to the old one.
-  const titleEl = $("#tytul-panelu");
-  const titleButton = $("#tytul-edytuj");
-  const titleError = $("#blad-tytulu");
+  const titleEl = $("#panel-title");
+  const titleButton = $("#edit-title");
+  const titleError = $("#title-error");
   function setTitle(text) {
     titleEl.textContent = text;
     document.title = text;
@@ -2020,7 +2020,7 @@
     const oldTitle = titleEl.textContent;
     const field = document.createElement("input");
     field.type = "text";
-    field.className = "tytul-pole";
+    field.className = "title-field";
     field.value = oldTitle;
     field.autocomplete = "off";
     field.spellcheck = false;
@@ -2084,14 +2084,14 @@
   // the document-level dragover from wallpaper uploads (above) stays untouched.
   //
   // The original does not disappear from the DOM — it moves around it and is itself the marker
-  // of the drop place (class .przeciagana), and under the cursor rides its
-  // copy (.duch). Thanks to that the position after the drop is read straight from the DOM,
+  // of the drop place (class .dragged), and under the cursor rides its
+  // copy (.ghost). Thanks to that the position after the drop is read straight from the DOM,
   // and undoing is a single insertBefore.
   const MOVE_THRESHOLD = 6;     // px; below this, releasing the button is a plain click
   const SCROLL_ZONE = 80; // px from the window edge
   const TOUCH_HOLD_MS = 300; // finger on a card: how long it must be held before dragging starts
   const TOUCH_TOLERANCE = 8;     // px; larger movement before the time elapses = plain page scrolling
-  const announcer = $("#ogloszenia");
+  const announcer = $("#announcements");
   const fmt = (text, ...arg) => { let i = 0; return String(text).replace(/%[ds]/g, () => arg[i++]); };
 
   let dragState = null; // state of the drag in progress
@@ -2103,29 +2103,29 @@
     setTimeout(() => { announcer.textContent = text; }, 30);
   }
 
-  const groupCards = (ul) => $$(":scope > .karta", ul);
+  const groupCards = (ul) => $$(":scope > .card", ul);
   const cardIndex = (card) => groupCards(card.parentElement).indexOf(card);
-  const groupIndex = (group) => $$("#tresc > .grupa").indexOf(group);
+  const groupIndex = (group) => $$("#content > .group").indexOf(group);
 
   function filterActive() { return !!filter.value.trim() || problemsOnly; }
 
   // DOM state we return to on an error or Esc
   function rememberPlace(el) {
-    const card = el.classList.contains("karta");
+    const card = el.classList.contains("card");
     return { parent: el.parentElement, next: el.nextElementSibling,
-             isCard: card, group: el.dataset.grupa, key: el.dataset.key };
+             isCard: card, group: el.dataset.group, key: el.dataset.key };
   }
   function restorePlace(el, m) {
     m.parent.insertBefore(el, m.next);
-    if (m.isCard) { el.dataset.grupa = m.group; el.dataset.key = m.key; }
+    if (m.isCard) { el.dataset.group = m.group; el.dataset.key = m.key; }
     refreshIndex();
   }
 
   // A card moved to another group changes its key (group/name); health on the
   // server side is also re-attached on config reload.
   function assignGroup(card, groupName) {
-    card.dataset.grupa = groupName;
-    card.dataset.key = groupName + "/" + card.dataset.nazwa;
+    card.dataset.group = groupName;
+    card.dataset.key = groupName + "/" + card.dataset.name;
     refreshIndex();
   }
 
@@ -2133,7 +2133,7 @@
     savingMove = true;
     try {
       await api("POST", "/api/services/move",
-        { group: z.group, name: card.dataset.nazwa, toGroup: toGroup, index: index });
+        { group: z.group, name: card.dataset.name, toGroup: toGroup, index: index });
       notify(tr("kolejnosc_ok"));
       return true;
     } catch (err) {
@@ -2148,7 +2148,7 @@
   async function saveGroupMove(section, z, index) {
     savingMove = true;
     try {
-      await api("POST", "/api/groups/move", { name: section.dataset.grupa, index: index });
+      await api("POST", "/api/groups/move", { name: section.dataset.group, index: index });
       notify(tr("kolejnosc_ok"));
       return true;
     } catch (err) {
@@ -2162,7 +2162,7 @@
 
   // common finish of a card move — for mouse, finger and keyboard
   async function finishCardMove(card, z) {
-    const toGroup = card.closest(".grupa").dataset.grupa;
+    const toGroup = card.closest(".group").dataset.group;
     const index = cardIndex(card);
     const changed = toGroup !== z.group;
     const samePlace = !changed && card.nextElementSibling === z.next;
@@ -2171,7 +2171,7 @@
     const ok = await saveCardMove(card, z, toGroup, index);
     if (ok) {
       const n = groupCards(card.parentElement).length;
-      announce(fmt(tr("pozycja_usluga"), card.dataset.nazwa, index + 1, n, toGroup));
+      announce(fmt(tr("pozycja_usluga"), card.dataset.name, index + 1, n, toGroup));
     }
     return ok;
   }
@@ -2180,7 +2180,7 @@
     if (section.nextElementSibling === z.next) return false;
     const index = groupIndex(section);
     const ok = await saveGroupMove(section, z, index);
-    if (ok) announce(fmt(tr("pozycja_grupa"), section.dataset.grupa, index + 1, $$("#tresc > .grupa").length));
+    if (ok) announce(fmt(tr("pozycja_grupa"), section.dataset.group, index + 1, $$("#content > .group").length));
     return ok;
   }
 
@@ -2190,7 +2190,7 @@
   // The nearest group under the cursor vertically; outside all of them — the nearest one.
   function groupUnderCursor(y) {
     let best = null, dist = Infinity;
-    for (const g of $$("#tresc > .grupa:not([hidden])")) {
+    for (const g of $$("#content > .group:not([hidden])")) {
       const r = g.getBoundingClientRect();
       const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
       if (d < dist) { dist = d; best = g; }
@@ -2210,11 +2210,11 @@
   function placeCard(card, x, y) {
     const section = groupUnderCursor(y);
     if (!section) return;
-    const ul = $(":scope > .siatka", section);
+    const ul = $(":scope > .grid", section);
     const allCards = groupCards(ul).filter((k) => !k.hidden);
     const others = allCards.filter((k) => k !== card);
     const insert = (before) => {
-      const target = before || $(":scope > .kafel-dodaj", ul);
+      const target = before || $(":scope > .tile-add", ul);
       if (card.parentElement === ul && card.nextElementSibling === target) return;
       ul.insertBefore(card, target);
     };
@@ -2249,40 +2249,40 @@
   }
 
   function placeGroup(section, y) {
-    const others = $$("#tresc > .grupa:not([hidden])").filter((g) => g !== section);
-    let before = $("#pusto");
+    const others = $$("#content > .group:not([hidden])").filter((g) => g !== section);
+    let before = $("#empty-state");
     for (const g of others) {
       const r = g.getBoundingClientRect();
       if (y < r.top + r.height / 2) { before = g; break; }
     }
     if (section.nextElementSibling === before) return;
-    $("#tresc").insertBefore(section, before);
+    $("#content").insertBefore(section, before);
   }
 
   // ── drag flow ───────────────────────────────────────────────────────────
   function startDrag(p) {
     const el = p.el;
     const r = el.getBoundingClientRect();
-    const ghost = p.type === "grupa" ? document.createElement("section") : el.cloneNode(true);
-    if (p.type === "grupa") {
-      ghost.className = "grupa duch";
+    const ghost = p.type === "group" ? document.createElement("section") : el.cloneNode(true);
+    if (p.type === "group") {
+      ghost.className = "group ghost";
       ghost.append($(":scope > h2", el).cloneNode(true));
     } else {
-      ghost.classList.add("duch");
+      ghost.classList.add("ghost");
     }
     ghost.removeAttribute("data-key");
     ghost.setAttribute("aria-hidden", "true");
     ghost.style.width = r.width + "px";
-    if (p.type !== "grupa") ghost.style.height = r.height + "px";
+    if (p.type !== "group") ghost.style.height = r.height + "px";
     document.body.append(ghost);
 
     p.ghost = ghost;
     p.dx = p.x0 - r.left;
     p.dy = p.y0 - r.top;
     p.active = true;
-    if (p.touch) ghost.classList.add("duch--dotyk");
-    document.body.classList.add("przeciaganie");
-    el.classList.add("przeciagana");
+    if (p.touch) ghost.classList.add("ghost--touch");
+    document.body.classList.add("dragging");
+    el.classList.add("dragged");
     moveGhost(p);
     autoScrollLoop();
   }
@@ -2296,7 +2296,7 @@
   }
 
   function placeByCursor(p) {
-    if (p.type === "grupa") placeGroup(p.el, p.y);
+    if (p.type === "group") placeGroup(p.el, p.y);
     else placeCard(p.el, p.x, p.y);
   }
 
@@ -2313,8 +2313,8 @@
     window.removeEventListener("blur", onAbort);
     clearTimeout(p.touchTimer);
     if (p.ghost) p.ghost.remove();
-    document.body.classList.remove("przeciaganie");
-    p.el.classList.remove("przeciagana");
+    document.body.classList.remove("dragging");
+    p.el.classList.remove("dragged");
   }
 
   function onMove(e) {
@@ -2342,7 +2342,7 @@
     cleanupDrag();
     if (!active) return; // the threshold was not crossed (or the hold was too short) — a plain click
     suppressClick(); // after a real drag the browser will send a click anyway — we do not open the link
-    if (type === "grupa") await finishGroupMove(el, place);
+    if (type === "group") await finishGroupMove(el, place);
     else await finishCardMove(el, place);
     // focus returns to the handle only when it was used; after grabbing the card we leave no outline
     if (handle) handle.focus({ preventScroll: true });
@@ -2394,7 +2394,7 @@
   // pointer events. It applies only to cards and group headings — the document-level
   // dragover/drop from wallpaper uploads (above) stays untouched.
   document.addEventListener("dragstart", (e) => {
-    if (e.target.closest && e.target.closest(".karta, .grupa > h2")) e.preventDefault();
+    if (e.target.closest && e.target.closest(".card, .group > h2")) e.preventDefault();
   }, true);
 
   function onTouchMove(e) {
@@ -2406,29 +2406,29 @@
   function dragSource(e) {
     const target = e.target.closest && e.target;
     if (!target) return null;
-    const handle = target.closest('[data-akcja="uchwyt"]');
+    const handle = target.closest('[data-action="handle"]');
     if (handle) {
-      const type = handle.dataset.typ;
-      const el = handle.closest(type === "grupa" ? ".grupa" : ".karta");
+      const type = handle.dataset.type;
+      const el = handle.closest(type === "group" ? ".group" : ".card");
       return el ? { type, el, handle, surface: false } : null;
     }
     // buttons and fields in the card do their own thing; modifiers = opening in a new tab
-    if (target.closest("button, input, select, textarea, label, summary, [data-akcja]")) return null;
+    if (target.closest("button, input, select, textarea, label, summary, [data-action]")) return null;
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return null;
-    const card = target.closest(".karta");
-    if (card) return { type: "usluga", el: card, handle: null, surface: true };
-    const heading = target.closest(".grupa > h2");
-    if (heading) return { type: "grupa", el: heading.parentElement, handle: null, surface: true };
+    const card = target.closest(".card");
+    if (card) return { type: "service", el: card, handle: null, surface: true };
+    const heading = target.closest(".group > h2");
+    if (heading) return { type: "group", el: heading.parentElement, handle: null, surface: true };
     return null;
   }
 
   document.addEventListener("pointerdown", (e) => {
     if (dragState || savingMove) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (!document.body.classList.contains("edycja")) return;
+    if (!document.body.classList.contains("edit")) return;
     const z = dragSource(e);
     if (!z) return;
-    if (filterActive()) { notify(tr("przenosz_filtr"), "ostrzezenie"); return; }
+    if (filterActive()) { notify(tr("przenosz_filtr"), "warning"); return; }
     const touchOnCard = z.surface && e.pointerType === "touch";
     dragState = {
       type: z.type, el: z.el, handle: z.handle, id: e.pointerId, active: false,
@@ -2460,17 +2460,17 @@
 
   // Keyboard: Alt + arrows on the handle. Up/left = earlier, down/right = later.
   document.addEventListener("keydown", async (e) => {
-    const handle = e.target.closest && e.target.closest('[data-akcja="uchwyt"]');
+    const handle = e.target.closest && e.target.closest('[data-action="handle"]');
     if (!handle || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const direction = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }[e.key];
     if (!direction) return;
     e.preventDefault(); // Alt+← is also "back" in the browser
     if (dragState || savingMove) return;
-    if (filterActive()) { notify(tr("przenosz_filtr"), "ostrzezenie"); return; }
+    if (filterActive()) { notify(tr("przenosz_filtr"), "warning"); return; }
 
-    const type = handle.dataset.typ;
-    const el = handle.closest(type === "grupa" ? ".grupa" : ".karta");
-    const siblings = type === "grupa" ? $$("#tresc > .grupa") : groupCards(el.parentElement);
+    const type = handle.dataset.type;
+    const el = handle.closest(type === "group" ? ".group" : ".card");
+    const siblings = type === "group" ? $$("#content > .group") : groupCards(el.parentElement);
     const i = siblings.indexOf(el);
     const j = i + direction;
     if (j < 0 || j >= siblings.length) return;
@@ -2478,21 +2478,21 @@
     const place = rememberPlace(el);
     if (direction < 0) el.parentElement.insertBefore(el, siblings[j]);
     else el.parentElement.insertBefore(el, siblings[j].nextElementSibling);
-    if (type === "grupa") await finishGroupMove(el, place);
+    if (type === "group") await finishGroupMove(el, place);
     else await finishCardMove(el, place);
     handle.focus({ preventScroll: false }); // insertBefore lost the focus
   });
 
   // The Enter/Space key on the handle does nothing — it is not an action button.
   document.addEventListener("click", (e) => {
-    if (e.target.closest && e.target.closest('[data-akcja="uchwyt"]')) e.preventDefault();
+    if (e.target.closest && e.target.closest('[data-action="handle"]')) e.preventDefault();
   }, true);
 
   // ── layout and title from other tabs ────────────────────────────────────
   function domLayout() {
-    return $$("#tresc > .grupa").map((g) => ({
-      name: g.dataset.grupa,
-      services: groupCards($(":scope > .siatka", g)).map((k) => k.dataset.nazwa),
+    return $$("#content > .group").map((g) => ({
+      name: g.dataset.group,
+      services: groupCards($(":scope > .grid", g)).map((k) => k.dataset.name),
     }));
   }
 

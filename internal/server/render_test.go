@@ -365,7 +365,7 @@ const previewStub = `<script>
     }
     if (u.startsWith("/api/service")) {
       const klucz = new URLSearchParams(u.split("?")[1] || "").get("key") || "";
-      const el = document.querySelector('.karta[data-key="' + klucz + '"]');
+      const el = document.querySelector('.card[data-key="' + klucz + '"]');
       const h = historia(klucz);
       const teraz = (window.STAN_POCZATKOWY || {})[klucz] || { state: "up", ms: 60 };
       const punkty = h.points.map((p, i) => ({
@@ -381,8 +381,8 @@ const previewStub = `<script>
         }
       }
       return json({
-        key: klucz, name: (el && el.dataset.nazwa) || klucz,
-        url: (el && el.dataset.adres) || "", icon: (el && el.dataset.ikona) || "",
+        key: klucz, name: (el && el.dataset.name) || klucz,
+        url: (el && el.dataset.address) || "", icon: (el && el.dataset.icon) || "",
         interval: "30s", timeout: "6s", expect: [200, 301, 302, 401, 403], insecure: false,
         now: teraz,
         day: { samples: 2871, uptime: h.uptime, p50: 46, p95: 128, max: 512 },
@@ -416,7 +416,7 @@ const previewStub = `<script>
 </` + `script>`
 
 var iconPattern = regexp.MustCompile(`src="/icon/([A-Za-z0-9._-]+)"`)
-var pickerPattern = regexp.MustCompile(`(<div class="picker-tla" id="picker-tla"[^>]*?) hidden>`)
+var pickerPattern = regexp.MustCompile(`(<div class="picker-backgrounds" id="picker-backgrounds"[^>]*?) hidden>`)
 
 // nextClick clicks an element that appears only after an earlier
 // click — a tab in a window that a moment ago was not in the tree,
@@ -441,7 +441,7 @@ addEventListener("load", () => setTimeout(() => {
   setTimeout(() => {
     // under file:// /icon/<name> does not exist, so app.js already replaced
     // the icon with a letter tile — we insert the file that lies next to the preview
-    const box = document.querySelector("#detale-ikona");
+    const box = document.querySelector("#detail-icon");
     if (box) {
       box.textContent = "";
       const img = document.createElement("img");
@@ -525,7 +525,7 @@ func TestPreviewPages(t *testing.T) {
 	state := string(b)
 
 	// ! tone and preset go through the config, not through swapping an attribute in the file:
-	// app.js sets data-ton from window.WYGLAD at start anyway, so a
+	// app.js sets data-tone from window.WYGLAD at start anyway, so a
 	// hand-changed attribute would be overwritten at the first paint.
 	// ! bento only makes sense when the cards have different sizes. examples/homelab.yaml
 	// does not set `size`, so the bento variant gets them for the time of rendering —
@@ -570,25 +570,25 @@ func TestPreviewPages(t *testing.T) {
 		{name: "index-picker-ciemny", preset: "aurora", tone: "dark", view: "grid", picker: true},
 		{name: "index-picker-jasny", preset: "dawn", tone: "light", view: "grid", picker: true},
 		{name: "index-ustawienia-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#ustawienia"},
+			click: "#settings"},
 		{name: "index-ustawienia-jasny", preset: "dawn", tone: "light", view: "grid",
-			click: "#ustawienia"},
+			click: "#settings"},
 		{name: "index-edycja-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#tryb-edycji"},
+			click: "#edit-mode"},
 		{name: "index-powiadomienia-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#ustawienia", click2: `[aria-controls="panel-powiadomienia"]`},
+			click: "#settings", click2: `[aria-controls="panel-notifications"]`},
 		{name: "index-instancja-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#ustawienia", click2: `[aria-controls="panel-instancja"]`},
+			click: "#settings", click2: `[aria-controls="panel-instance"]`},
 		{name: "index-plik-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`},
+			click: "#settings", click2: `[aria-controls="panel-file"]`},
 		{name: "index-plik-jasny", preset: "dawn", tone: "light", view: "grid",
-			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`},
+			click: "#settings", click2: `[aria-controls="panel-file"]`},
 		{name: "index-plik-pelny-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: "#ustawienia", click2: `[aria-controls="panel-plik"]`, click3: "#yaml-pelny-ekran"},
+			click: "#settings", click2: `[aria-controls="panel-file"]`, click3: "#yaml-fullscreen"},
 		{name: "index-detale-ciemny", preset: "aurora", tone: "dark", view: "grid",
-			click: ".karta .szczegoly"},
+			click: ".card .details"},
 		{name: "index-detale-jasny", preset: "dawn", tone: "light", view: "grid",
-			click: ".karta .szczegoly"},
+			click: ".card .details"},
 	}
 	for _, w := range variants {
 		s.mu.Lock()
@@ -662,16 +662,16 @@ func TestPreviewPages(t *testing.T) {
 // idioms come back on their own if nobody guards them: the test holds the list so
 // that a regression is a red test, not a review remark half a year later.
 var forbiddenIdioms = []string{
-	`class="przycisk`, `class="ikonka`, `class="grupa-akcja`,
-	`class="menu-pozycja`, `class="picker-podmien`, `class="picker-domyslne`,
-	`class="picker-zapisz`, `class="wybrany`,
+	`class="button`, `class="mini-icon`, `class="group-action`,
+	`class="menu-item`, `class="picker-replace`, `class="picker-default`,
+	`class="picker-save`, `class="selected`,
 }
 
 // noBase — components that are <button>s but are not buttons in the visual
-// sense: .chip is a badge with a counter, .szczegoly is the chart bar
+// sense: .chip is a badge with a counter, .details is the chart bar
 // taking the whole card width in the grid's flat DOM. Giving either .btn
 // would break the layout, not unify the appearance.
-var noDB = []string{`class="chip`, `class="szczegoly`}
+var noDB = []string{`class="chip`, `class="details`}
 
 func TestTemplatesWithoutRemovedIdioms(t *testing.T) {
 	for _, name := range []string{"index.html", "login.html"} {
@@ -720,8 +720,8 @@ func TestSettingsHaveTabs(t *testing.T) {
 		t.Fatalf("czytam index.html: %v", err)
 	}
 	for _, id := range []string{
-		"panel-wyglad", "panel-powiadomienia", "panel-konta",
-		"panel-historia", "panel-plik", "panel-instancja",
+		"panel-appearance", "panel-notifications", "panel-account",
+		"panel-history", "panel-file", "panel-instance",
 	} {
 		if !bytes.Contains(content, []byte(`id="`+id+`"`)) {
 			t.Errorf("missing panel %q", id)
@@ -749,8 +749,8 @@ func TestPageHasHandlesAndTitleForEditing(t *testing.T) {
 	}
 	html := buf.String()
 	for _, want := range []string{
-		`id="tytul-panelu"`, `id="tytul-edytuj"`, `id="blad-tytulu"`, `id="ogloszenia"`,
-		`data-akcja="uchwyt" data-typ="usluga"`, `data-akcja="uchwyt" data-typ="grupa"`,
+		`id="panel-title"`, `id="edit-title"`, `id="title-error"`, `id="announcements"`,
+		`data-action="handle" data-type="service"`, `data-action="handle" data-type="group"`,
 		`aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"`,
 	} {
 		if !strings.Contains(html, want) {
@@ -758,10 +758,10 @@ func TestPageHasHandlesAndTitleForEditing(t *testing.T) {
 		}
 	}
 	// one handle per card and one per group
-	if n := strings.Count(html, `data-typ="usluga"`); n != 1 {
+	if n := strings.Count(html, `data-type="service"`); n != 1 {
 		t.Errorf("service handles = %d, want 1 (one card)", n)
 	}
-	if n := strings.Count(html, `data-typ="grupa"`); n != 1 {
+	if n := strings.Count(html, `data-type="group"`); n != 1 {
 		t.Errorf("group handles = %d, want 1", n)
 	}
 }
