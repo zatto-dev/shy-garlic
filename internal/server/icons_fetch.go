@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -50,7 +51,25 @@ func newIconClient() *http.Client {
 	t.TLSHandshakeTimeout = 3 * time.Second
 	t.ResponseHeaderTimeout = 5 * time.Second
 	t.MaxConnsPerHost = maxConnsPerHost
-	return &http.Client{Transport: t}
+	return &http.Client{Transport: t, CheckRedirect: iconRedirects}
+}
+
+const maxIconRedirects = 3
+
+// iconRedirects follows at most maxIconRedirects redirects and never from https to
+// http: an icon source that sends us to plain text is not something to follow.
+func iconRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) > maxIconRedirects {
+		return fmt.Errorf("icon source: stopped after %d redirects", maxIconRedirects)
+	}
+	if req.URL.Scheme != "https" {
+		for _, v := range via {
+			if v.URL.Scheme == "https" {
+				return errors.New("icon source: refusing a redirect from https to http")
+			}
+		}
+	}
+	return nil
 }
 
 type iconSource struct {

@@ -348,10 +348,10 @@ func (s *Server) Start(ctx context.Context) error {
 		slog.Info("icons", "mode", s.icons.Mode(), "available", s.icons.Count())
 		// now that the index is in, fetch what the config uses (and its variants)
 		s.mu.RLock()
-		cfg := s.cfg
+		loaded := s.cfg != nil
 		s.mu.RUnlock()
-		if cfg != nil {
-			s.icons.Retain(ctx, configIcons(cfg))
+		if loaded {
+			s.icons.RetainFrom(ctx, s.iconNames)
 		}
 		s.icons.RunRefresh(ctx) // daily conditional refresh of the index, until shutdown
 	}()
@@ -562,6 +562,18 @@ func (s *Server) brokenConfig(stamp string, b config.FileError, err error) error
 	return err
 }
 
+// iconNames is the icons of the config in force right now. Retain reads it when its
+// turn comes, not when it was asked for, so a slow Retain never works from a config
+// that has been replaced since.
+func (s *Server) iconNames() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cfg == nil {
+		return nil
+	}
+	return configIcons(s.cfg)
+}
+
 // apply starts the monitor, the notifier and the cards on the given config.
 func (s *Server) apply(ctx context.Context, cfg *config.Config) {
 	// ! The threshold must get in here, not only on a save from the panel. Without that
@@ -594,7 +606,7 @@ func (s *Server) apply(ctx context.Context, cfg *config.Config) {
 
 	// icons the services use go to the disk cache in the background (so the first
 	// render does not wait for the network), and the files of removed services go
-	s.icons.Retain(ctx, configIcons(cfg))
+	s.icons.RetainFrom(ctx, s.iconNames)
 	s.monitor.SetTargets(ctx, targets)
 	live := make(map[string]bool, len(targets))
 	for _, t := range targets {

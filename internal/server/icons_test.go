@@ -607,7 +607,7 @@ func TestRetainRemovesWhatServicesDoNotUse(t *testing.T) {
 	k, _, dir := loadedCatalog(t)
 	old := time.Now().Add(-2 * time.Hour)
 	for f, mod := range map[string]time.Time{
-		"leftover.svg": {}, "leftover.png": {}, "index.json": {}, "spis.json": {}, "selfhst/llama-cpp.svg": {},
+		"leftover.svg": {}, "leftover.png": {}, "selfhst/llama-cpp.svg": {},
 		".stale.svg.123.tmp": old, ".fresh.svg.456.tmp": {}, "notes.txt": {},
 	} {
 		p := filepath.Join(dir, f)
@@ -619,9 +619,14 @@ func TestRetainRemovesWhatServicesDoNotUse(t *testing.T) {
 			_ = os.Chtimes(p, mod, mod)
 		}
 	}
+	for _, f := range []string{"index.json", "spis.json"} { // the name index of 0.15
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(`{"jellyfin":"svg"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	k.Retain(context.Background(), []string{"jellyfin"})
 	waitFor(t, "jellyfin.svg", func() bool { return fileExists(filepath.Join(dir, "jellyfin.svg")) })
-	want := []string{".fresh.svg.456.tmp", "icons-index.db", "icons-index.meta.json", "jellyfin.svg", "notes.txt"}
+	want := []string{".fresh.svg.456.tmp", ownerMarker, "icons-index.db", "icons-index.meta.json", "jellyfin.svg", "notes.txt"}
 	if got := dirNames(t, dir); !slices.Equal(got, want) {
 		t.Errorf("cache directory = %v, want %v", got, want)
 	}
@@ -923,7 +928,7 @@ func TestParallelFetchesOfOneIconDoNotCollide(t *testing.T) {
 	if err != nil || string(got) != "<svg>"+body+"</svg>" {
 		t.Errorf("cached file is damaged: %d bytes, %v", len(got), err)
 	}
-	if names := dirNames(t, dir); !slices.Equal(names, []string{"plex.svg"}) {
+	if names := dirNames(t, dir); !slices.Equal(names, []string{ownerMarker, "plex.svg"}) {
 		t.Errorf("directory = %v, want only plex.svg (no temporary files)", names)
 	}
 }

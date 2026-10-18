@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"container/list"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,9 +65,12 @@ type Catalog struct {
 	life     context.Context // set by Refresh; background downloads end with it
 
 	keep     map[string]bool // file names (no extension) the services use: the only ones kept on disk
-	wanted   []string        // the names last given to Retain, replayed when the index changes
-	retained bool            // Retain was called at least once (before that nothing is known to be unused)
-	retain   sync.Mutex      // one Retain at a time (prune + prefetch)
+	wanted   func() []string // where Retain reads the names the services use, replayed when the index changes
+	markOnce sync.Once
+	owned    bool       // the cache directory is ours (see claimDir): only then is anything deleted from it
+	checked  time.Time  // when the index source was last asked, kept here too in case the disk is read-only
+	retained bool       // Retain was called at least once (before that nothing is known to be unused)
+	retain   sync.Mutex // one Retain at a time (prune + prefetch)
 
 	thumbs thumbCache
 	net    netGuard
@@ -121,6 +125,7 @@ func NewCatalogAt(baseURL, zipPath, cacheDir string) *Catalog {
 	}
 	if k.cacheDir != "" {
 		_ = os.MkdirAll(k.cacheDir, 0o755)
+		k.claimDir()
 	}
 	k.loadIndexFromDisk()
 	return k
@@ -185,8 +190,9 @@ func slicesCompact(s []string) []string {
 // the catalog keeps such a pair. An empty string in both fields = this icon
 // has no separate variants, the caller should use the plain base name.
 func (k *Catalog) Variants(name string) (dark, light string) {
-	n, ok := canonicalName(name)
-	x := k.index()
+	n, ok := catalogName(name)
+	x := k.acquire()
+	defer x.release()
 	if !ok || x == nil {
 		return "", ""
 	}
@@ -226,11 +232,12 @@ func (k *Catalog) loadZip(path string) error {
 // taken literally with an unknown extension (svg first, then png), as the panel
 // always did before an index was in.
 func (k *Catalog) fileFor(name string) (iconFile, bool) {
-	n, ok := canonicalName(name)
+	n, ok := catalogName(name)
 	if !ok {
 		return iconFile{}, false
 	}
-	if x := k.index(); x != nil {
+	if x := k.acquire(); x != nil {
+		defer x.release()
 		if f, ok := x.resolve(n); ok {
 			return f, true
 		}
@@ -240,12 +247,14 @@ func (k *Catalog) fileFor(name string) (iconFile, bool) {
 }
 
 func (k *Catalog) Has(name string) bool {
-	n, ok := canonicalName(name)
+	n, ok := catalogName(name)
 	if !ok {
 		return false
 	}
-	if x := k.index(); x != nil {
-		if _, ok := x.resolve(n); ok {
+	if x := k.acquire(); x != nil {
+		_, found := x.resolve(n)
+		x.release()
+		if found {
 			return true
 		}
 	}
@@ -258,7 +267,7 @@ func (k *Catalog) Has(name string) bool {
 // icons_fetch.go: at most iconWaitBudget of waiting, the download itself goes on in
 // the background).
 func (k *Catalog) Read(ctx context.Context, name string) ([]byte, string, error) {
-	n, ok := canonicalName(name)
+	n, ok := catalogName(name)
 	if !ok {
 		return nil, "", fmt.Errorf("bad icon name")
 	}
@@ -416,7 +425,7 @@ func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([
 	if dir != "" {
 		// ! a unique temporary file per call (SHYG-59): a fixed ".<name>.tmp" was shared by
 		// parallel downloads of one icon, which could rename a half-written file
-		if err := writeFileAtomic(dir, name+"."+ext, data); err != nil {
+		if err := k.saveIn(dir, name+"."+ext, data); err != nil {
 			slog.Debug("icon not saved", "icon", name, "err", err)
 		}
 	}
@@ -427,7 +436,8 @@ func (k *Catalog) fetchFrom(ctx context.Context, base, dir, name, ext string) ([
 // phrase, then those containing it in the middle or in an alias or display name.
 func (k *Catalog) Search(q string, limit int) []string {
 	q = cleanQuery(q)
-	if x := k.index(); x != nil {
+	if x := k.acquire(); x != nil {
+		defer x.release()
 		out, err := x.search(q, limit)
 		if err != nil {
 			slog.Debug("icon search failed", "err", err)
@@ -462,11 +472,12 @@ func (k *Catalog) Search(q string, limit int) []string {
 // filesOf lists the files an icon name needs: itself and, when it has them, its
 // dark/light pair. Without an index the name is kept literally.
 func (k *Catalog) filesOf(name string) []iconFile {
-	n, ok := canonicalName(name)
+	n, ok := catalogName(name)
 	if !ok {
 		return nil
 	}
-	x := k.index()
+	x := k.acquire()
+	defer x.release()
 	if x == nil {
 		return []iconFile{{File: n}}
 	}
@@ -486,10 +497,21 @@ func (k *Catalog) filesOf(name string) []iconFile {
 // without a download), and every other icon file in the cache is removed — the data
 // directory holds the icons of services that exist, nothing else.
 func (k *Catalog) Retain(ctx context.Context, names []string) {
+	names = append([]string(nil), names...)
+	k.RetainFrom(ctx, func() []string { return names })
+}
+
+// RetainFrom is Retain for a caller whose list of names changes: current is called
+// while the one-at-a-time lock is held, so a call that waited its turn behind a newer
+// one still sees the newest names and cannot delete the icon of a service added in
+// between. (A list taken before the lock would be a snapshot that may be stale by the
+// time the call runs.)
+func (k *Catalog) RetainFrom(ctx context.Context, current func() []string) {
 	k.retain.Lock()
 	defer k.retain.Unlock()
+	names := append([]string(nil), current()...)
 	k.mu.Lock()
-	k.wanted = append([]string(nil), names...)
+	k.wanted = current
 	k.retained = true
 	k.mu.Unlock()
 	if k.cacheDir == "" || k.Mode() == "zip" {
@@ -533,7 +555,7 @@ func (k *Catalog) Retain(ctx context.Context, names []string) {
 			if kind == "image/png" {
 				ext = "png"
 			}
-			if writeFileAtomic(k.cacheDir, f.File+"."+ext, data) == nil {
+			if k.save(f.File+"."+ext, data) == nil {
 				continue
 			}
 		}
@@ -562,8 +584,24 @@ func (k *Catalog) Retain(ctx context.Context, names []string) {
 					return
 				}
 				<-fl.done
-				if fl.err != nil && !errors.Is(fl.err, errNotFound) {
-					slog.Debug("icon prefetch failed", "icon", f.File, "err", fl.err)
+				if fl.err != nil {
+					if !errors.Is(fl.err, errNotFound) {
+						slog.Debug("icon prefetch failed", "icon", f.File, "err", fl.err)
+					}
+					return
+				}
+				// ! we may have joined a download that began before any service used
+				// this icon: it was meant for the thumbnail cache and wrote no file
+				if k.isKept(f.File) {
+					if _, _, ok := readCached(k.cacheDir, f.File, f.Ext); !ok {
+						ext := "svg"
+						if fl.kind == "image/png" {
+							ext = "png"
+						}
+						if err := k.save(f.File+"."+ext, fl.data); err != nil {
+							slog.Debug("icon not saved", "icon", f.File, "err", err)
+						}
+					}
 				}
 			}()
 		}
@@ -575,15 +613,15 @@ func (k *Catalog) Retain(ctx context.Context, names []string) {
 // resolve differently).
 func (k *Catalog) retainAgain() {
 	k.mu.RLock()
-	names, retained, ctx := append([]string(nil), k.wanted...), k.retained, k.life
+	current, retained, ctx := k.wanted, k.retained, k.life
 	k.mu.RUnlock()
-	if !retained {
+	if !retained || current == nil {
 		return // the config has not said yet what it uses; pruning now would delete it all
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	k.Retain(ctx, names)
+	k.RetainFrom(ctx, current)
 }
 
 // isKept tells whether a file belongs to a service and so goes to disk.
@@ -593,10 +631,130 @@ func (k *Catalog) isKept(file string) bool {
 	return k.keep[file]
 }
 
+// ownerMarker is created in a cache directory the first time we claim it. Pruning
+// deletes files, so it runs only in a directory that carries it.
+const ownerMarker = ".shyg-icons"
+
+// claimDir decides, once, whether the cache directory is ours. It is when it has the
+// marker, or when it is empty, or when it holds the files of the 0.15 layout of this
+// panel (an index.json/spis.json in our format, a selfhst/ directory of icons). Then the marker is written. A directory with anything
+// else (--cache pointed at ~/Pictures) is left alone: nothing is ever deleted there.
+func (k *Catalog) claimDir() {
+	if pathExists(filepath.Join(k.cacheDir, ownerMarker)) {
+		k.owned = true
+		return
+	}
+	if k.mode == "zip" {
+		return
+	}
+	if !k.looksLikeOurs() {
+		slog.Warn("the icon cache directory holds files that are not ours: icons of removed services will not be deleted from it",
+			"dir", k.cacheDir)
+		return
+	}
+	k.owned = true // the marker itself is written with our first file, see save
+}
+
+// ensureMarker writes the marker of a directory we own, once, before our first write.
+func (k *Catalog) ensureMarker() {
+	if !k.owned {
+		return
+	}
+	k.markOnce.Do(func() {
+		p := filepath.Join(k.cacheDir, ownerMarker)
+		if pathExists(p) {
+			return
+		}
+		if err := os.MkdirAll(k.cacheDir, 0o755); err != nil {
+			return
+		}
+		if err := os.WriteFile(p, []byte("Shy Garlic icon cache: files here may be deleted when no service uses them.\n"), 0o644); err != nil {
+			slog.Debug("icon cache marker not written", "err", err)
+		}
+	})
+}
+
+// saveIn is save for a directory given by the caller (the cache directory, or nothing).
+func (k *Catalog) saveIn(dir, name string, data []byte) error {
+	if dir == k.cacheDir {
+		k.ensureMarker()
+	}
+	return writeFileAtomic(dir, name, data)
+}
+
+// save writes one file of the cache directory (marker first).
+func (k *Catalog) save(name string, data []byte) error {
+	k.ensureMarker()
+	return writeFileAtomic(k.cacheDir, name, data)
+}
+
+func pathExists(path string) bool { _, err := os.Stat(path); return err == nil }
+
+func (k *Catalog) looksLikeOurs() bool {
+	entries, err := os.ReadDir(k.cacheDir)
+	if err != nil {
+		return false
+	}
+	dotOnly := true
+	evidence := false
+	for _, e := range entries {
+		n := e.Name()
+		if !strings.HasPrefix(n, ".") {
+			dotOnly = false
+		}
+		path := filepath.Join(k.cacheDir, n)
+		switch {
+		case n == "index.json" || n == legacyIndexFile:
+			if ourNameIndex(path) {
+				evidence = true
+			}
+		case n == "selfhst" && e.IsDir():
+			if onlyIconFiles(path) {
+				evidence = true
+			}
+		}
+	}
+	return dotOnly || evidence
+}
+
+// ourNameIndex tells whether a file is the name index of the earlier layout: a JSON
+// object of strings.
+func ourNameIndex(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) > maxIndexBytes {
+		return false
+	}
+	var m map[string]string
+	return json.Unmarshal(b, &m) == nil && m != nil
+}
+
+// onlyIconFiles tells whether a directory holds nothing but icon files and
+// temporary files — the only content of the selfhst/ directory of 0.15.
+func onlyIconFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !(strings.HasSuffix(n, ".svg") || strings.HasSuffix(n, ".png") || strings.HasSuffix(n, ".tmp")) {
+			return false
+		}
+	}
+	return true
+}
+
 // prune removes from the cache directory everything a service does not use: icon
 // files, files of the previous layout (index.json, spis.json, the selfhst/
 // directory) and temporary files left by a crash. The index file is never touched.
+// It does nothing in a directory that is not ours, and of the old layout it removes
+// only what is recognizably ours.
 func (k *Catalog) prune(keep map[string]bool) {
+	if !k.owned {
+		return
+	}
+	// ! before anything of the old layout goes: it is the proof the directory is ours
+	k.ensureMarker()
 	entries, err := os.ReadDir(k.cacheDir)
 	if err != nil {
 		return
@@ -606,12 +764,14 @@ func (k *Catalog) prune(keep map[string]bool) {
 		path := filepath.Join(k.cacheDir, n)
 		switch {
 		case e.IsDir():
-			if n == "selfhst" { // layout of 0.15
+			if n == "selfhst" && onlyIconFiles(path) { // layout of 0.15
 				_ = os.RemoveAll(path)
 			}
 		case n == indexFileName || n == indexMetaName:
 		case n == "index.json" || n == legacyIndexFile:
-			_ = os.Remove(path)
+			if ourNameIndex(path) {
+				_ = os.Remove(path)
+			}
 		case strings.HasPrefix(n, ".") && strings.HasSuffix(n, ".tmp"):
 			if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > staleTmpAge {
 				_ = os.Remove(path)

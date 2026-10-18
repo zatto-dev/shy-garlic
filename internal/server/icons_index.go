@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // the icon index is a SQLite file, same driver as the store
@@ -94,6 +95,28 @@ func canonicalName(name string) (string, bool) {
 	return n, true
 }
 
+// catalogName is canonicalName for a name that comes from a config: configs of the
+// earlier versions say `Home Assistant` or `Home_Assistant`, which the allow-list
+// rejects as written. Such a name is first brought to the catalog's own form
+// (aliasForm), and only the result has to pass the allow-list. A name that could
+// leave the cache directory is refused before any rewriting.
+func catalogName(name string) (string, bool) {
+	if n, ok := canonicalName(name); ok {
+		return n, true
+	}
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.TrimPrefix(n, legacySelfhstPrefix)
+	n = strings.TrimSuffix(strings.TrimSuffix(n, ".svg"), ".png")
+	if badIconName(n) {
+		return "", false
+	}
+	n = aliasForm(n)
+	if !iconName.MatchString(n) {
+		return "", false
+	}
+	return n, true
+}
+
 // aliasForm is the normalization icons.zatto.dev applies to aliases and slugs:
 // lowercase, every run of other characters becomes one dash.
 func aliasForm(s string) string {
@@ -123,6 +146,11 @@ type iconFile struct {
 type iconIndex struct {
 	db    *sql.DB
 	count int
+
+	mu      sync.Mutex
+	refs    int  // queries in progress (see Catalog.acquire)
+	retired bool // replaced by a newer index: closed as soon as the last reader is done
+	closed  bool
 }
 
 func sqliteURI(path string, query string) string {
@@ -170,7 +198,42 @@ func openIconIndex(path string) (*iconIndex, error) {
 	return x, nil
 }
 
-func (x *iconIndex) close() { _ = x.db.Close() }
+func (x *iconIndex) close() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.closeLocked()
+}
+
+func (x *iconIndex) closeLocked() {
+	if !x.closed {
+		x.closed = true
+		_ = x.db.Close()
+	}
+}
+
+// release ends the use started by Catalog.acquire; safe on nil. A retired index is
+// closed here when the last reader leaves.
+func (x *iconIndex) release() {
+	if x == nil {
+		return
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.refs--
+	if x.retired && x.refs <= 0 {
+		x.closeLocked()
+	}
+}
+
+// retire marks the index as replaced; it closes now if nobody is reading it.
+func (x *iconIndex) retire() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.retired = true
+	if x.refs <= 0 {
+		x.closeLocked()
+	}
+}
 
 // lookup finds the file for one exact slug or one of its variants.
 func (x *iconIndex) lookup(name string) (iconFile, bool) {
@@ -545,13 +608,29 @@ func (k *Catalog) readMeta() indexMeta {
 	return m
 }
 
+// lastChecked is when the index source was last asked. The value in memory wins: a
+// read-only cache directory cannot keep it on disk, and without it a 304 would be
+// followed by another request a minute later, for ever.
+func (k *Catalog) lastChecked() time.Time {
+	k.mu.RLock()
+	t := k.checked
+	k.mu.RUnlock()
+	if !t.IsZero() {
+		return t
+	}
+	return k.readMeta().CheckedAt
+}
+
 func (k *Catalog) writeMeta(m indexMeta) {
+	k.mu.Lock()
+	k.checked = m.CheckedAt
+	k.mu.Unlock()
 	m.Source = k.baseURL
 	b, err := json.Marshal(m)
 	if err != nil {
 		return
 	}
-	if err := writeFileAtomic(k.cacheDir, indexMetaName, b); err != nil {
+	if err := k.save(indexMetaName, b); err != nil {
 		slog.Debug("icon index metadata not saved", "err", err)
 	}
 }
@@ -563,8 +642,23 @@ func (k *Catalog) index() *iconIndex {
 	return k.idx
 }
 
-// swapIndex installs a new index and retires the old one a little later, so a
-// reader that grabbed it a moment ago finishes its query.
+// acquire returns the loaded index for one use (nil when there is none); the caller
+// ends it with release. An index replaced meanwhile stays open until its last reader
+// is done, so a query never meets a closed database.
+func (k *Catalog) acquire() *iconIndex {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	x := k.idx
+	if x != nil {
+		x.mu.Lock()
+		x.refs++
+		x.mu.Unlock()
+	}
+	return x
+}
+
+// swapIndex installs a new index and retires the old one: it is closed once the
+// readers that already hold it are done.
 func (k *Catalog) swapIndex(x *iconIndex) {
 	k.mu.Lock()
 	old := k.idx
@@ -572,7 +666,7 @@ func (k *Catalog) swapIndex(x *iconIndex) {
 	k.mu.Unlock()
 	k.net.forgetMisses()
 	if old != nil {
-		time.AfterFunc(10*time.Second, old.close)
+		old.retire()
 	}
 }
 
@@ -625,7 +719,7 @@ func (k *Catalog) RunRefresh(ctx context.Context) {
 	for {
 		wait := indexRetryEach
 		if !failed {
-			wait = max(time.Minute, indexRefreshEach-time.Since(k.readMeta().CheckedAt))
+			wait = max(time.Minute, indexRefreshEach-time.Since(k.lastChecked()))
 		}
 		select {
 		case <-ctx.Done():
@@ -645,7 +739,7 @@ func (k *Catalog) RunRefresh(ctx context.Context) {
 func (k *Catalog) updateIndex(ctx context.Context) (bool, error) {
 	meta := k.readMeta()
 	have := k.index() != nil
-	if have && time.Since(meta.CheckedAt) < indexRefreshEach {
+	if have && time.Since(k.lastChecked()) < indexRefreshEach {
 		return false, nil
 	}
 	host := hostOf(k.baseURL)
@@ -688,6 +782,7 @@ func (k *Catalog) updateIndex(ctx context.Context) (bool, error) {
 	if err := os.MkdirAll(k.cacheDir, 0o755); err != nil {
 		return false, err
 	}
+	k.ensureMarker()
 	tmp, err := os.CreateTemp(k.cacheDir, ".icons-index-*.tmp")
 	if err != nil {
 		return false, err
