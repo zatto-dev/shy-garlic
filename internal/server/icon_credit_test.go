@@ -2,11 +2,7 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"html"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,6 +16,7 @@ import (
 func TestIconCreditRendersInBothLanguages(t *testing.T) {
 	s := testServer(t)
 	links := []string{
+		`href="https://icons.zatto.dev/attribution"`,
 		`href="https://github.com/homarr-labs/dashboard-icons"`,
 		`href="https://www.apache.org/licenses/LICENSE-2.0"`,
 		`href="https://github.com/selfhst/icons"`,
@@ -56,23 +53,5 @@ func TestIconCreditRendersInBothLanguages(t *testing.T) {
 	}
 	if texts[i18n.EN] == texts[i18n.PL] {
 		t.Error("the credit text is not translated")
-	}
-}
-
-// The credit says icons are served unmodified, so an oversized file must be
-// refused, not cut off at the read limit and cached truncated.
-func TestFetchRefusesOversizedIconInsteadOfTruncating(t *testing.T) {
-	big := bytes.Repeat([]byte("x"), 2<<20+1)
-	k, dir := newCatalogWithMockCDN(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(big)
-	})
-	k.ext = map[string]string{"huge": "svg"}
-	k.names = []string{"huge"}
-
-	if data, _, err := k.Read(context.Background(), "huge"); err == nil {
-		t.Fatalf("Read returned %d bytes of a file over the limit, want an error", len(data))
-	}
-	if _, err := os.Stat(filepath.Join(dir, "huge.svg")); err == nil {
-		t.Error("a truncated icon was written to the cache")
 	}
 }

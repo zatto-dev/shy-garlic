@@ -731,6 +731,13 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 			variants[n] = [2]string{dark, light}
 		}
 	}
+	// the edit dialog asks about the name a service already has, which may be an old
+	// name or an alias of what the search returns: answer for the name asked
+	if n, ok := canonicalName(q); ok {
+		if dark, light := s.icons.Variants(n); dark != "" {
+			variants[n] = [2]string{dark, light}
+		}
+	}
 	jsonReply(w, http.StatusOK, map[string]any{
 		"icons":    names,
 		"variants": variants,

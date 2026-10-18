@@ -3,10 +3,8 @@ package server
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -16,20 +14,18 @@ import (
 // ! The panel's promise is to be lighter and faster than anything else, so the
 // network sits behind three guards:
 //   - a request for an icon that is not on disk waits at most iconWaitBudget for
-//     the download, for ALL sources together; past that it gets a 404 (the card
+//     the download; past that it gets a 404 (the card
 //     shows its letter) while the download finishes in the background, so the
 //     next render has the file. Concurrent requests for one name share one
 //     download.
-//   - a name that every source answered 404 for is not asked again for
-//     notFoundTTL;
-//   - a CDN host that failed (timeout, refused, 5xx) is skipped for
-//     hostCooldown, so an offline panel answers at once instead of after a
-//     connect timeout per icon. Before this, a firewall dropping packets cost
-//     40 s per icon (20 s client timeout × two catalogs).
+//   - a name the source answered 404 for is not asked again for notFoundTTL;
+//   - a host that failed (timeout, refused, 5xx) is skipped for hostCooldown, so
+//     an offline panel answers at once instead of after a connect timeout per
+//     icon. Before this, a firewall dropping packets cost 40 s per icon.
 const (
 	iconWaitBudget  = 1500 * time.Millisecond
 	iconFetchBudget = 8 * time.Second  // one background download, all sources
-	indexBudget     = 30 * time.Second // index files are megabytes, fetched in the background
+	indexBudget     = 30 * time.Second // the index is about a megabyte, fetched in the background
 	notFoundTTL     = 10 * time.Minute
 	hostCooldown    = 2 * time.Minute
 	maxNotFound     = 4096 // bound on remembered misses; names come from requests
@@ -129,45 +125,19 @@ func (g *netGuard) markDown(host string) {
 	g.downTill[host] = time.Now().Add(hostCooldown)
 }
 
-// sourcesFor decides where a name comes from, in order. Dashboard Icons first;
-// selfh.st when its name, or as a fallback when the indexes cannot tell. No
-// sources = both indexes are complete and neither has the name: answered from
-// memory, so random names in /icon/ never reach the network.
-func (k *Catalog) sourcesFor(name string) []iconSource {
-	homarr := func(n, ext string) iconSource {
-		return iconSource{base: cdnIcons, dir: k.cacheDir, name: n, ext: ext}
+// sourcesFor says where one icon file comes from. A file a service uses is stored in
+// the cache directory; any other (a picker thumbnail) is only handed back and kept
+// in memory, so the data directory never fills with icons nobody saved.
+func (k *Catalog) sourcesFor(f iconFile) []iconSource {
+	dir := ""
+	if k.isKept(f.File) {
+		dir = k.cacheDir
 	}
-	selfhst := func(n, ext string) iconSource {
-		return iconSource{base: selfhstCDN, dir: k.selfhstCacheDir(), name: n, ext: ext}
-	}
-	k.mu.RLock()
-	defer k.mu.RUnlock()
-	if ref, ok := strings.CutPrefix(name, selfhstPrefix); ok {
-		ext, ok := k.selfhst.fileExt(ref)
-		if !ok && k.selfhst.loaded {
-			return nil
-		}
-		return []iconSource{selfhst(ref, ext)}
-	}
-	if ext, ok := k.homarrFileLocked(name); ok {
-		return []iconSource{homarr(name, ext)}
-	}
-	sExt, inSelfhst := k.selfhst.fileExt(name)
-	if inSelfhst && k.homarrAuthoritative {
-		return []iconSource{selfhst(name, sExt)}
-	}
-	if k.homarrAuthoritative && k.selfhst.loaded {
-		return nil
-	}
-	out := []iconSource{homarr(name, "")}
-	if inSelfhst || !k.selfhst.loaded {
-		out = append(out, selfhst(name, sExt))
-	}
-	return out
+	return []iconSource{{base: k.baseURL, dir: dir, name: f.File, ext: f.Ext}}
 }
 
-// fetchIcon is one background download along the sources, shared by everyone
-// asking for the same name. nil = maxIconFlights downloads are already running.
+// fetchIcon is one background download, shared by everyone asking for the same name.
+// nil = maxIconFlights downloads are already running.
 func (k *Catalog) fetchIcon(name string, sources []iconSource) *iconFlight {
 	g := &k.net
 	g.mu.Lock()
@@ -189,6 +159,9 @@ func (k *Catalog) fetchIcon(name string, sources []iconSource) *iconFlight {
 		ctx, cancel := context.WithTimeout(k.lifetime(), iconFetchBudget)
 		defer cancel()
 		f.data, f.kind, f.err = k.walkSources(ctx, name, sources)
+		if f.err == nil && len(sources) > 0 && sources[0].dir == "" {
+			k.thumbs.put(name, f.data, f.kind)
+		}
 		g.mu.Lock()
 		delete(g.flights, name)
 		g.mu.Unlock()
@@ -197,15 +170,12 @@ func (k *Catalog) fetchIcon(name string, sources []iconSource) *iconFlight {
 	return f
 }
 
+// walkSources fetches the first source that answers. There is one source today (the
+// icon server, or a mirror of it); the list stays a list so a second one is a data
+// change, not a rewrite. A 404 is the only answer that moves on to the next source
+// and the only one remembered as a miss; a network failure is neither.
 func (k *Catalog) walkSources(ctx context.Context, key string, sources []iconSource) ([]byte, string, error) {
-	for i, src := range sources {
-		// a later source's cache counts only once the earlier sources said 404 —
-		// otherwise a selfh.st file could shadow a Dashboard Icons one of the same name
-		if i > 0 {
-			if data, kind, ok := readCached(src.dir, src.name, src.ext); ok {
-				return data, kind, nil
-			}
-		}
+	for _, src := range sources {
 		exts := []string{src.ext}
 		if src.ext == "" {
 			exts = []string{"svg", "png"}
@@ -216,15 +186,6 @@ func (k *Catalog) walkSources(ctx context.Context, key string, sources []iconSou
 				return data, kind, nil
 			}
 			if !errors.Is(err, errNotFound) {
-				// network trouble or a broken answer: not a reason to ask another
-				// catalog over the network, and not a miss to remember — but a file
-				// a later catalog left in the cache can still be served (offline
-				// without an index, that is the only way to show it)
-				for _, later := range sources[i+1:] {
-					if data, kind, ok := readCached(later.dir, later.name, later.ext); ok {
-						return data, kind, nil
-					}
-				}
 				return nil, "", err
 			}
 		}
@@ -253,84 +214,4 @@ func (k *Catalog) readFromNetwork(ctx context.Context, name string, sources []ic
 	case <-ctx.Done():
 		return nil, "", ctx.Err()
 	}
-}
-
-// Prefetch downloads, in the background, the icons the config uses (and their
-// dark/light variants) that are not on disk yet, so the first render has them.
-func (k *Catalog) Prefetch(ctx context.Context, names []string) {
-	if k.cacheDir == "" {
-		return // nothing to keep the files in, so nothing gained
-	}
-	var todo []string
-	seen := map[string]bool{}
-	add := func(n string) {
-		if n == "" || seen[n] || badIconName(n) {
-			return
-		}
-		seen[n] = true
-		todo = append(todo, n)
-	}
-	for _, n := range names {
-		add(n)
-		if dark, light := k.Variants(n); dark != "" {
-			add(dark)
-			add(light)
-		}
-	}
-	if len(todo) == 0 {
-		return
-	}
-	go func() {
-		sem := make(chan struct{}, prefetchWorkers)
-		var wg sync.WaitGroup
-		zipMode := k.Mode() == "zip"
-	loop:
-		for _, n := range todo {
-			// zip mode is for networks without internet: what the zip lacks is not
-			// fetched ahead of time
-			if zipMode || k.onDiskOrZip(n) || k.net.missing(n) {
-				continue
-			}
-			sources := k.sourcesFor(n)
-			if len(sources) == 0 {
-				continue
-			}
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				break loop
-			}
-			wg.Add(1)
-			go func() {
-				defer func() { <-sem; wg.Done() }()
-				f := k.fetchIcon(n, sources)
-				if f == nil {
-					return
-				}
-				<-f.done
-				if f.err != nil && !errors.Is(f.err, errNotFound) {
-					slog.Debug("icon prefetch failed", "icon", n, "err", f.err)
-				}
-			}()
-		}
-		wg.Wait()
-	}()
-}
-
-// onDiskOrZip tells whether Read can answer without the network.
-func (k *Catalog) onDiskOrZip(name string) bool {
-	k.mu.RLock()
-	zipIdx := k.zipIdx
-	k.mu.RUnlock()
-	if zipIdx != nil {
-		if _, ok := zipIdx[name+".svg"]; ok {
-			return true
-		}
-	}
-	sources := k.sourcesFor(name)
-	if len(sources) == 0 {
-		return false
-	}
-	_, _, ok := readCached(sources[0].dir, sources[0].name, sources[0].ext)
-	return ok
 }
