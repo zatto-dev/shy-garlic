@@ -292,3 +292,53 @@ func TestReplacedIndexIsClosedOnlyAfterItsLastReader(t *testing.T) {
 		t.Error("an unused replaced index stayed open")
 	}
 }
+
+// ── adoption and deletion are narrow ─────────────────────────────────────────
+
+func TestPruneDoesNotAdoptADirectoryWithOnlyHiddenEntries(t *testing.T) {
+	m := newIconServer(t, fixtureIcons())
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewCatalogAt(m.srv.URL, "", dir)
+	k.Refresh(context.Background())
+	k.Retain(context.Background(), nil)
+	if k.owned {
+		t.Error("a directory holding only .git counts as ours")
+	}
+	if fileExists(filepath.Join(dir, ownerMarker)) {
+		t.Error("a directory holding only .git got our marker")
+	}
+}
+
+func TestPruneKeepsForeignFilesInAClaimedDirectory(t *testing.T) {
+	m := newIconServer(t, fixtureIcons())
+	dir := t.TempDir() // empty: claimed
+	k := NewCatalogAt(m.srv.URL, "", dir)
+	k.Refresh(context.Background())
+	k.Retain(context.Background(), []string{"jellyfin", "plex"})
+	waitFor(t, "plex.svg", func() bool {
+		return fileExists(filepath.Join(dir, "jellyfin.svg")) && fileExists(filepath.Join(dir, "plex.svg"))
+	})
+	if !k.owned {
+		t.Fatal("an empty directory was not claimed")
+	}
+	for _, f := range []string{"my-photo.png", "logo.svg"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("mine"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k.Retain(context.Background(), []string{"jellyfin"})
+	if fileExists(filepath.Join(dir, "plex.svg")) {
+		t.Error("our unused icon was not deleted")
+	}
+	if !fileExists(filepath.Join(dir, "jellyfin.svg")) {
+		t.Error("a used icon was deleted")
+	}
+	for _, f := range []string{"my-photo.png", "logo.svg"} {
+		if !fileExists(filepath.Join(dir, f)) {
+			t.Errorf("foreign %s was deleted", f)
+		}
+	}
+}

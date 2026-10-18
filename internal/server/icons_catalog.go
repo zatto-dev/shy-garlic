@@ -67,10 +67,11 @@ type Catalog struct {
 	keep     map[string]bool // file names (no extension) the services use: the only ones kept on disk
 	wanted   func() []string // where Retain reads the names the services use, replayed when the index changes
 	markOnce sync.Once
-	owned    bool       // the cache directory is ours (see claimDir): only then is anything deleted from it
-	checked  time.Time  // when the index source was last asked, kept here too in case the disk is read-only
-	retained bool       // Retain was called at least once (before that nothing is known to be unused)
-	retain   sync.Mutex // one Retain at a time (prune + prefetch)
+	owned    bool            // the cache directory is ours (see claimDir): only then is anything deleted from it
+	written  map[string]bool // file names (no extension) this process saved itself
+	checked  time.Time       // when the index source was last asked, kept here too in case the disk is read-only
+	retained bool            // Retain was called at least once (before that nothing is known to be unused)
+	retain   sync.Mutex      // one Retain at a time (prune + prefetch)
 
 	thumbs thumbCache
 	net    netGuard
@@ -653,6 +654,9 @@ func (k *Catalog) claimDir() {
 		return
 	}
 	k.owned = true // the marker itself is written with our first file, see save
+	if entries, err := os.ReadDir(k.cacheDir); err == nil && len(entries) == 0 {
+		slog.Info("the icon cache directory is empty: claiming it, icons of removed services will be deleted from it", "dir", k.cacheDir)
+	}
 }
 
 // ensureMarker writes the marker of a directory we own, once, before our first write.
@@ -678,6 +682,7 @@ func (k *Catalog) ensureMarker() {
 func (k *Catalog) saveIn(dir, name string, data []byte) error {
 	if dir == k.cacheDir {
 		k.ensureMarker()
+		k.noteWritten(name)
 	}
 	return writeFileAtomic(dir, name, data)
 }
@@ -685,7 +690,31 @@ func (k *Catalog) saveIn(dir, name string, data []byte) error {
 // save writes one file of the cache directory (marker first).
 func (k *Catalog) save(name string, data []byte) error {
 	k.ensureMarker()
+	k.noteWritten(name)
 	return writeFileAtomic(k.cacheDir, name, data)
+}
+
+// noteWritten remembers that we saved an icon file: prune may delete it later even
+// if the index no longer lists the slug.
+func (k *Catalog) noteWritten(name string) {
+	base, ok := iconBase(name)
+	if !ok {
+		return
+	}
+	k.mu.Lock()
+	if k.written == nil {
+		k.written = map[string]bool{}
+	}
+	k.written[base] = true
+	k.mu.Unlock()
+}
+
+// iconBase returns the file name without a .svg/.png extension.
+func iconBase(name string) (string, bool) {
+	if b, ok := strings.CutSuffix(name, ".svg"); ok {
+		return b, true
+	}
+	return strings.CutSuffix(name, ".png")
 }
 
 func pathExists(path string) bool { _, err := os.Stat(path); return err == nil }
@@ -695,26 +724,31 @@ func (k *Catalog) looksLikeOurs() bool {
 	if err != nil {
 		return false
 	}
-	dotOnly := true
-	evidence := false
+	return len(entries) == 0 || k.hasOldLayout() // only hidden entries (.git) are not evidence
+}
+
+// hasOldLayout tells whether the cache directory holds files of the 0.15 layout of
+// this panel: a name index in our format, or a selfhst/ directory of icons.
+func (k *Catalog) hasOldLayout() bool {
+	entries, err := os.ReadDir(k.cacheDir)
+	if err != nil {
+		return false
+	}
 	for _, e := range entries {
 		n := e.Name()
-		if !strings.HasPrefix(n, ".") {
-			dotOnly = false
-		}
 		path := filepath.Join(k.cacheDir, n)
 		switch {
 		case n == "index.json" || n == legacyIndexFile:
 			if ourNameIndex(path) {
-				evidence = true
+				return true
 			}
 		case n == "selfhst" && e.IsDir():
 			if onlyIconFiles(path) {
-				evidence = true
+				return true
 			}
 		}
 	}
-	return dotOnly || evidence
+	return false
 }
 
 // ourNameIndex tells whether a file is the name index of the earlier layout: a JSON
@@ -759,6 +793,16 @@ func (k *Catalog) prune(keep map[string]bool) {
 	if err != nil {
 		return
 	}
+	// a file is ours to delete only when its slug is in the catalog index or we saved
+	// it ourselves; a foreign logo.svg in a claimed directory stays
+	x := k.acquire()
+	if x == nil {
+		return
+	}
+	defer x.release()
+	// while files of the old flat layout are still here (they are the proof the
+	// directory is ours), loose icon files in it are ours too
+	legacy := k.hasOldLayout()
 	for _, e := range entries {
 		n := e.Name()
 		path := filepath.Join(k.cacheDir, n)
@@ -777,11 +821,25 @@ func (k *Catalog) prune(keep map[string]bool) {
 				_ = os.Remove(path)
 			}
 		case strings.HasSuffix(n, ".svg") || strings.HasSuffix(n, ".png"):
-			if !keep[strings.TrimSuffix(strings.TrimSuffix(n, ".svg"), ".png")] {
+			base, _ := iconBase(n)
+			if !keep[base] && (legacy || k.isOurIcon(x, base)) {
 				_ = os.Remove(path)
 			}
 		}
 	}
+}
+
+// isOurIcon tells whether an icon file name is one the catalog (or this process) made:
+// a slug of the index, a -dark/-light variant of one, or a file we saved.
+func (k *Catalog) isOurIcon(x *iconIndex, base string) bool {
+	k.mu.RLock()
+	w := k.written[base]
+	k.mu.RUnlock()
+	if w {
+		return true
+	}
+	_, ok := x.lookup(base)
+	return ok
 }
 
 // legacyIndexFile is the pre-0.14 name of the old name-index cache.
