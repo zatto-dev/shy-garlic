@@ -45,7 +45,7 @@ func checkTemplateOutput(t *testing.T, html string) {
 
 func fullPageView() pageView {
 	d := pageView{
-		Title: "Homelab", Version: "test", User: "admin", IconCount: 3363,
+		Title: "Homelab", Version: "test", User: "admin", IconCount: 3363, IconsBase: DefaultIconsURL,
 		State: template.JS("{}"), Lang: "pl",
 		Appearance:     appearanceView{Preset: "aurora", Blur: 10, Tone: "dark", View: "grid"},
 		AppearanceJSON: template.JS(`{"preset":"aurora","image":"","blur":10,"tone":"dark","view":"grid"}`),

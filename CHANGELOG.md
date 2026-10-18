@@ -10,6 +10,44 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-18
+
+### Changed
+
+- Icons now come from one source, [icons.zatto.dev](https://icons.zatto.dev),
+  instead of jsDelivr (Dashboard Icons) plus selfh.st. It serves the same two
+  collections, merged, sanitized and optimized. The base URL is configurable
+  (`--icons-url` / `SHYG_ICONS_URL`) so you can point the panel at your own
+  mirror. Icon names in existing configs keep working: old slugs, old aliases and
+  `selfhst:<name>` resolve to the same icon.
+- The icon catalog no longer sits in memory. The index of all names is a SQLite
+  file (`<cache>/icons-index.db`) imported with a streaming parser and queried
+  from disk, refreshed with a conditional request (ETag) once a day, replaced
+  atomically, and rebuilt if damaged. The icon picker searches it offline too.
+- The data directory keeps only the icons your services use (and their
+  light/dark pairs): fetched when a service is added or at start, removed when
+  the service is deleted. Picker thumbnails live in a small in-memory cache and
+  are never written to disk. Files of the previous layout (`<cache>/selfhst/`,
+  `index.json`) and the icons of the catalog that no service uses are removed.
+- The credit now links to the icon server's attribution page ("Icon credits")
+  and says the files are optimized and sanitized, not served byte for byte.
+- `/icon/*` also sends `X-Content-Type-Options: nosniff`.
+
+### Removed
+
+- The jsDelivr and selfh.st clients, and the separate selfh.st cache. `icons.zip`
+  (`--icons`) works as before.
+
+### Fixed
+
+- Parallel downloads of one icon shared a fixed temporary file name and could
+  rename a half-written file into the cache (SHYG-59). Every write now goes
+  through its own temporary file in the same directory, then fsync and rename.
+- Pruning the icon cache is safer. A directory is claimed only when it is empty
+  or holds the files of the 0.15 layout (a directory with just `.git` is left
+  alone), and only icon files the catalog index knows, or that the panel saved
+  itself, are deleted: a foreign `logo.svg` in the cache directory stays.
+
 ## [0.15.0] — 2026-10-17
 
 ### Added

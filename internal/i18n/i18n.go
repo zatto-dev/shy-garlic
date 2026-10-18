@@ -98,9 +98,10 @@ var texts = map[string]map[Lang]string{
 	"icon_credit_by":      {EN: "by", PL: "autorstwa"},
 	"icon_credit_license": {EN: "license", PL: "licencja"},
 	"icon_credit_changes": {
-		EN: "Fetched by this server and served from its cache unmodified. Logos belong to their owners.",
-		PL: "Pobierane przez ten serwer i serwowane z jego cache bez modyfikacji. Logotypy należą do ich właścicieli.",
+		EN: "Optimized (SVGO) and sanitized by the icon server, fetched by this server. Logos belong to their owners.",
+		PL: "Zoptymalizowane (SVGO) i oczyszczone przez serwer ikon, pobierane przez ten serwer. Logotypy należą do ich właścicieli.",
 	},
+	"icon_credit_link": {EN: "Icon credits", PL: "Autorzy ikon"},
 	"icon_credit_changes_zip": {
 		EN: "Served unmodified. Logos belong to their owners.",
 		PL: "Serwowane bez modyfikacji. Logotypy należą do ich właścicieli.",

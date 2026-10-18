@@ -50,7 +50,9 @@ func run() error {
 	addr := fs.String("addr", envOr("SHYG_ADDR", ":8080"), "listen address")
 	dataPath := fs.String("data", envOr("SHYG_DATA", "shygarlic.db"), "SQLite file with accounts and history")
 	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "optional icons.zip — a full offline icon set, no downloading from the network")
-	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "icon cache directory (default: next to the DB file)")
+	iconsURL := fs.String("icons-url", envOr("SHYG_ICONS_URL", server.DefaultIconsURL),
+		"icon source: the base URL of an icons.zatto.dev-compatible server (index.json, svg/, png/); point it at your own mirror to keep icon lookups in-house")
+	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "icon directory (default: icons/ next to the DB file): holds only the icons your services use and the icon index; icons of removed services are deleted, other files are left alone")
 	webhook := fs.String("webhook", envOr("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
 		"notification webhook URL (Discord or anything that accepts JSON)")
 	webhookFormat := fs.String("webhook-format", envOr("SHYG_WEBHOOK_FORMAT", ""),
@@ -76,6 +78,11 @@ func run() error {
 		return fmt.Errorf("--webhook-format %q: allowed %s", *webhookFormat, strings.Join(formatTexts(), ", "))
 	}
 
+	iconsBase, err := server.NormalizeIconsURL(*iconsURL)
+	if err != nil {
+		return fmt.Errorf("--icons-url: %w", err)
+	}
+
 	level := slog.LevelInfo
 	if *debug {
 		level = slog.LevelDebug
@@ -84,7 +91,7 @@ func run() error {
 
 	o := cliOptions{
 		cfgPath: *cfgPath, seedConfig: *seedCfg, addr: *addr, dataPath: *dataPath,
-		iconsZip: *iconsZip, cacheDir: *cacheDir, backgroundDir: *backgroundDir,
+		iconsZip: *iconsZip, iconsURL: iconsBase, cacheDir: *cacheDir, backgroundDir: *backgroundDir,
 		webhook: *webhook, webhookFormat: *webhookFormat, failThreshold: *failThreshold, dockerSock: *dockerSock,
 		trustedProxy: *trustedProxy, metricsAllow: *metricsAllow, allowedHost: *allowedHost,
 	}
@@ -113,6 +120,7 @@ type cliOptions struct {
 	addr          string
 	dataPath      string
 	iconsZip      string
+	iconsURL      string
 	cacheDir      string
 	backgroundDir string
 	webhook       string
@@ -158,6 +166,7 @@ func instanceDescription(fs *flag.FlagSet, o cliOptions) []server.OptionInfo {
 		{Key: "cache", Value: o.cacheDir, Source: source(fs, "cache", "SHYG_CACHE")},
 		{Key: "backgrounds", Value: o.backgroundDir, Source: source(fs, "backgrounds", "SHYG_BACKGROUNDS")},
 		{Key: "icons", Value: o.iconsZip, Source: source(fs, "icons", "SHYG_ICONS")},
+		{Key: "icons-url", Value: o.iconsURL, Source: source(fs, "icons-url", "SHYG_ICONS_URL")},
 		{Key: "docker", Value: o.dockerSock, Source: source(fs, "docker", "SHYG_DOCKER")},
 		{Key: "webhook-format", Value: o.webhookFormat, Source: source(fs, "webhook-format", "SHYG_WEBHOOK_FORMAT")},
 		{Key: "trusted-proxy", Value: o.trustedProxy, Source: source(fs, "trusted-proxy", "SHYG_TRUSTED_PROXY")},
@@ -202,6 +211,7 @@ func serve(o cliOptions) error {
 	if o.cacheDir == "" {
 		o.cacheDir = filepath.Join(filepath.Dir(o.dataPath), "icons")
 	}
+
 	if o.backgroundDir == "" {
 		o.backgroundDir = server.DefaultBackgroundDir(o.dataPath)
 	}
@@ -225,7 +235,7 @@ func serve(o cliOptions) error {
 	}
 
 	s, err := server.New(o.cfgPath, st, server.Options{
-		IconsZip: o.iconsZip, CacheDir: o.cacheDir, BackgroundDir: o.backgroundDir,
+		IconsZip: o.iconsZip, IconsURL: o.iconsURL, CacheDir: o.cacheDir, BackgroundDir: o.backgroundDir,
 		Webhook: o.webhook, FailThreshold: o.failThreshold, DockerSock: o.dockerSock,
 		TrustedProxy: split(o.trustedProxy),
 		MetricsAllow: split(o.metricsAllow),

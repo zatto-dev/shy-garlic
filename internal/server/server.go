@@ -121,7 +121,8 @@ type Server struct {
 // Options gathers what is not the path to the config.
 type Options struct {
 	IconsZip      string   // optional full offline icon set
-	CacheDir      string   // cache of icons fetched from the CDN
+	IconsURL      string   // icon source (empty = icons.zatto.dev); a mirror of it works too
+	CacheDir      string   // icons of the services plus the icon index (nothing else is kept here)
 	BackgroundDir string   // directory of uploaded wallpapers (empty = feature disabled)
 	Webhook       string   // notification webhook address (empty = disabled)
 	FailThreshold int      // how many failed checks in a row before we notify
@@ -164,7 +165,7 @@ func New(path string, st *store.Store, o Options) (*Server, error) {
 	}
 	s := &Server{
 		path: path, monitor: health.New(), tmpl: tmpl, st: st,
-		lim: newLimiter(), icons: NewCatalog(o.IconsZip, o.CacheDir),
+		lim: newLimiter(), icons: NewCatalogAt(o.IconsURL, o.IconsZip, o.CacheDir),
 		backgrounds: NewBackgroundStore(o.BackgroundDir),
 		notifier:    notify.New(o.Webhook, o.FailThreshold),
 		docker:      dockerdisc.New(o.DockerSock),
@@ -345,13 +346,14 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		s.icons.Refresh(ctx)
 		slog.Info("icons", "mode", s.icons.Mode(), "available", s.icons.Count())
-		// now that the indexes are in, fetch what the config uses (and its variants)
+		// now that the index is in, fetch what the config uses (and its variants)
 		s.mu.RLock()
-		cfg := s.cfg
+		loaded := s.cfg != nil
 		s.mu.RUnlock()
-		if cfg != nil {
-			s.icons.Prefetch(ctx, configIcons(cfg))
+		if loaded {
+			s.icons.RetainFrom(ctx, s.iconNames)
 		}
+		s.icons.RunRefresh(ctx) // daily conditional refresh of the index, until shutdown
 	}()
 	return nil
 }
@@ -560,6 +562,18 @@ func (s *Server) brokenConfig(stamp string, b config.FileError, err error) error
 	return err
 }
 
+// iconNames is the icons of the config in force right now. Retain reads it when its
+// turn comes, not when it was asked for, so a slow Retain never works from a config
+// that has been replaced since.
+func (s *Server) iconNames() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.cfg == nil {
+		return nil
+	}
+	return configIcons(s.cfg)
+}
+
 // apply starts the monitor, the notifier and the cards on the given config.
 func (s *Server) apply(ctx context.Context, cfg *config.Config) {
 	// ! The threshold must get in here, not only on a save from the panel. Without that
@@ -590,9 +604,9 @@ func (s *Server) apply(ctx context.Context, cfg *config.Config) {
 		}
 	}
 
-	// icons the config uses go to the disk cache in the background, so the first
-	// render does not wait for the CDN
-	s.icons.Prefetch(ctx, configIcons(cfg))
+	// icons the services use go to the disk cache in the background (so the first
+	// render does not wait for the network), and the files of removed services go
+	s.icons.RetainFrom(ctx, s.iconNames)
 	s.monitor.SetTargets(ctx, targets)
 	live := make(map[string]bool, len(targets))
 	for _, t := range targets {
@@ -827,7 +841,8 @@ type pageView struct {
 	Version   string
 	User      string
 	IconCount int
-	IconsZip  bool // icons come from icons.zip — the credit must not claim downloads
+	IconsZip  bool   // icons come from icons.zip — the credit must not claim downloads
+	IconsBase string // icon source; the credit links to its /attribution page
 
 	Lang                   string
 	T                      map[string]string
@@ -943,7 +958,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	lang := i18n.FromRequest(r)
 	data := pageView{Title: cfg.Title, Version: Version, IconCount: s.icons.Count(), Lang: string(lang),
-		IconsZip: s.icons.Mode() == "zip"}
+		IconsZip: s.icons.Mode() == "zip", IconsBase: s.icons.Base()}
 	data.T, data.TJSON, data.SecondLang, data.SecondLangName, data.SecondLangShort = fillLang(lang)
 	data.Appearance = s.instanceAppearance()
 	data.Banner = s.instanceBanner(lang)

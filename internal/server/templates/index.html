@@ -655,8 +655,10 @@ window.APPEARANCE = {{.AppearanceJSON}};
 
 {{/* The icon collections' licenses ask for credit where their icons are used:
      title, author, source and license (Apache-2.0 for Dashboard Icons, CC BY 4.0
-     for selfh.st/icons), and for CC BY whether the work was changed — it is not,
-     the server stores and serves the files byte for byte. */}}
+     for selfh.st/icons), and for CC BY whether the work was changed. The icon
+     server (icons.zatto.dev) optimizes and sanitizes the files, and says so on its
+     attribution page, which the "Icon credits" link points at. In zip mode the
+     files are the user's own set, served unmodified, and there is no such page. */}}
 {{define "icon-credit" -}}
 <p class="icon-credit">{{.T.icon_credit_label}}
   <a href="https://github.com/homarr-labs/dashboard-icons" target="_blank" rel="noopener noreferrer">Dashboard Icons</a>
@@ -664,5 +666,6 @@ window.APPEARANCE = {{.AppearanceJSON}};
   <span class="dot-sep">·</span>
   <a href="https://github.com/selfhst/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a>
   {{.T.icon_credit_by}} selfh.st (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" title="{{.T.icon_credit_license}}">CC BY 4.0</a>).
-  {{if .IconsZip}}{{.T.icon_credit_changes_zip}}{{else}}{{.T.icon_credit_changes}}{{end}}</p>
+  {{if .IconsZip}}{{.T.icon_credit_changes_zip}}{{else}}{{.T.icon_credit_changes}}
+  <a href="{{.IconsBase}}/attribution" target="_blank" rel="noopener noreferrer">{{.T.icon_credit_link}}</a>{{end}}</p>
 {{- end}}
