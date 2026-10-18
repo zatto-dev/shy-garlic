@@ -661,7 +661,7 @@ scripts) and `shyg version` prints the version. Flags take one or two dashes
 | `--seed-config`    | `SHYG_SEED_CONFIG`      | none                              | copied to `--config` on start when that file does not exist yet |
 | `--addr`           | `SHYG_ADDR`             | `:8080`                           | listen address |
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                    | SQLite file with accounts and history (in the image: `/data/shygarlic.db`) |
-| `--cache`          | `SHYG_CACHE`            | `icons/` next to the database     | icon directory: the icons your services use plus the icon index; any other `.svg`/`.png` there is deleted |
+| `--cache`          | `SHYG_CACHE`            | `icons/` next to the database     | icon directory: the icons your services use plus the icon index; icons of removed services are deleted, other files are left alone |
 | `--icons-url`      | `SHYG_ICONS_URL`        | `https://icons.zatto.dev`         | icon source: base URL of an icons.zatto.dev-compatible server (`index.json`, `svg/`, `png/`, `attribution`); use it to point at your own mirror |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` next to the database        | uploaded wallpapers |
 | `--icons`          | `SHYG_ICONS`            | none                              | `icons.zip`, an offline icon set: no index downloads; names missing from the zip still go to the icon server |

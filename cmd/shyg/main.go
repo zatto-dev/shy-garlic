@@ -52,7 +52,7 @@ func run() error {
 	iconsZip := fs.String("icons", envOr("SHYG_ICONS", ""), "optional icons.zip — a full offline icon set, no downloading from the network")
 	iconsURL := fs.String("icons-url", envOr("SHYG_ICONS_URL", server.DefaultIconsURL),
 		"icon source: the base URL of an icons.zatto.dev-compatible server (index.json, svg/, png/); point it at your own mirror to keep icon lookups in-house")
-	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "icon directory (default: icons/ next to the DB file): holds only the icons your services use and the icon index; any other .svg/.png there is deleted")
+	cacheDir := fs.String("cache", envOr("SHYG_CACHE", ""), "icon directory (default: icons/ next to the DB file): holds only the icons your services use and the icon index; icons of removed services are deleted, other files are left alone")
 	webhook := fs.String("webhook", envOr("SHYG_WEBHOOK", os.Getenv("SHYG_DISCORD_WEBHOOK")),
 		"notification webhook URL (Discord or anything that accepts JSON)")
 	webhookFormat := fs.String("webhook-format", envOr("SHYG_WEBHOOK_FORMAT", ""),

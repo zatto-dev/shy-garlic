@@ -28,7 +28,7 @@ the entries below say when it does.
   light/dark pairs): fetched when a service is added or at start, removed when
   the service is deleted. Picker thumbnails live in a small in-memory cache and
   are never written to disk. Files of the previous layout (`<cache>/selfhst/`,
-  `index.json`) and any other `.svg`/`.png` in the cache directory are removed.
+  `index.json`) and the icons of the catalog that no service uses are removed.
 - The credit now links to the icon server's attribution page ("Icon credits")
   and says the files are optimized and sanitized, not served byte for byte.
 - `/icon/*` also sends `X-Content-Type-Options: nosniff`.

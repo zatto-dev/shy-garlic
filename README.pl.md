@@ -665,7 +665,7 @@ myślniki (`-addr` albo `--addr`). Flaga z wiersza poleceń wygrywa ze zmienną
 | `--seed-config`    | `SHYG_SEED_CONFIG`      | brak                               | kopiowany pod `--config` przy starcie, gdy tego pliku jeszcze nie ma |
 | `--addr`           | `SHYG_ADDR`             | `:8080`                            | adres nasłuchu |
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                     | plik SQLite z kontami i historią (w obrazie: `/data/shygarlic.db`) |
-| `--cache`          | `SHYG_CACHE`            | `icons/` obok bazy                 | katalog ikon: ikony Twoich usług i spis ikon; każdy inny `.svg`/`.png` jest tam usuwany |
+| `--cache`          | `SHYG_CACHE`            | `icons/` obok bazy                 | katalog ikon: ikony Twoich usług i spis ikon; ikony usuniętych usług są kasowane, inne pliki zostają |
 | `--icons-url`      | `SHYG_ICONS_URL`        | `https://icons.zatto.dev`          | źródło ikon: adres bazowy serwera zgodnego z icons.zatto.dev (`index.json`, `svg/`, `png/`, `attribution`); wskaż własne lustro |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` obok bazy                    | wgrane tapety |
 | `--icons`          | `SHYG_ICONS`            | brak                               | `icons.zip`, zestaw ikon offline: bez pobierania spisu; nazwy spoza zipa nadal idą na serwer ikon |
