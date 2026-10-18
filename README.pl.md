@@ -184,39 +184,54 @@ Panel bez internetu traci przy okazji wszystkie ikony.
 Tutaj przeglądarka pyta wyłącznie Twój panel, o `/icon/<nazwa>`, i o nic więcej.
 Ikonę dociąga **serwer**, raz, i cache'uje ją na dysku.
 
-Żeby było dokładnie, bo twierdzenia o prywatności zasługują na precyzję: CDN
-nigdy nie widzi Twojej przeglądarki, nie dowiaduje się, ile osób korzysta z
-panelu, i po pierwszym pobraniu nie dostaje już nic. Widzi natomiast, raz,
-serwer proszący o plik. Jeśli i to jest za dużo — `--icons icons.zip` wozi
-zestaw w jednym pliku: żaden spis nie jest pobierany, a ikona z zipa nigdy nie
-dotyka sieci. Nazwy, której w zipie nie ma, panel nadal szuka w CDN (najpierw
-Dashboard Icons, potem selfh.st), więc zero zapytań na zewnątrz wymaga, żeby
-zip miał każdą ikonę używaną w konfiguracji.
+Żeby było dokładnie, bo twierdzenia o prywatności zasługują na precyzję: serwer
+ikon nigdy nie widzi Twojej przeglądarki, nie dowiaduje się, ile osób korzysta z
+panelu, i po pierwszym pobraniu ikony nie dostaje już nic. Widzi natomiast
+serwer, który raz dziennie prosi o spis i o pliki używane przez Twoje usługi.
+Domyślne źródło to [icons.zatto.dev](https://icons.zatto.dev); wskaż
+`--icons-url` na własne lustro, żeby i to zostało u Ciebie. Jeśli nie chcesz
+żadnych zapytań — `--icons icons.zip` wozi zestaw w jednym pliku: żaden spis nie
+jest pobierany, a ikona z zipa nigdy nie dotyka sieci. Nazwy, której w zipie
+nie ma, panel nadal szuka na serwerze ikon, więc zero zapytań na zewnątrz
+wymaga, żeby zip miał każdą ikonę używaną w konfiguracji.
 
 Pobieranie nigdy nie wstrzymuje strony. Ikona, której nie ma jeszcze na
-dysku, czeka na CDN najwyżej 1,5 s; potem karta pokazuje literę, a pobranie
-kończy się w tle. Nazwa, której nie ma żaden katalog, nie jest odpytywana
-ponownie przez 10 minut, a CDN, który nie odpowiedział albo zwrócił błąd, jest
-pomijany przez 2 minuty, więc panel bez sieci odpowiada od razu. Ikony używane
-w konfiguracji są pobierane w tle zaraz po starcie i po każdej zmianie
-konfiguracji.
+dysku, czeka na sieć najwyżej 1,5 s; potem karta pokazuje literę, a pobranie
+kończy się w tle. Nazwa, której serwer ikon nie ma, nie jest odpytywana
+ponownie przez 10 minut, a serwer, który nie odpowiedział albo zwrócił błąd,
+jest pomijany przez 2 minuty, więc panel bez sieci odpowiada od razu.
 
-Katalog ma ponad 5000 pozycji, wyszukiwanych po nazwie i po aliasie. Łączy dwie
-kolekcje: najpierw [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons)
-(Apache-2.0), a nazwy, których tam brakuje (np. `llama-cpp`), uzupełnia
-[selfh.st/icons](https://github.com/selfhst/icons) (CC BY 4.0). Gdy nazwa jest
-w obu, wygrywa Dashboard Icons; `icon: selfhst:<nazwa>` prosi jawnie o grafikę
-z selfh.st. Obie kolekcje mają osobny cache (`<cache>/selfhst/` dla selfh.st),
-więc jedna nie nadpisuje drugiej. Grafiki ikon należą do właścicieli znaków
-towarowych.
+Katalog ma ponad 5000 pozycji, wyszukiwanych po nazwie i po aliasie, z jednego
+źródła: [icons.zatto.dev](https://icons.zatto.dev) łączy
+[Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0)
+i [selfh.st/icons](https://github.com/selfhst/icons) (CC BY 4.0), oczyszcza i
+optymalizuje pliki, a serwuje je jako zwykłe pliki statyczne. Nazwy ikon z
+wcześniejszych wersji nadal działają: nazwa z któregokolwiek starego katalogu,
+stary alias albo `selfhst:<nazwa>` prowadzą do tej samej ikony. Grafiki ikon
+należą do właścicieli znaków towarowych.
+
+Panel jest lekki w pamięci i na dysku:
+
+- Spis wszystkich nazw ikon to plik SQLite, `<cache>/icons-index.db` (poniżej
+  1 MB), odpytywany z dysku i nigdy nie ładowany do pamięci. Odświeża się
+  warunkowym zapytaniem raz dziennie i zostaje, gdy serwera nie widać, więc
+  wybór ikony przeszukuje spis także offline.
+- W `<cache>` leżą tylko ikony Twoich usług razem z parami jasna/ciemna:
+  pobierane po dodaniu usługi (a przy starcie dla istniejących), usuwane po jej
+  skasowaniu. Miniatury z wyboru ikony mieszkają w małej pamięci podręcznej w RAM
+  (najwyżej 2 MiB) i nie dotykają dysku.
+- Każdy inny `.svg` lub `.png` w `<cache>` jest usuwany, więc nie wskazuj
+  `--cache` na katalog z innymi plikami.
 
 Żadna z kolekcji nie jest dołączona do Shy Garlica: ani do repozytorium, ani do
-binarki, ani do obrazu. Serwer pobiera każdy plik i serwuje go bez modyfikacji,
-a panel podaje autorstwo i licencje obu kolekcji w stopce i pod wyborem ikony.
-Dashboard Icons nie ma pliku NOTICE, więc nie ma nic więcej do dołączania. Jeśli
-sam rozprowadzasz ikony — `icons.zip` do trybu zip, obraz z wypełnionym cache —
-dołącz tekst licencji Apache-2.0 dla Dashboard Icons i atrybucję CC BY 4.0 dla
-selfh.st/icons. Szczegóły: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+binarki, ani do obrazu. Panel podaje autorstwo i licencje obu kolekcji w stopce i
+pod wyborem ikony, z linkiem „Autorzy ikon" do strony atrybucji serwera ikon.
+Serwer ikon optymalizuje i oczyszcza pliki (pisze o tym na tej stronie), więc nie
+są to dokładne kopie oryginałów. Dashboard Icons nie ma pliku NOTICE, więc nie
+ma nic więcej do dołączania. Jeśli sam rozprowadzasz ikony — `icons.zip` do
+trybu zip, obraz z wypełnionym cache — dołącz tekst licencji Apache-2.0 dla
+Dashboard Icons i atrybucję CC BY 4.0 dla selfh.st/icons. Szczegóły:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Umie zajrzeć do Twoich kontenerów
 
@@ -650,9 +665,10 @@ myślniki (`-addr` albo `--addr`). Flaga z wiersza poleceń wygrywa ze zmienną
 | `--seed-config`    | `SHYG_SEED_CONFIG`      | brak                               | kopiowany pod `--config` przy starcie, gdy tego pliku jeszcze nie ma |
 | `--addr`           | `SHYG_ADDR`             | `:8080`                            | adres nasłuchu |
 | `--data`           | `SHYG_DATA`             | `shygarlic.db`                     | plik SQLite z kontami i historią (w obrazie: `/data/shygarlic.db`) |
-| `--cache`          | `SHYG_CACHE`            | `icons/` obok bazy                 | katalog cache ikon |
+| `--cache`          | `SHYG_CACHE`            | `icons/` obok bazy                 | katalog ikon: ikony Twoich usług i spis ikon; każdy inny `.svg`/`.png` jest tam usuwany |
+| `--icons-url`      | `SHYG_ICONS_URL`        | `https://icons.zatto.dev`          | źródło ikon: adres bazowy serwera zgodnego z icons.zatto.dev (`index.json`, `svg/`, `png/`, `attribution`); wskaż własne lustro |
 | `--backgrounds`    | `SHYG_BACKGROUNDS`      | `bg/` obok bazy                    | wgrane tapety |
-| `--icons`          | `SHYG_ICONS`            | brak                               | `icons.zip`, zestaw ikon offline: bez pobierania spisu; nazwy spoza zipa nadal idą do CDN |
+| `--icons`          | `SHYG_ICONS`            | brak                               | `icons.zip`, zestaw ikon offline: bez pobierania spisu; nazwy spoza zipa nadal idą na serwer ikon |
 | `--docker`         | `SHYG_DOCKER`           | `/var/run/docker.sock`, jeśli jest | gniazdo Dockera albo adres proxy gniazda (`http://host:2375`) do podpowiadania usług |
 | `--webhook`        | `SHYG_WEBHOOK`          | brak (ustaw w panelu)              | adres webhooka powiadomień; stara nazwa `SHYG_DISCORD_WEBHOOK` jest nadal czytana |
 | `--webhook-format` | `SHYG_WEBHOOK_FORMAT`   | `discord`, o ile nie ustawiono w panelu | `discord`, `slack`, `ntfy`, `gotify`, `telegram` albo `generic` |

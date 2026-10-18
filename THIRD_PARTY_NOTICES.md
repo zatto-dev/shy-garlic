@@ -6,13 +6,18 @@ repository.
 
 ## Icon collections
 
-The panel shows service icons from two collections. **Neither is bundled in
-the source tree, the binary or the container image.** The server downloads an
-icon from the jsDelivr CDN the first time it is needed, stores the file in its
-cache directory and serves it from there **unmodified** (byte for byte; a file
-over the size limit is refused, not cut short). The credit below is also shown
-in the panel itself: in the footer and under the icon picker, in English and
-Polish.
+The panel shows service icons from two collections, merged and published by
+the icon server <https://icons.zatto.dev> (source:
+<https://github.com/zatto-dev/zatto-icons>). **Neither is bundled in the
+source tree, the binary or the container image.** The server downloads the
+icons your services use from the icon server (or from the mirror you set with
+`--icons-url`), stores them in its icon directory and serves them from there.
+The icon server **sanitizes and optimizes** the files (active content is
+stripped, SVGs are minified with SVGO, PNG metadata chunks are dropped),
+so they are modified copies, not byte-for-byte originals. The changes are
+described on its attribution page, <https://icons.zatto.dev/attribution>, which
+the panel links to as "Icon credits". The credit below is also shown in the
+panel itself: in the footer and under the icon picker, in English and Polish.
 
 ### Dashboard Icons
 
@@ -23,7 +28,9 @@ Polish.
   (full text: <https://github.com/homarr-labs/dashboard-icons/blob/main/LICENSE>)
 - NOTICE file: the repository has none (checked 2026-10-17), so there is no
   NOTICE text to carry along.
-- Used as: the first icon catalog; a name it has is always served from it.
+- Changes: sanitized and optimized by the icon server (see above).
+- Used as: the first catalog of the merged index; where both collections have a
+  name, this one wins.
 
 ### selfh.st/icons
 
@@ -32,9 +39,9 @@ Polish.
 - License: Creative Commons Attribution 4.0 International (CC BY 4.0) —
   <https://creativecommons.org/licenses/by/4.0/>
   (full text: <https://github.com/selfhst/icons/blob/main/LICENSE>)
-- Changes: none. Files are served as published.
-- Used as: the second icon catalog, for names Dashboard Icons does not have,
-  and explicitly via `icon: selfhst:<name>`.
+- Changes: sanitized and optimized by the icon server (see above).
+- Used as: the second catalog of the merged index, for the names Dashboard
+  Icons does not have.
 
 ### Trademarks
 
