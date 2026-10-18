@@ -329,7 +329,7 @@ the deployment instead: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerts`
 
 The default image cannot commit the config to git, because it has no `git`.
 Pick a `-git` tag if you keep the config in a repository. Pin a version in
-production (`ghcr.io/zatto-dev/shy-garlic:0.14.0`) instead of following `latest`.
+production (`ghcr.io/zatto-dev/shy-garlic:0.16.0`) instead of following `latest`.
 
 ### Docker Compose
 
@@ -422,11 +422,11 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
   --namespace shy-garlic --create-namespace
 ```
 
-**Plain kubectl** (kustomize, pinned to a release tag; replace `v0.14.0` with the
+**Plain kubectl** (kustomize, pinned to a release tag; replace `v0.16.0` with the
 [latest release](https://github.com/zatto-dev/shy-garlic/releases/latest) tag):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.14.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.16.0"
 ```
 
 Then reach the panel and create the administrator on the first visit (see

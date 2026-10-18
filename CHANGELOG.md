@@ -10,6 +10,8 @@ the entries below say when it does.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-18
+
 ### Changed
 
 - Icons now come from one source, [icons.zatto.dev](https://icons.zatto.dev),
@@ -41,6 +43,10 @@ the entries below say when it does.
 - Parallel downloads of one icon shared a fixed temporary file name and could
   rename a half-written file into the cache (SHYG-59). Every write now goes
   through its own temporary file in the same directory, then fsync and rename.
+- Pruning the icon cache is safer. A directory is claimed only when it is empty
+  or holds the files of the 0.15 layout (a directory with just `.git` is left
+  alone), and only icon files the catalog index knows, or that the panel saved
+  itself, are deleted: a foreign `logo.svg` in the cache directory stays.
 
 ## [0.15.0] — 2026-10-17
 

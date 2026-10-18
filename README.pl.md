@@ -327,7 +327,7 @@ podaj adres przez deploy: `SHYG_WEBHOOK=http://ntfy.home.arpa/alerty`
 
 Domyślny obraz nie potrafi commitować configu do gita, bo nie ma `gita`. Jeśli
 trzymasz config w repozytorium, wybierz tag z `-git`. Na produkcji przypnij
-wersję (`ghcr.io/zatto-dev/shy-garlic:0.14.0`) zamiast śledzić `latest`.
+wersję (`ghcr.io/zatto-dev/shy-garlic:0.16.0`) zamiast śledzić `latest`.
 
 ### Docker Compose
 
@@ -422,11 +422,11 @@ helm install shy-garlic oci://ghcr.io/zatto-dev/charts/shy-garlic \
   --namespace shy-garlic --create-namespace
 ```
 
-**Zwykły kubectl** (kustomize, przypięty do taga wydania; podmień `v0.14.0` na tag
+**Zwykły kubectl** (kustomize, przypięty do taga wydania; podmień `v0.16.0` na tag
 [najnowszego wydania](https://github.com/zatto-dev/shy-garlic/releases/latest)):
 
 ```bash
-kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.14.0"
+kubectl apply -k "github.com/zatto-dev/shy-garlic//deploy/kubernetes?ref=v0.16.0"
 ```
 
 Potem wejdź do panelu i załóż administratora przy pierwszej wizycie (zob.
