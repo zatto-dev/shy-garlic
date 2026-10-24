@@ -7,7 +7,7 @@ toolchain go1.27.2
 require (
 	github.com/goccy/go-yaml v1.19.2
 	golang.org/x/crypto v0.58.0
-	modernc.org/sqlite v1.60.1
+	modernc.org/sqlite v1.61.0
 )
 
 require (
