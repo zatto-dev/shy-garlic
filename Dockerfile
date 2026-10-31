@@ -27,7 +27,7 @@ RUN mkdir -p /empty
 # The Helm chart and the kustomize base use this variant: their init container
 # needs `sh`.
 # alpine:3.24
-FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS git
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS git
 RUN apk add --no-cache git ca-certificates tzdata && adduser -D -u 65532 nonroot \
  && mkdir -p /data && chown 65532:65532 /data
 COPY --from=build /out/shyg /shyg
